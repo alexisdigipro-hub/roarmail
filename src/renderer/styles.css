@@ -409,3 +409,31 @@ label.check input { width: 18px; height: 18px; accent-color: var(--accent); box-
 .remind.on { color: var(--accent-2); background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge); }
 .outbox-bar.as-button { width: 100%; text-align: left; color: var(--text); cursor: pointer; }
 .outbox-bar b.plain { color: var(--text); font-weight: 600; }
+
+/* ---------- columns Alex can resize: a handle in the gap after the folders and after the list ---------- */
+.folders { flex: 0 1 var(--w-folders, 220px); width: auto; min-width: 150px; }
+.list { flex: 0 1 var(--w-list, 380px); width: auto; min-width: 260px; }
+.viewer { min-width: 320px; }
+/* the handle fills the gap exactly: its negative margins cancel the extra gap it would add */
+.splitter { position: relative; z-index: 3; flex: none; width: var(--gap); margin: 0 calc(var(--gap) * -1); cursor: col-resize; outline: 0; touch-action: none; }
+.splitter::before { content: ''; position: absolute; inset: 0 -3px; }
+.splitter::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 34px; border-radius: 4px; transform: translate(-50%, -50%);
+  background: var(--edge-2); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .04); opacity: .55;
+  transition: height .35s var(--spring, ease), opacity .2s, background .2s, box-shadow .2s;
+}
+.splitter:hover::after, .splitter:focus-visible::after { height: 64px; opacity: 1; background: rgba(255, 255, 255, .32); }
+.splitter.on::after { height: 96px; opacity: 1; background: var(--accent-2); box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 70%, transparent); }
+html[data-mode='light'] .splitter:hover::after, html[data-mode='light'] .splitter:focus-visible::after { background: rgba(20, 24, 30, .3); }
+html.resizing, html.resizing * { cursor: col-resize !important; }
+html.resizing iframe { pointer-events: none; }
+
+/* ---------- Mac: the red, yellow and green buttons sit in their own strip above the columns, which is also where the window is dragged ---------- */
+[data-platform='darwin'] { --mac-top: 40px; }
+[data-platform='darwin'] .app { padding-top: var(--mac-top); }
+[data-platform='darwin'] .app::before { height: var(--mac-top); }
+[data-platform='darwin'] .rail { padding-top: 14px; }
+[data-platform='darwin'] .folders { padding-top: 16px; }
+[data-platform='darwin'] .list-head { padding-top: 14px; }
+/* full screen hides the buttons: the strip goes too */
+[data-platform='darwin'].fullscreen { --mac-top: var(--gap); }

@@ -12,6 +12,7 @@ import { SettingsSheet } from './components/SettingsSheet'
 import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
 import { short } from './when'
+import { Splitter, useWidths } from './components/Splitter'
 
 const api = window.roarmail
 const keyOf = (r: MessageRow) => r.threadId || r.id
@@ -45,6 +46,7 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null)
   const scopeRef = useRef(scope); scopeRef.current = scope
   const [intro, setIntro] = useState(true)
+  const [widths, setWidth] = useWidths()
   const folderLens = useLens<HTMLDivElement>(`${scope.accountId}|${scope.folderId || ''}|${scope.role || ''}|${folders.length}`)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -252,7 +254,7 @@ export default function App() {
   const later = outbox.filter((o) => o.status !== 'failed' && o.scheduled)
 
   return (
-    <div className={`app ${intro ? 'intro' : ''}`}>
+    <div className={`app ${intro ? 'intro' : ''}`} style={{ ['--w-folders' as any]: `${widths.folders}px`, ['--w-list' as any]: `${widths.list}px` }}>
       <nav className="rail">
         <div className="drag" />
         <button className={`acc all ${scope.accountId === 'all' ? 'on' : ''}`} title={t.allInboxes} onClick={() => setScope({ accountId: 'all', role: 'inbox' })}>
@@ -294,6 +296,7 @@ export default function App() {
           </div>
         </aside>
       )}
+      {scope.accountId !== 'all' && <Splitter col="folders" width={widths.folders} onChange={setWidth} title={t.resizeCol} />}
 
       <section className="list">
         <div className="list-head">
@@ -346,6 +349,7 @@ export default function App() {
           {accounts.every((a) => a.state === 'online') && <span className="ellipsis">{t.shortcuts}</span>}
         </div>
       </section>
+      <Splitter col="list" width={widths.list} onChange={setWidth} title={t.resizeCol} />
 
       {chosen.length > 1 ? (
         <section className="viewer empty multi">

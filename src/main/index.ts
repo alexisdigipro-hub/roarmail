@@ -49,7 +49,7 @@ function createWindow() {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1e23' : '#eceef1',
     title: 'RoarMail',
     ...(mac
-      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 28, y: 30 } }
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 20, y: 13 } } // in the 40px strip above the columns (styles.css, --mac-top)
       : { titleBarStyle: 'hidden' as const, titleBarOverlay: nativeTheme.shouldUseDarkColors ? { color: '#1b1e23', symbolColor: '#eef0f3', height: 40 } : { color: '#eceef1', symbolColor: '#1b1f25', height: 40 } }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -66,6 +66,10 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); openSafe(url) } })
   win.on('close', (e) => { if ((process.platform === 'darwin' || background) && !quitting) { e.preventDefault(); win?.hide() } })
   win.on('closed', () => { win = null })
+  // full screen hides the Mac buttons, so the page drops the strip they sit in
+  const fullscreen = (on: boolean) => win?.webContents.executeJavaScript(`document.documentElement.classList.toggle('fullscreen', ${on})`).catch(() => {})
+  win.on('enter-full-screen', () => fullscreen(true))
+  win.on('leave-full-screen', () => fullscreen(false))
   win.webContents.on('did-finish-load', () => {
     if (pendingMailto) { emit(mailtoEvent(pendingMailto)); pendingMailto = null }
   })
