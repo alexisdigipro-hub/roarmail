@@ -55,7 +55,8 @@ function createWindow() {
   })
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   // opened at login: stay in the menu bar until asked
-  const hidden = process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAsHidden)
+  // (a Mac login item gets no arguments: a start in the first two minutes after the computer starts counts as one)
+  const hidden = process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().openAtLogin && os.uptime() < 120)
   win.once('ready-to-show', () => { if (!hidden || shownOnce) win?.show(); shownOnce = true })
   // nothing ever navigates the app window; links go to the system browser
   win.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
@@ -128,7 +129,7 @@ app.whenReady().then(() => {
   // start with the computer, waiting in the menu bar (tray on Windows), so scheduled things happen on time
   const applyLogin = (on: boolean) => {
     background = on
-    try { app.setLoginItemSettings({ openAtLogin: on, openAsHidden: true, args: on ? ['--hidden'] : [] }) } catch { /* not allowed here */ }
+    try { app.setLoginItemSettings({ openAtLogin: on, args: on ? ['--hidden'] : [] }) } catch { /* not allowed here */ }
     if (on) makeTray(); else if (process.platform !== 'darwin') { tray?.destroy(); tray = null }
   }
   const makeTray = () => {

@@ -187,7 +187,7 @@ export function createDemo(): MailApi & { update: any } {
     snooze: async (ids, until) => {
       const sel = msgs.filter((m) => ids.includes(m.id))
       for (const m of sel) {
-        const s = { id: uid(), accountId: m.accountId, subject: m.subject, fromName: m.fromName, until, msgId: m.id, origin: m.folderId }
+        const s: (typeof snoozes)[number] = { id: uid(), accountId: m.accountId, subject: m.subject, fromName: m.fromName, until, msgId: m.id, origin: m.folderId }
         m.folderId = `${m.accountId}-snoozed`
         // in the demo a snooze comes back after a minute at most, to show it
         if (until) s.timer = setTimeout(() => wake(s), Math.min(until - Date.now(), 60e3))
