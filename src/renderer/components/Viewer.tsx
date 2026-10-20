@@ -11,13 +11,15 @@ import { Icon } from './Icon'
 
 export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
+export type RoarAction = 'share' | 'task'
 
-export function Viewer({ row, accounts, prefs, onCompose, onAct }: {
+export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar }: {
   row: MessageRow | null
   accounts: Account[]
   prefs: Settings
   onCompose: (kind: ComposeKind, m: MessageFull) => void
   onAct: (action: RowAction) => void
+  onRoar: (action: RoarAction, m: MessageFull) => void
 }) {
   const [items, setItems] = useState<MessageRow[] | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -67,6 +69,9 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct }: {
         <button className={`tool ${row.flagged ? 'on' : ''}`} title={`${row.flagged ? t.unflag : t.flag} (S)`}
           onClick={() => onAct(row.flagged ? 'unflag' : 'flag')}><Icon name="star" filled={row.flagged} /></button>
         <button className="tool" title={`${t.markUnread} (U)`} onClick={() => onAct('unseen')}><Icon name="unread" /></button>
+        <span className="sep" />
+        <button className="tool roar" title={t.rm_share} onClick={() => last.current && onRoar('share', last.current)}><Icon name="roar" /></button>
+        <button className="tool" title={t.rm_task} onClick={() => last.current && onRoar('task', last.current)}><Icon name="tasks" /></button>
       </div>
 
       <div className="read">

@@ -150,6 +150,18 @@ export interface Settings {
 export interface LockState { available: boolean; enabled: boolean; locked: boolean; method: 'touchid' | 'none' }
 export type SwipeAction = 'archive' | 'trash' | 'flag' | 'seen' | 'snooze' | 'none'
 
+// ---------- RoarMe (optional sign-in; see src/main/roarme.ts) ----------
+export interface RoarPerson { id: string; name: string; username: string; avatar?: string }
+export interface RoarMeStatus { signedIn: boolean; needsMfa: boolean; email?: string; me?: RoarPerson }
+export interface RoarRoom { id: string; kind: string; title: string; avatar?: string; members: RoarPerson[]; unread: number }
+export interface RoarTask { id: string; title: string; notes: string; due: string | null; priority: 'low' | 'normal' | 'high'; status: 'pending' | 'open' | 'doing' | 'done' | 'declined'; mine: boolean; from?: string; to?: string }
+export interface RoarTaskInput { title: string; notes: string; due?: string; priority?: 'low' | 'normal' | 'high'; assignee?: string }
+export interface RoarWork {
+  tasks: RoarTask[]
+  events: { id: string; roomId: string; title: string; start: string; video: boolean }[]
+  hub: { linked: boolean; tasks: { id: string; title: string; due?: string; status?: string; project?: string; projectId?: string }[]; events: { id: string; title?: string; typeLabel?: string; date: string; endDate?: string; start?: string; project?: string; location?: string; color?: string }[] }
+}
+
 export type Action = 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash' | 'move'
 
 export type MailEvent =
@@ -163,6 +175,7 @@ export type MailEvent =
   | { type: 'outbox' }
   | { type: 'opFailed'; error: string }
   | { type: 'lock'; locked: boolean }
+  | { type: 'roarme' }
 
 export interface MailApi {
   platform: string
@@ -207,6 +220,18 @@ export interface MailApi {
   deleteSignature(id: string): Promise<void>
   settings(): Promise<Settings>
   setSetting<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void>
+  roarmeStatus(): Promise<RoarMeStatus>
+  roarmeSignIn(email: string, password: string): Promise<RoarMeStatus>
+  roarmeVerify(code: string): Promise<RoarMeStatus>
+  roarmeSignOut(): Promise<void>
+  roarmeRooms(): Promise<RoarRoom[]>
+  roarmeContacts(): Promise<RoarPerson[]>
+  /** an email into a RoarMe chat, with a note and (optionally) its attachments */
+  roarmeShare(roomId: string, messageId: string, note: string, withFiles: boolean): Promise<{ skipped: number }>
+  roarmeTask(task: RoarTaskInput): Promise<void>
+  roarmeTaskStatus(id: string, status: RoarTask['status']): Promise<void>
+  roarmeWork(): Promise<RoarWork>
+  roarmeOpen(where: { roomId?: string; hub?: 'tasks' | 'calendar' }): Promise<void>
   pickFiles(): Promise<string[]>
   openAttachment(id: string): Promise<void>
   saveAttachment(id: string): Promise<void>

@@ -6,6 +6,7 @@ import path from 'path'
 import { openStore } from './store'
 import { MailService } from './mail'
 import { autodetect } from './autodetect'
+import { RoarMe } from './roarme'
 import type { LockState, MailEvent, MessageRow } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const updater = require('./updater.js')
@@ -195,6 +196,24 @@ app.whenReady().then(() => {
   handle('mail:refresh', (_e, id) => mail.refresh(id))
   handle('mail:openExternal', (_e, url) => openSafe(url))
   handle('mail:unsubscribe', (_e, id) => mail.unsubscribe(id))
+
+  // RoarMe: the account, sharing into chats, tasks and the calendar
+  const roarme = new RoarMe(() => emit({ type: 'roarme' }))
+  handle('mail:roarmeStatus', () => roarme.status())
+  handle('mail:roarmeSignIn', (_e, email, pass) => roarme.signIn(email, pass))
+  handle('mail:roarmeVerify', (_e, code) => roarme.verify(code))
+  handle('mail:roarmeSignOut', () => roarme.signOut())
+  handle('mail:roarmeRooms', () => roarme.rooms())
+  handle('mail:roarmeContacts', () => roarme.contacts())
+  handle('mail:roarmeTask', (_e, task) => roarme.makeTask(task))
+  handle('mail:roarmeTaskStatus', (_e, id, status) => roarme.setTaskStatus(id, status))
+  handle('mail:roarmeWork', () => roarme.work())
+  handle('mail:roarmeOpen', (_e, where) => roarme.open(where || {}))
+  handle('mail:roarmeShare', async (_e, roomId: string, messageId: string, note: string, withFiles: boolean) => {
+    const m = await mail.message(messageId)
+    const files = withFiles ? await Promise.all(m.attachments.map(async (a) => { const x = await mail.attachment(a.id); return { name: x.filename, type: a.mime, content: x.content } })) : []
+    return roarme.share(roomId, { subject: m.subject, from: m.fromName ? `${m.fromName} <${m.fromEmail}>` : m.fromEmail, date: m.date, snippet: m.snippet || (m.text || '').slice(0, 600), messageId: m.messageId }, note || '', files)
+  })
   handle('mail:blockSender', (_e, email, blocked) => mail.blockSender(email, blocked))
   handle('mail:blockedSenders', () => mail.blockedSenders())
 

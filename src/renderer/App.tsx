@@ -10,6 +10,7 @@ import { Composer, type ComposeSeed } from './components/Composer'
 import { MovePicker } from './components/MovePicker'
 import { SettingsSheet } from './components/SettingsSheet'
 import { TimePicker } from './components/TimePicker'
+import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
 import { short } from './when'
 
 const api = window.roarmail
@@ -33,6 +34,8 @@ export default function App() {
   const [moving, setMoving] = useState<{ accountId: string; ids: string[]; exclude?: string } | null>(null)
   const [snoozing, setSnoozing] = useState<string[] | null>(null)
   const [showScheduled, setShowScheduled] = useState(false)
+  const [roar, setRoar] = useState<{ kind: 'share' | 'task'; m: MessageFull } | null>(null)
+  const [workOpen, setWorkOpen] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
   const [outbox, setOutbox] = useState<OutboxItem[]>([])
   const [prefs, setPrefs] = useState<Settings>({ ...LOOK_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false })
@@ -195,7 +198,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (compose || adding || moving || snoozing || settingsOpen || el.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(el.tagName)) {
+      if (compose || adding || moving || snoozing || roar || settingsOpen || el.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(el.tagName)) {
         if (e.key === 'Escape' && el === searchRef.current) { setQuery(''); searchRef.current?.blur() }
         return
       }
@@ -228,7 +231,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [list, index, current, chosen, compose, adding, moving, snoozing, settingsOpen, scope, act, openCompose, openMove, openSnooze, toast, inDrafts, openRow])
+  }, [list, index, current, chosen, compose, adding, moving, snoozing, roar, settingsOpen, scope, act, openCompose, openMove, openSnooze, toast, inDrafts, openRow])
 
   const title = useMemo(() => {
     if (results) return t.searchResults
@@ -264,6 +267,7 @@ export default function App() {
         <button className="acc add" title={t.addAccount} onClick={() => setAdding(true)}><Icon name="plus" size={18} /></button>
         <span className="grow" />
         <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
+        <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
         <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
       </nav>
 
@@ -361,9 +365,13 @@ export default function App() {
       ) : (
         <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs}
           onCompose={(kind, m) => openCompose(kind, m)}
+          onRoar={(kind, m) => setRoar({ kind, m })}
           onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else if (a === 'snooze') openSnooze([current]); else act([current], a) }} />
       )}
 
+      {workOpen && <WorkPanel onClose={() => setWorkOpen(false)} />}
+      {roar?.kind === 'share' && <ShareSheet message={roar.m} onClose={() => setRoar(null)} onDone={(text) => { setRoar(null); flash({ text, ms: 3000 }) }} />}
+      {roar?.kind === 'task' && <TaskSheet message={roar.m} onClose={() => setRoar(null)} onDone={(text) => { setRoar(null); flash({ text, ms: 3000 }) }} />}
       {update?.status === 'ready' && (
         <button className="update pill primary" onClick={() => api.update.install()}>{t.updateReady} {update.version} · {t.restart}</button>
       )}

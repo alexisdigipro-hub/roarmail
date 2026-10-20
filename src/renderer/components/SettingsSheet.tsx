@@ -6,11 +6,12 @@ import type { Account, LockState, Settings, Signature, SwipeAction } from '../..
 import { t, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, revealFrom, useLens } from '../look'
 import { Icon } from './Icon'
+import { RoarMeAccount } from './RoarMe'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
-type Page = 'accounts' | 'appearance' | 'signatures' | 'privacy' | 'general' | 'keys'
+type Page = 'accounts' | 'roarme' | 'appearance' | 'signatures' | 'privacy' | 'general' | 'keys'
 const PAGES: [Page, string][] = [
-  ['accounts', 'inbox'], ['appearance', 'palette'], ['signatures', 'compose'], ['privacy', 'shield'], ['general', 'gear'], ['keys', 'keyboard'],
+  ['accounts', 'inbox'], ['roarme', 'roar'], ['appearance', 'palette'], ['signatures', 'compose'], ['privacy', 'shield'], ['general', 'gear'], ['keys', 'keyboard'],
 ]
 
 export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
@@ -55,6 +56,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
           </div>
           <div className="settings-body">
             {page === 'accounts' && <Accounts accounts={accounts} sigs={sigs} onAdd={onAddAccount} />}
+            {page === 'roarme' && <RoarMeAccount />}
             {page === 'appearance' && prefs && <Appearance s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
             {page === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
             {page === 'privacy' && <Privacy />}

@@ -128,6 +128,17 @@ function deliver(item: OutboxItem & { draft: Draft }) {
   emit({ type: 'outbox' }); changed(acc.id)
 }
 
+const demoPeople = [{ id: 'u2', name: 'Μαρία Παπαδοπούλου', username: 'maria' }, { id: 'u3', name: 'Νίκος Κ.', username: 'nikos' }, { id: 'u4', name: 'Ελένη Δ.', username: 'eleni' }]
+const demoRooms = [
+  { id: 'r1', kind: 'direct', title: 'Μαρία Παπαδοπούλου', members: [demoPeople[0]], unread: 2 },
+  { id: 'r2', kind: 'group', title: 'Dream of Elysium · crew', members: demoPeople, unread: 5 },
+  { id: 'r3', kind: 'direct', title: 'Νίκος Κ.', members: [demoPeople[1]], unread: 0 },
+]
+const demoTasks: import('../shared/api').RoarTask[] = [
+  { id: 't1', title: 'Call sheet Παρασκευής', notes: '', due: new Date(Date.now() + 24 * H).toISOString().slice(0, 10), priority: 'high', status: 'open', mine: true },
+  { id: 't2', title: 'Κάτοψη στούντιο στο συνεργείο', notes: '', due: null, priority: 'normal', status: 'pending', mine: true, from: 'Μαρία Παπαδοπούλου' },
+]
+
 function wake(s: (typeof snoozes)[number]) {
   const i = snoozes.indexOf(s)
   if (i < 0) return
@@ -239,6 +250,20 @@ export function createDemo(): MailApi & { update: any } {
     deleteSignature: async (id) => { const i = sigs.findIndex((x) => x.id === id); if (i >= 0) sigs.splice(i, 1) },
     settings: async () => ({ ...settings }),
     setSetting: async (k, v) => { settings = { ...settings, [k]: v } },
+    // RoarMe, signed in as a sample person with sample chats and tasks
+    roarmeStatus: async () => ({ signedIn: true, needsMfa: false, email: 'alex@themadlions.com', me: { id: 'u1', name: 'Alex', username: 'alex' } }),
+    roarmeSignIn: async () => ({ signedIn: true, needsMfa: false, email: 'alex@themadlions.com', me: { id: 'u1', name: 'Alex', username: 'alex' } }),
+    roarmeVerify: async () => ({ signedIn: true, needsMfa: false, email: 'alex@themadlions.com', me: { id: 'u1', name: 'Alex', username: 'alex' } }),
+    roarmeSignOut: async () => {},
+    roarmeRooms: async () => demoRooms,
+    roarmeContacts: async () => demoPeople,
+    roarmeShare: async () => ({ skipped: 0 }),
+    roarmeTask: async (x) => { demoTasks.unshift({ id: uid(), title: x.title, notes: x.notes, due: x.due || null, priority: x.priority || 'normal', status: x.assignee ? 'pending' : 'open', mine: !x.assignee, to: demoPeople.find((p) => p.id === x.assignee)?.name }) },
+    roarmeTaskStatus: async (id, status) => { const i = demoTasks.findIndex((x) => x.id === id); if (i >= 0) { if (status === 'done') demoTasks.splice(i, 1); else demoTasks[i].status = status } },
+    roarmeWork: async () => ({ tasks: demoTasks.map((x) => ({ ...x })), events: [{ id: 'e1', roomId: 'r2', title: 'Production call', start: new Date(Date.now() + 26 * H).toISOString(), video: true }],
+      hub: { linked: true, tasks: [{ id: 'h1', title: 'Color grading v2', due: new Date(Date.now() + 3 * 24 * H).toISOString().slice(0, 10), project: 'Dream of Elysium' }],
+        events: [{ id: 'he1', title: 'Shoot day', date: new Date(Date.now() + 4 * 24 * H).toISOString().slice(0, 10), start: '08:00', project: 'Dream of Elysium', color: '#ff9f0a' }] } }),
+    roarmeOpen: async () => { window.open('https://alexisdigipro-hub.github.io/roarme/', '_blank', 'noopener') },
     pickFiles: async () => [],
     openAttachment: async () => { alert('Demo: τα συνημμένα ανοίγουν στην εφαρμογή. / Attachments open in the app.') },
     saveAttachment: async () => { alert('Demo: τα συνημμένα αποθηκεύονται στην εφαρμογή. / Attachments are saved in the app.') },
