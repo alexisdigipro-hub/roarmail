@@ -262,6 +262,40 @@ app.whenReady().then(() => {
   handle('mail:removeAlias', (_e, id) => mail.removeAlias(id))
   handle('mail:serverFolders', (_e, id) => mail.serverFolders(id))
   handle('mail:unifiedFolders', () => mail.unifiedFolders())
+  // a folder's right-click menu: the Mac's own menu, built here; the window does what was picked
+  handle('mail:folderMenu', (_e, folderId: string, l: Record<string, string>) => new Promise((resolve) => {
+    const f = mail.folders(String(mail.folderAccount(folderId))).find((x) => x.id === folderId)
+    if (!f || !win) return resolve(null)
+    let picked: string | null = null
+    const pick = (v: string) => () => { picked = v }
+    const fixed = !!f.role
+    const colours: [string, string][] = [['#ff453a', l.red], ['#ff9f0a', l.orange], ['#ffd60a', l.yellow], ['#30d158', l.green], ['#0a84ff', l.blue], ['#bf5af2', l.purple]]
+    Menu.buildFromTemplate([
+      { label: l.new, click: pick('new') },
+      { label: l.sub, click: pick('sub') },
+      { label: l.rename, enabled: !fixed, click: pick('rename') },
+      { type: 'separator' },
+      ...colours.map(([hex, label]) => ({ label, type: 'checkbox' as const, checked: f.color === hex, click: pick(`c:${hex}`) })),
+      { label: l.custom, click: pick('custom') },
+      ...(f.color ? [{ label: l.nocolor, click: pick('nocolor') }] : []),
+      { type: 'separator' },
+      { label: l.hide, enabled: f.role !== 'inbox', click: pick('hide') },
+      { type: 'separator' },
+      { label: l.read, enabled: f.unread > 0, click: pick('read') },
+      { type: 'separator' },
+      { label: l.sync, click: pick('sync') },
+      { type: 'separator' },
+      { label: l.delete, enabled: !fixed, click: pick('delete') },
+    ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
+  }))
+  handle('mail:createFolder', (_e, accountId, parentId, name) => mail.createFolder(accountId, parentId, name))
+  handle('mail:renameFolder', (_e, id, name) => mail.renameFolder(id, name))
+  handle('mail:deleteFolder', (_e, id) => mail.deleteFolder(id))
+  handle('mail:setFolderColor', (_e, id, color) => mail.setFolderColor(id, color))
+  handle('mail:hideFolder', (_e, id, hidden) => mail.hideFolder(id, !!hidden))
+  handle('mail:hiddenFolders', (_e, accountId) => mail.folders(accountId, true))
+  handle('mail:markFolderRead', (_e, id) => mail.markFolderRead(id))
+  handle('mail:syncFolderAll', (_e, id) => mail.syncFolderAll(id))
   handle('mail:senderIcons', (_e, emails: string[]) => mail.senderIcons(Array.isArray(emails) ? emails : []))
   handle('mail:emojiPanel', () => { if (app.isEmojiPanelSupported()) app.showEmojiPanel() })
   // Settings > Accounts > Picture: any image, cut to the middle square and made small (160 px) before it is kept

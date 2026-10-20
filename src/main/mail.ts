@@ -558,15 +558,118 @@ export class MailService {
 
   // ---------- folders ----------
 
-  folders(accountId: string): Folder[] {
-    const rows = this.db.prepare('select * from folders where account_id = ? and hidden = 0').all(accountId) as Row[]
+  folders(accountId: string, hidden = false): Folder[] {
+    const rows = this.db.prepare(`select * from folders where account_id = ? and hidden = ${hidden ? 1 : 0}`).all(accountId) as Row[]
     const order: Record<string, number> = { inbox: 0, snoozed: 1, flagged: 2, drafts: 3, sent: 4, archive: 5, all: 6, spam: 7, trash: 8 }
     return rows
       .map((r) => ({
         id: r.id, accountId, path: r.path, name: r.role === 'inbox' ? 'Inbox' : r.name, role: (r.role || r.special || null) as FolderRole | null, unread: r.unread, total: r.total,
-        depth: r.delimiter ? r.path.split(r.delimiter).length - 1 : 0,
+        depth: r.delimiter ? r.path.split(r.delimiter).length - 1 : 0, color: r.color || null,
       }))
       .sort((a, b) => (a.role ? order[a.role] ?? 9 : 10) - (b.role ? order[b.role] ?? 9 : 10) || a.path.localeCompare(b.path))
+  }
+
+  // ---------- a folder's right-click menu ----------
+
+  private folderRow(id: string): Row {
+    const f = this.db.prepare('select * from folders where id = ?').get(id) as Row
+    if (!f) throw new Error('folder not found')
+    return f
+  }
+
+  /** a new folder at the top (in the server's namespace, e.g. Plesk's "INBOX.") or inside another */
+  async createFolder(accountId: string, parentId: string | null, name: string) {
+    const clean = String(name || '').trim().replace(/[\\/]/g, '-')
+    if (!clean) throw new Error('name')
+    const parent = parentId ? this.folderRow(parentId) : null
+    await this.run(accountId, async (c) => {
+      const delim = parent?.delimiter || (c as any).namespace?.delimiter || '/'
+      const path = parent ? `${parent.path}${delim}${clean}` : `${(c as any).namespace?.prefix || ''}${clean}`
+      await c.mailboxCreate(path)
+    })
+    await this.syncFolders(accountId)
+  }
+
+  async renameFolder(folderId: string, name: string) {
+    const f = this.folderRow(folderId)
+    const clean = String(name || '').trim().replace(/[\\/]/g, '-')
+    if (!clean || f.role === 'inbox') return
+    const cut = f.delimiter ? f.path.lastIndexOf(f.delimiter) : -1
+    const to = cut >= 0 ? `${f.path.slice(0, cut + 1)}${clean}` : clean
+    await this.run(f.account_id, (c) => c.mailboxRename(f.path, to))
+    // the same row keeps its colour and settings under the new path
+    this.db.prepare('update folders set path = ?, name = ? where id = ?').run(to, clean, folderId)
+    await this.syncFolders(f.account_id)
+  }
+
+  /** the folder and everything in it go from the server (the window asks first) */
+  async deleteFolder(folderId: string) {
+    const f = this.folderRow(folderId)
+    if (f.role === 'inbox') return
+    await this.run(f.account_id, (c) => c.mailboxDelete(f.path))
+    this.dropFolderMessages(folderId)
+    this.db.prepare('delete from folders where id = ?').run(folderId)
+    await this.syncFolders(f.account_id)
+    this.emit({ type: 'messages', accountId: f.account_id })
+  }
+
+  folderAccount(folderId: string): string | null {
+    return (this.db.prepare('select account_id from folders where id = ?').get(folderId) as Row)?.account_id || null
+  }
+
+  setFolderColor(folderId: string, color: string | null) {
+    const ok = color && /^#[0-9a-f]{6}$/i.test(color) ? color : null
+    this.db.prepare('update folders set color = ? where id = ?').run(ok, folderId)
+    this.emit({ type: 'folders', accountId: this.folderRow(folderId).account_id })
+  }
+
+  hideFolder(folderId: string, hidden: boolean) {
+    this.db.prepare('update folders set hidden = ? where id = ?').run(hidden ? 1 : 0, folderId)
+    this.emit({ type: 'folders', accountId: this.folderRow(folderId).account_id })
+  }
+
+  /** every message in the folder read, here at once and on the server */
+  async markFolderRead(folderId: string) {
+    const f = this.folderRow(folderId)
+    this.db.prepare(`update messages set seen = 1 where id in (select message_id from message_folders where folder_id = ?)`).run(folderId)
+    this.recount(folderId)
+    this.emit({ type: 'messages', accountId: f.account_id }); this.emit({ type: 'folders', accountId: f.account_id })
+    this.badge()
+    await this.run(f.account_id, async (c) => {
+      const lock = await c.getMailboxLock(f.path)
+      try { if ((c.mailbox as any).exists) await c.messageFlagsAdd('1:*', ['\\Seen']) } finally { lock.release() }
+    })
+  }
+
+  /** the whole folder: what the first sync left out (it takes the recent ones) comes down in batches */
+  async syncFolderAll(folderId: string): Promise<number> {
+    const f = this.folderRow(folderId)
+    const gmail = this.accountRow(f.account_id).provider === 'gmail'
+    this.emit({ type: 'sync', accountId: f.account_id, busy: true })
+    let added = 0
+    try {
+      await this.run(f.account_id, async (c) => {
+        const lock = await c.getMailboxLock(f.path)
+        try {
+          const all = ((await c.search({ all: true }, { uid: true })) || []) as number[]
+          const have = new Set((this.db.prepare('select uid from message_folders where folder_id = ?').all(folderId) as Row[]).map((r) => r.uid))
+          const missing = all.filter((u) => !have.has(u))
+          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+          if (gmail) query.threadId = true
+          for (let i = 0; i < missing.length; i += 200) {
+            const batch: Row[] = []
+            for await (const m of c.fetch(missing.slice(i, i + 200), query as any, { uid: true })) batch.push(m as any)
+            added += this.storeFetched(f.account_id, folderId, batch).length
+          }
+        } finally { lock.release() }
+      })
+      this.assignThreads(f.account_id)
+      this.recount(folderId)
+    } finally {
+      this.emit({ type: 'sync', accountId: f.account_id, busy: false })
+      this.emit({ type: 'messages', accountId: f.account_id }); this.emit({ type: 'folders', accountId: f.account_id })
+    }
+    return added
   }
 
   private folderByRole(accountId: string, role: FolderRole): Row | undefined {

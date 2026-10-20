@@ -131,6 +131,8 @@ export default function App() {
   const list = results ?? rows
   const senderPic = useSenderIcons(list.slice(0, 150).map((r) => r.fromEmail), prefs.senderPictures && prefs.listAvatars)
   const [editUnified, setEditUnified] = useState(false)
+  // a folder's right-click menu asks here for a name or a colour
+  const [folderAsk, setFolderAsk] = useState<{ kind: 'new' | 'sub' | 'rename' | 'custom'; folder: Folder } | null>(null)
   const chosen = list.filter((r) => selected.includes(keyOf(r)))
   const current = chosen.length === 1 ? chosen[0] : null
   const index = current ? list.indexOf(current) : -1
@@ -235,6 +237,27 @@ export default function App() {
       onDragLeave: () => setDropOn((d) => (d === f.id ? '' : d)),
       onDrop: (e: DragEvent) => { e.preventDefault(); run() },
     } : {}
+  }
+
+  /** a folder's right-click menu (the Mac's own, from the engine) and what each choice does */
+  const folderMenu = async (f: Folder, e: MouseEvent) => {
+    e.preventDefault()
+    const labels = { new: t.fm_new, sub: t.fm_sub, rename: t.fm_rename, red: t.qc_red, orange: t.qc_orange, yellow: t.fc_yellow, green: t.qc_green,
+      blue: t.qc_blue, purple: t.qc_purple, custom: t.fc_custom, nocolor: t.fc_none, hide: t.fm_hide, read: t.fm_read, sync: t.fm_sync, delete: t.fm_delete }
+    const pick = await api.folderMenu(f.id, labels)
+    if (!pick) return
+    try {
+      if (pick === 'new' || pick === 'sub' || pick === 'rename' || pick === 'custom') setFolderAsk({ kind: pick, folder: f })
+      else if (pick.startsWith('c:')) await api.setFolderColor(f.id, pick.slice(2))
+      else if (pick === 'nocolor') await api.setFolderColor(f.id, null)
+      else if (pick === 'hide') { await api.hideFolder(f.id, true); flash({ text: `${t.fm_hidden}`, ms: 3500 }) }
+      else if (pick === 'read') await api.markFolderRead(f.id)
+      else if (pick === 'sync') { flash({ text: t.fm_syncing, ms: 2500 }); const n = await api.syncFolderAll(f.id); flash({ text: `${t.fm_synced} ${n}`, ms: 3500 }) }
+      else if (pick === 'delete' && confirm(`${t.fm_deleteQ}\n\n${f.name}`)) {
+        await api.deleteFolder(f.id)
+        if (scope.folderId === f.id) setScope({ accountId: f.accountId, role: 'inbox' })
+      }
+    } catch (err) { flash({ text: clean(err) }) }
   }
 
   const openMove = useCallback((targets: MessageRow[]) => {
@@ -402,8 +425,9 @@ export default function App() {
             const on = scope.folderId ? scope.folderId === f.id : f.role === 'inbox'
             return (
               <button key={f.id} className={`folder ${on ? 'on' : ''} ${dropOn === f.id ? 'drop' : ''}`} style={{ paddingLeft: 14 + Math.min(f.depth, 4) * 14 }}
-                onClick={() => setScope(f.role === 'inbox' ? { accountId: f.accountId, role: 'inbox' } : { accountId: f.accountId, folderId: f.id })} {...dropTo(f)}>
-                <Icon name={folderIcon(f.role)} size={16} />
+                onClick={() => setScope(f.role === 'inbox' ? { accountId: f.accountId, role: 'inbox' } : { accountId: f.accountId, folderId: f.id })} {...dropTo(f)}
+                onContextMenu={(e) => folderMenu(f, e)}>
+                <span className="folder-ic" style={f.color ? { color: f.color } : undefined}><Icon name={folderIcon(f.role)} size={16} filled={!!f.color && !f.role} /></span>
                 <span className="grow ellipsis">{f.role ? t[f.role as Key] : f.name}</span>
                 {counter(f) > 0 && <span className={`count ${(f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter) === 'total' ? 'total' : ''}`}>{counter(f)}</span>}
               </button>
@@ -549,6 +573,7 @@ export default function App() {
       {update?.status === 'ready' && (
         <button className="update pill primary" onClick={() => api.update.install()}>{t.updateReady} {update.version} · {t.restart}</button>
       )}
+      {folderAsk && <FolderSheet ask={folderAsk} onClose={() => setFolderAsk(null)} onDone={(text) => { setFolderAsk(null); if (text) flash({ text, ms: 3000 }) }} />}
       {adding && <AddAccount first={false} onDone={() => { setAdding(false); loadAccounts() }} onCancel={() => setAdding(false)} />}
       {settingsOpen && <SettingsSheet accounts={accounts} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}
       {moving && (
@@ -650,6 +675,40 @@ function LockScreen() {
       <Icon name="lock" size={28} />
       <p className="muted">{t.locked}</p>
       <button className="pill primary" disabled={busy} onClick={unlock}>{t.unlock}</button>
+    </div>
+  )
+}
+
+/** the questions a folder's right-click menu asks: a name (new, inside, rename) or a colour of your own */
+function FolderSheet({ ask, onClose, onDone }: { ask: { kind: 'new' | 'sub' | 'rename' | 'custom'; folder: Folder }; onClose: () => void; onDone: (text?: string) => void }) {
+  const f = ask.folder
+  const [name, setName] = useState(ask.kind === 'rename' ? f.name : '')
+  const [color, setColor] = useState(f.color || '#d40000')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const title = ask.kind === 'new' ? t.fm_new : ask.kind === 'sub' ? `${t.fm_sub} · ${f.name}` : ask.kind === 'rename' ? t.fm_rename : t.fc_custom
+  const go = async () => {
+    setBusy(true); setError('')
+    try {
+      if (ask.kind === 'custom') await api.setFolderColor(f.id, color)
+      else if (ask.kind === 'rename') await api.renameFolder(f.id, name)
+      else await api.createFolder(f.accountId, ask.kind === 'sub' ? f.id : null, name)
+      onDone(ask.kind === 'custom' ? undefined : t.fm_done)
+    } catch (e) { setError(clean(e)); setBusy(false) }
+  }
+  return (
+    <div className="sheet-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
+      <div className="sheet folder-sheet">
+        <h3>{title}</h3>
+        {ask.kind === 'custom'
+          ? <label className="row">{t.fc_pick}<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
+          : <label>{t.fm_name}<input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) go() }} /></label>}
+        {error && <p className="error small">{error}</p>}
+        <div className="row end">
+          <button className="pill ghost" onClick={onClose}>{t.cancel}</button>
+          <button className="pill primary" disabled={busy || (ask.kind !== 'custom' && !name.trim())} onClick={go}>{ask.kind === 'rename' ? t.fm_rename : ask.kind === 'custom' ? t.save : t.fm_create}</button>
+        </div>
+      </div>
     </div>
   )
 }

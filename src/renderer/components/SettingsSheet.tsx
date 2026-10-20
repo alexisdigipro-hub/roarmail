@@ -1,8 +1,8 @@
 // Settings, laid out like RoarMe's: a list of pages on the left (icons, current values, a chevron, the lens
 // sliding to the open one), the page on the right with a big title. Appearance carries RoarMe's look settings.
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, LockState, NewMailSound, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
+import type { Account, Folder, LockState, NewMailSound, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
 import { t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
@@ -10,11 +10,21 @@ import { Icon } from './Icon'
 import { RoarMeAccount } from './RoarMe'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
-type Page = 'general' | 'accounts' | 'roarme' | 'appearance' | 'fonts' | 'signatures' | 'privacy' | 'expert' | 'updates' | 'keys'
-const PAGES: [Page, string][] = [
-  ['general', 'gear'], ['accounts', 'inbox'], ['roarme', 'roar'], ['appearance', 'palette'], ['fonts', 'type'], ['signatures', 'compose'], ['privacy', 'shield'], ['expert', 'sliders'], ['updates', 'download'], ['keys', 'keyboard'],
-]
 const MAC = window.roarmail.platform === 'darwin'
+
+// The pages, in five groups (Alex, 21 Oct 2026: "tidy, in categories"), like the Mac's System Settings
+type Page = 'accounts' | 'signatures' | 'roarme' | 'general' | 'reading' | 'composing' | 'notify' | 'search'
+  | 'theme' | 'list' | 'fonts' | 'privacy' | 'updates' | 'keys' | 'expert'
+const GROUPS: [Key, [Page, string][]][] = [
+  ['grp_accounts', [['accounts', 'inbox'], ['signatures', 'compose'], ['roarme', 'roar']]],
+  ['grp_mail', [['general', 'gear'], ['reading', 'unread'], ['composing', 'sent'], ['notify', 'bell'], ['search', 'search']]],
+  ['grp_look', [['theme', 'palette'], ['list', 'all'], ['fonts', 'type']]],
+  ['grp_privacy', [['privacy', 'shield']]],
+  ['grp_system', [['updates', 'download'], ['keys', 'keyboard'], ['expert', 'sliders']]],
+]
+const title = (p: Page) => t[`pg_${p}` as Key]
+
+type Set = <K extends keyof Settings>(k: K, v: Settings[K], e?: MouseEvent) => void
 
 export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
   accounts: Account[]; onAddAccount: () => void; onClose: () => void; onLook: (s: Settings) => void
@@ -27,12 +37,22 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
   const loadSigs = () => window.roarmail.signatures().then(setSigs)
   useEffect(() => { loadSigs(); window.roarmail.settings().then(setPrefs) }, [])
 
+  // one way to change a setting, for every page: kept, applied to the look, told to the window
+  const set: Set = (k, v, e) => {
+    if (!prefs) return
+    const next = { ...prefs, [k]: v }
+    window.roarmail.setSetting(k, v)
+    const apply = () => { setPrefs(next); applyLook(next); onLook(next) }
+    if (e && (k === 'appearance' || k === 'theme')) revealFrom(e, apply); else apply()
+  }
+  const replace = (n: Settings) => { setPrefs(n); applyLook(n); onLook(n) }
+
   const value = (p: Page) => {
     if (!prefs) return ''
     if (p === 'accounts') return String(accounts.length)
-    if (p === 'appearance') return prefs.theme === 'pumba' ? 'Pumba' : 'Simba'
+    if (p === 'theme') return prefs.theme === 'pumba' ? 'Pumba' : 'Simba'
     if (p === 'signatures') return sigs.length ? String(sigs.length) : ''
-    if (p === 'privacy') return prefs.lock ? t.appLockShort : ''
+    if (p === 'privacy') return prefs.privacyMode ? t.on : prefs.lock ? t.appLockShort : ''
     if (p === 'updates') return upd?.status === 'ready' ? t.up_readyShort : upd?.current || ''
     return ''
   }
@@ -43,32 +63,39 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
         <nav className="set-side">
           <div className="set-brand"><b>ROAR</b><i>MAIL</i></div>
           <div className="set-list list-lens lens" ref={nav}>
-            {PAGES.map(([k, icon]) => (
-              <button key={k} className={`set-nav ${page === k ? 'on' : ''}`} onClick={() => setPage(k)}>
-                <Icon name={icon} size={17} />
-                <span className="grow">{t[k as Key]}</span>
-                <span className="set-val">{value(k)}</span>
-                <Icon name="chevron" size={13} />
-              </button>
-            ))}
+            {GROUPS.flatMap(([g, pages]) => [
+              <div key={g} className="set-group-title">{t[g]}</div>,
+              ...pages.map(([k, icon]) => (
+                <button key={k} className={`set-nav ${page === k ? 'on' : ''}`} onClick={() => setPage(k)}>
+                  <Icon name={icon} size={16} />
+                  <span className="grow ellipsis">{title(k)}</span>
+                  <span className="set-val">{value(k)}</span>
+                </button>
+              )),
+            ])}
           </div>
         </nav>
         <section className="set-page" key={page}>
           <div className="set-head">
-            <h2>{t[page as Key]}</h2>
+            <h2>{title(page)}</h2>
             <button className="tool" onClick={onClose} title={t.done}><Icon name="close" /></button>
           </div>
           <div className="settings-body">
             {page === 'accounts' && <Accounts accounts={accounts} sigs={sigs} onAdd={onAddAccount} />}
-            {page === 'roarme' && <RoarMeAccount />}
-            {page === 'appearance' && prefs && <Appearance s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
             {page === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
-            {page === 'privacy' && <Privacy />}
-            {page === 'general' && <General />}
-            {page === 'updates' && prefs && <Updates s={prefs} onChange={(n) => { setPrefs(n); onLook(n) }} />}
-            {page === 'expert' && prefs && <Advanced s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
-            {page === 'fonts' && prefs && <Fonts s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
+            {page === 'roarme' && <RoarMeAccount />}
             {page === 'keys' && <Shortcuts />}
+            {prefs && page === 'general' && <General s={prefs} set={set} />}
+            {prefs && page === 'reading' && <Reading s={prefs} set={set} />}
+            {prefs && page === 'composing' && <Composing s={prefs} set={set} />}
+            {prefs && page === 'notify' && <Notify s={prefs} set={set} />}
+            {prefs && page === 'search' && <Search s={prefs} set={set} />}
+            {prefs && page === 'theme' && <Theme s={prefs} set={set} />}
+            {prefs && page === 'list' && <ListPage s={prefs} set={set} />}
+            {prefs && page === 'fonts' && <Fonts s={prefs} set={set} />}
+            {prefs && page === 'privacy' && <Privacy s={prefs} set={set} />}
+            {prefs && page === 'updates' && <Updates s={prefs} set={set} />}
+            {prefs && page === 'expert' && <Advanced replace={replace} />}
           </div>
         </section>
       </div>
@@ -76,13 +103,161 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
   )
 }
 
-/** RoarMe's Appearance page: theme, day and night, accent, font, spacing, corners, text size, motion and the rest */
-function Appearance({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
-  const set = <K extends keyof Settings>(k: K, v: Settings[K], e?: MouseEvent) => {
-    const next = { ...s, [k]: v }
-    window.roarmail.setSetting(k, v)
-    if (e && (k === 'appearance' || k === 'theme')) revealFrom(e, () => onChange(next)); else onChange(next)
-  }
+/** a titled card of settings; the note sits under it */
+function Group({ title, note, children }: { title?: string; note?: string; children: ReactNode }) {
+  return (
+    <section className="set-sec">
+      {title && <h4 className="set-sub">{title}</h4>}
+      <div className="set-group">{children}</div>
+      {note && <p className="muted small set-note">{note}</p>}
+    </section>
+  )
+}
+
+/** one line of a card: what it is (and a hint) on the left, the control on the right */
+function Line({ label, hint, children }: { label: ReactNode; hint?: string; children: ReactNode }) {
+  return (
+    <div className="set-row">
+      <span className="set-label">{label}{hint && <small className="muted block">{hint}</small>}</span>
+      <span className="set-ctl">{children}</span>
+    </div>
+  )
+}
+
+function Choice<V extends string | number>({ value, options, onChange }: { value: V; options: [V, string][]; onChange: (v: V) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange((typeof value === 'number' ? Number(e.target.value) : e.target.value) as V)}>
+      {options.map(([v, label]) => <option key={String(v)} value={v}>{label}</option>)}
+    </select>
+  )
+}
+
+/** Mail > General: the app itself on this computer */
+function General({ s, set }: { s: Settings; set: Set }) {
+  const [isDefault, setIsDefault] = useState<boolean | null>(null)
+  useEffect(() => { window.roarmail.isDefaultMail().then(setIsDefault).catch(() => {}) }, [])
+  return (
+    <div className="stack">
+      <Group title={t.sec_app}>
+        <Line label={t.g_language}>
+          <Choice value={s.language} onChange={(v) => set('language', v)} options={[['auto', t.g_langAuto], ['el', 'Ελληνικά'], ['en', 'English']]} />
+        </Line>
+        <Line label={t.g_defaultApp}>
+          {isDefault
+            ? <span className="muted small ok-text"><Icon name="shield" size={14} /> RoarMail</span>
+            : <button className="pill small" disabled={isDefault == null} onClick={() => window.roarmail.makeDefaultMail().then(setIsDefault)}>{t.g_makeDefault}</button>}
+        </Line>
+        <Toggle label={t.runAtLoginShort} hint={t.runAtLogin} on={s.runAtLogin} set={(v) => set('runAtLogin', v)} />
+        {MAC && (
+          <Line label={t.g_dock}>
+            <Choice value={s.dockMode} onChange={(v) => set('dockMode', v)} options={[['both', t.g_dockBoth], ['dock', t.g_dockOnly], ['menubar', t.g_menubarOnly]]} />
+          </Line>
+        )}
+      </Group>
+      <Group title={t.sec_inboxes}>
+        <Toggle label={t.g_unified} hint={t.g_unifiedHint} on={s.unifiedInbox} set={(v) => set('unifiedInbox', v)} />
+        <Line label={t.g_checkEvery}>
+          <Choice value={s.checkEvery} onChange={(v) => set('checkEvery', v)}
+            options={[[1, t.g_every1], [5, t.g_every5], [15, t.g_every15], [30, t.g_every30], [60, t.g_every60], [0, t.g_manually]]} />
+        </Line>
+      </Group>
+    </div>
+  )
+}
+
+/** Mail > Reading: what happens while reading and acting on mail */
+function Reading({ s, set }: { s: Settings; set: Set }) {
+  const swipes: [SwipeAction, string][] = (['archive', 'trash', 'snooze', 'flag', 'seen', 'none'] as SwipeAction[]).map((w) => [w, t[`sw_${w}` as Key]])
+  const folderName = s.downloadsFolder.split(/[\\/]/).filter(Boolean).pop() || ''
+  return (
+    <div className="stack">
+      <Group title={t.sec_reading}>
+        <Line label={t.g_markRead}>
+          <Choice value={s.markRead} onChange={(v) => set('markRead', v)} options={[['open', t.g_readOpen], ['delay', t.g_readDelay], ['never', t.g_readNever]]} />
+        </Line>
+        <Toggle label={t.ad_detect} hint={t.ad_detectHint} on={s.detectLinks} set={(v) => set('detectLinks', v)} />
+        {MAC && <Toggle label={t.g_linksBg} hint={t.g_linksBgHint} on={s.linksInBackground} set={(v) => set('linksInBackground', v)} />}
+      </Group>
+      <Group title={t.sec_swipe} note={t.sec_swipeNote}>
+        <Line label={t.swipeLeft}><Choice value={s.swipeLeft} onChange={(v) => set('swipeLeft', v)} options={swipes} /></Line>
+        <Line label={t.swipeRight}><Choice value={s.swipeRight} onChange={(v) => set('swipeRight', v)} options={swipes} /></Line>
+      </Group>
+      <Group title={t.sec_attachments}>
+        <Line label={t.g_downloads}>
+          <span className="muted small ellipsis dl-name" title={s.downloadsFolder}>{s.downloadsFolder ? folderName : t.g_askEachTime}</span>
+          <button className="pill small" onClick={() => window.roarmail.pickFolder().then((p) => { if (p) set('downloadsFolder', p) })}>{t.g_choose}</button>
+          {s.downloadsFolder && <button className="pill small ghost" onClick={() => set('downloadsFolder', '')}>{t.g_askEachTime}</button>}
+        </Line>
+      </Group>
+    </div>
+  )
+}
+
+/** Mail > Composing: sending */
+function Composing({ s, set }: { s: Settings; set: Set }) {
+  return (
+    <div className="stack">
+      <Group title={t.sec_sending}>
+        <Line label={t.undoSend}>
+          <Choice value={s.undoSendSeconds} onChange={(v) => set('undoSendSeconds', v)} options={[0, 5, 10, 20, 30].map((n) => [n, n ? `${n} ${t.seconds}` : t.off])} />
+        </Line>
+        <Toggle label={t.g_retry} hint={t.g_retryHint} on={s.retrySending} set={(v) => set('retrySending', v)} />
+      </Group>
+      <p className="muted small set-note">{t.sec_composeNote}</p>
+    </div>
+  )
+}
+
+/** Mail > Notifications: what tells you about new mail */
+function Notify({ s, set }: { s: Settings; set: Set }) {
+  return (
+    <div className="stack">
+      <Group title={t.sec_notifications}>
+        <Line label={t.g_notify}>
+          <Choice value={s.notifyFor} onChange={(v) => set('notifyFor', v)} options={[['inbox', t.g_notifyInbox], ['known', t.g_notifyKnown], ['none', t.g_notifyNone]]} />
+        </Line>
+        {MAC && s.notifyFor !== 'none' && <Toggle label={t.g_notifyReply} hint={t.g_notifyReplyHint} on={s.notifyReply} set={(v) => set('notifyReply', v)} />}
+      </Group>
+      <Group title={t.sec_sounds}>
+        <Line label={t.g_sound}>
+          <select value={s.newMailSound} onChange={(e) => { const v = e.target.value as Settings['newMailSound']; set('newMailSound', v); if (v !== 'system' && v !== 'none') playNewMail(v) }}>
+            <option value="system">{t.g_soundSystem}</option>
+            {NEW_MAIL_SOUNDS.map((k) => <option key={k} value={k}>{t[`snd_${k}` as Key]}</option>)}
+            <option value="none">{t.g_soundNone}</option>
+          </select>
+          <button className="tool small" title={t.g_play} disabled={s.newMailSound === 'system' || s.newMailSound === 'none'} onClick={() => playNewMail(s.newMailSound as NewMailSound)}><Icon name="bell" size={15} /></button>
+        </Line>
+        <Toggle label={t.g_actionSounds} hint={t.g_actionSoundsHint} on={s.actionSounds} set={(v) => set('actionSounds', v)} />
+      </Group>
+      <Group title={t.sec_badges}>
+        <Line label={t.g_badge}>
+          <Choice value={s.dockBadge} onChange={(v) => set('dockBadge', v)} options={[['inbox', t.g_badgeInbox], ['all', t.g_badgeAll], ['none', t.g_badgeNone]]} />
+        </Line>
+        <Toggle label={t.ap_accBadges} hint={t.ap_accBadgesHint} on={s.accountBadges} set={(v) => set('accountBadges', v)} />
+      </Group>
+    </div>
+  )
+}
+
+/** Mail > Search */
+function Search({ s, set }: { s: Settings; set: Set }) {
+  return (
+    <div className="stack">
+      <Group title={t.sec_searchWhere}>
+        <Toggle label={t.ad_searchSpam} on={s.searchJunk} set={(v) => set('searchJunk', v)} />
+        <Toggle label={t.ad_searchTrash} on={s.searchTrash} set={(v) => set('searchTrash', v)} />
+        <Toggle label={t.ad_online} hint={t.ad_onlineHint} on={s.onlineSearch} set={(v) => set('onlineSearch', v)} />
+      </Group>
+      <Group title={t.sec_searchHow} note={t.ad_accentsNote}>
+        <Toggle label={t.ad_conversations} hint={t.ad_conversationsHint} on={s.searchConversations} set={(v) => set('searchConversations', v)} />
+        <Toggle label={t.ad_exact} hint={t.ad_exactHint} on={s.exactSearch} set={(v) => set('exactSearch', v)} />
+      </Group>
+    </div>
+  )
+}
+
+/** Look > Theme: RoarMe's look settings */
+function Theme({ s, set }: { s: Settings; set: Set }) {
   const modes: [Settings['appearance'], string][] = [['system', t.ap_auto], ['dark', t.ap_dark], ['light', t.ap_light]]
   const dens: [Settings['density'], string][] = [['relaxed', t.den_relaxed], ['standard', t.den_standard], ['tight', t.den_tight]]
   const themeSeg = useLens<HTMLDivElement>(s.theme)
@@ -96,71 +271,75 @@ function Appearance({ s, onChange }: { s: Settings; onChange: (s: Settings) => v
             <div className="subj">{t.previewSubject}</div><div className="snip muted">{t.previewText}</div></div></div>
         <div className="row"><button className="pill primary small">{t.send}</button><button className="pill small">{t.reply}</button></div>
       </div>
+      <Group title={t.sec_colours}>
+        <Line label={t.theme}>
+          <div className="theme-tiles seg lens" ref={themeSeg}>
+            {(['simba', 'pumba'] as const).map((th) => (
+              <button key={th} className={`theme-tile ${th} ${s.theme === th ? 'on' : ''}`} onClick={(e) => set('theme', th, e)}>
+                <i className="tile-art" /><span>{th === 'simba' ? 'Simba' : 'Pumba'}</span>
+              </button>
+            ))}
+          </div>
+        </Line>
+        <Line label={t.dayNight}>
+          <div className="seg lens" ref={modeSeg}>
+            {modes.map(([k, label]) => <button key={k} className={s.appearance === k ? 'on' : ''} onClick={(e) => set('appearance', k, e)}>{label}</button>)}
+          </div>
+        </Line>
+        <Line label={t.accent}>
+          <div className="accents">
+            <button className={`accent-dot theme-own ${!s.accent ? 'on' : ''}`} title={t.themeColor} onClick={() => set('accent', '')} />
+            {ACCENTS.map(([k, label, hex]) => (
+              <button key={k} className={`accent-dot ${s.accent === k ? 'on' : ''} ${k === 'white' ? 'white' : ''}`} title={label} style={{ ['--c' as any]: hex }} onClick={() => set('accent', k)} />
+            ))}
+          </div>
+        </Line>
+      </Group>
+      <Group title={t.sec_shape}>
+        <Line label={t.font}>
+          <select value={s.font} onChange={(e) => set('font', e.target.value as Settings['font'])}>
+            {FONTS.map(([k, label, fam]) => <option key={k} value={k} style={{ fontFamily: fam }}>{label}</option>)}
+          </select>
+        </Line>
+        <Line label={t.density}>
+          <div className="seg lens" ref={denSeg}>
+            {dens.map(([k, label]) => <button key={k} className={s.density === k ? 'on' : ''} onClick={() => set('density', k)}>{label}</button>)}
+          </div>
+        </Line>
+        <Line label={<>{t.corners} <b className="muted">{s.radius}px</b></>}>
+          <input type="range" min={4} max={16} step={2} value={s.radius} onChange={(e) => set('radius', Number(e.target.value))} />
+        </Line>
+        <Line label={<>{t.textSize} <b className="muted">{TEXT_SIZES[s.textSize]}px</b></>}>
+          <input type="range" min={0} max={4} step={1} value={s.textSize} onChange={(e) => set('textSize', Number(e.target.value))} />
+        </Line>
+      </Group>
+      <Group title={t.ap_feel}>
+        <Toggle label={t.motion} hint={t.motionHint} on={s.motion} set={(v) => set('motion', v)} />
+        <Toggle label={t.glassLook} hint={t.glassHint} on={s.glass} set={(v) => set('glass', v)} />
+        <Toggle label={t.focusRings} hint={t.focusHint} on={s.focusRings} set={(v) => set('focusRings', v)} />
+        <Toggle label={t.lite} hint={t.liteHint} on={s.lite} set={(v) => set('lite', v)} />
+      </Group>
+    </div>
+  )
+}
 
-      <div className="set-row"><span>{t.theme}</span>
-        <div className="theme-tiles seg lens" ref={themeSeg}>
-          {(['simba', 'pumba'] as const).map((th) => (
-            <button key={th} className={`theme-tile ${th} ${s.theme === th ? 'on' : ''}`} onClick={(e) => set('theme', th, e)}>
-              <i className="tile-art" /><span>{th === 'simba' ? 'Simba' : 'Pumba'}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="set-row"><span>{t.dayNight}</span>
-        <div className="seg lens" ref={modeSeg}>
-          {modes.map(([k, label]) => <button key={k} className={s.appearance === k ? 'on' : ''} onClick={(e) => set('appearance', k, e)}>{label}</button>)}
-        </div>
-      </div>
-      <div className="set-row"><span>{t.accent}</span>
-        <div className="accents">
-          <button className={`accent-dot theme-own ${!s.accent ? 'on' : ''}`} title={t.themeColor} onClick={() => set('accent', '')} />
-          {ACCENTS.map(([k, label, hex]) => (
-            <button key={k} className={`accent-dot ${s.accent === k ? 'on' : ''} ${k === 'white' ? 'white' : ''}`} title={label} style={{ ['--c' as any]: hex }} onClick={() => set('accent', k)} />
-          ))}
-        </div>
-      </div>
-      <div className="set-row"><span>{t.font}</span>
-        <select value={s.font} onChange={(e) => set('font', e.target.value as Settings['font'])}>
-          {FONTS.map(([k, label, fam]) => <option key={k} value={k} style={{ fontFamily: fam }}>{label}</option>)}
-        </select>
-      </div>
-      <div className="set-row"><span>{t.density}</span>
-        <div className="seg lens" ref={denSeg}>
-          {dens.map(([k, label]) => <button key={k} className={s.density === k ? 'on' : ''} onClick={() => set('density', k)}>{label}</button>)}
-        </div>
-      </div>
-      <div className="set-row"><span>{t.corners} <b className="muted">{s.radius}px</b></span>
-        <input type="range" min={4} max={16} step={2} value={s.radius} onChange={(e) => set('radius', Number(e.target.value))} />
-      </div>
-      <div className="set-row"><span>{t.textSize} <b className="muted">{TEXT_SIZES[s.textSize]}px</b></span>
-        <input type="range" min={0} max={4} step={1} value={s.textSize} onChange={(e) => set('textSize', Number(e.target.value))} />
-      </div>
-      <h4 className="set-sub">{t.ap_list}</h4>
-      <div className="set-row"><span>{t.ap_preview}</span>
-        <select value={s.previewLines} onChange={(e) => set('previewLines', Number(e.target.value))}>
-          <option value={0}>{t.ap_previewNone}</option><option value={1}>{t.ap_preview1}</option><option value={2}>{t.ap_preview2}</option><option value={3}>{t.ap_preview3}</option>
-        </select>
-      </div>
-      <Toggle label={t.ap_avatars} hint={t.ap_avatarsHint} on={s.listAvatars} set={(v) => set('listAvatars', v)} />
-      <Toggle label={t.ap_senderPics} hint={s.privacyMode ? t.ap_senderPicsOff : t.ap_senderPicsHint} on={s.senderPictures && !s.privacyMode} disabled={s.privacyMode} set={(v) => set('senderPictures', v)} />
-      <h4 className="set-sub">{t.ap_lists}</h4>
-      <Toggle label={t.ap_accColours} hint={t.ap_accColoursHint} on={s.accountColours} set={(v) => set('accountColours', v)} />
-      <Toggle label={t.ap_accBadges} hint={t.ap_accBadgesHint} on={s.accountBadges} set={(v) => set('accountBadges', v)} />
-      <div className="set-row"><span>{t.ap_inboxCounter}</span>
-        <select value={s.inboxCounter} onChange={(e) => set('inboxCounter', e.target.value as Settings['inboxCounter'])}>
-          <option value="unread">{t.ap_cUnread}</option><option value="total">{t.ap_cTotal}</option><option value="none">{t.ap_cNone}</option>
-        </select>
-      </div>
-      <div className="set-row"><span>{t.ap_folderCounter}</span>
-        <select value={s.folderCounter} onChange={(e) => set('folderCounter', e.target.value as Settings['folderCounter'])}>
-          <option value="unread">{t.ap_cUnread}</option><option value="total">{t.ap_cTotal}</option><option value="none">{t.ap_cNone}</option>
-        </select>
-      </div>
-      <h4 className="set-sub">{t.ap_feel}</h4>
-      <Toggle label={t.motion} hint={t.motionHint} on={s.motion} set={(v) => set('motion', v)} />
-      <Toggle label={t.glassLook} hint={t.glassHint} on={s.glass} set={(v) => set('glass', v)} />
-      <Toggle label={t.focusRings} hint={t.focusHint} on={s.focusRings} set={(v) => set('focusRings', v)} />
-      <Toggle label={t.lite} hint={t.liteHint} on={s.lite} set={(v) => set('lite', v)} />
+/** Look > Message list: what each row shows, pictures, colours and counters */
+function ListPage({ s, set }: { s: Settings; set: Set }) {
+  const counters: [Settings['inboxCounter'], string][] = [['unread', t.ap_cUnread], ['total', t.ap_cTotal], ['none', t.ap_cNone]]
+  return (
+    <div className="stack">
+      <Group title={t.sec_rows}>
+        <Line label={t.ap_preview}>
+          <Choice value={s.previewLines} onChange={(v) => set('previewLines', v)} options={[[0, t.ap_previewNone], [1, t.ap_preview1], [2, t.ap_preview2], [3, t.ap_preview3]]} />
+        </Line>
+        <Toggle label={t.ap_avatars} hint={t.ap_avatarsHint} on={s.listAvatars} set={(v) => set('listAvatars', v)} />
+        <Toggle label={t.ap_senderPics} hint={s.privacyMode ? t.ap_senderPicsOff : t.ap_senderPicsHint} on={s.senderPictures && !s.privacyMode} disabled={s.privacyMode || !s.listAvatars} set={(v) => set('senderPictures', v)} />
+        <Toggle label={t.ap_accColours} hint={t.ap_accColoursHint} on={s.accountColours} set={(v) => set('accountColours', v)} />
+      </Group>
+      <Group title={t.sec_counters}>
+        <Line label={t.ap_inboxCounter}><Choice value={s.inboxCounter} onChange={(v) => set('inboxCounter', v)} options={counters} /></Line>
+        <Line label={t.ap_folderCounter}><Choice value={s.folderCounter} onChange={(v) => set('folderCounter', v)} options={counters} /></Line>
+      </Group>
     </div>
   )
 }
@@ -313,7 +492,9 @@ const ERASE_DAYS = [0, 1, 7, 30, 90]
 /** Apple Mail's "Mailbox Behaviours": which folder is which, and erasing old Trash and Junk */
 function AccountFolders({ a }: { a: Account }) {
   const [list, setList] = useState<{ path: string; name: string }[]>([])
-  useEffect(() => { window.roarmail.serverFolders(a.id).then(setList) }, [a.id])
+  const [hidden, setHidden] = useState<Folder[]>([])
+  const loadHidden = () => window.roarmail.hiddenFolders(a.id).then(setHidden)
+  useEffect(() => { window.roarmail.serverFolders(a.id).then(setList); loadHidden() }, [a.id])
   const days = (n: number) => (n === 0 ? t.ac_never : n === 1 ? `1 ${t.day}` : `${n} ${t.days}`)
   return (
     <>
@@ -336,6 +517,12 @@ function AccountFolders({ a }: { a: Account }) {
           {ERASE_DAYS.map((n) => <option key={n} value={n}>{days(n)}</option>)}
         </select>
       </div>
+      {hidden.length > 0 && <h4 className="set-sub">{t.ac_hiddenFolders}</h4>}
+      {hidden.map((f) => (
+        <div className="set-row" key={f.id}><span>{f.path}</span>
+          <button className="pill small" onClick={async () => { await window.roarmail.hideFolder(f.id, false); loadHidden() }}>{t.ac_show}</button>
+        </div>
+      ))}
     </>
   )
 }
@@ -421,96 +608,6 @@ function SignatureEditor({ sig, reload, onDeleted }: { sig: Signature; reload: (
   )
 }
 
-function General() {
-  const [s, setS] = useState<Settings | null>(null)
-  const [isDefault, setIsDefault] = useState<boolean | null>(null)
-  useEffect(() => { window.roarmail.settings().then(setS); window.roarmail.isDefaultMail().then(setIsDefault) }, [])
-  if (!s) return null
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { setS({ ...s, [k]: v }); window.roarmail.setSetting(k, v) }
-  const swipes: SwipeAction[] = ['archive', 'trash', 'snooze', 'flag', 'seen', 'none']
-  const every: [number, string][] = [[1, t.g_every1], [5, t.g_every5], [15, t.g_every15], [30, t.g_every30], [60, t.g_every60], [0, t.g_manually]]
-  const folderName = s.downloadsFolder.split(/[\\/]/).filter(Boolean).pop() || ''
-  return (
-    <div className="stack">
-      <div className="set-row"><span>{t.g_defaultApp}</span>
-        {isDefault
-          ? <span className="muted small ok-text"><Icon name="shield" size={14} /> RoarMail</span>
-          : <button className="pill small" disabled={isDefault == null} onClick={() => window.roarmail.makeDefaultMail().then(setIsDefault)}>{t.g_makeDefault}</button>}
-      </div>
-      <div className="set-row"><span>{t.g_language}</span>
-        <select value={s.language} onChange={(e) => set('language', e.target.value as Settings['language'])}>
-          <option value="auto">{t.g_langAuto}</option><option value="el">Ελληνικά</option><option value="en">English</option>
-        </select>
-      </div>
-      <Toggle label={t.g_unified} hint={t.g_unifiedHint} on={s.unifiedInbox} set={(v) => set('unifiedInbox', v)} />
-      {MAC && (
-        <div className="set-row"><span>{t.g_dock}</span>
-          <select value={s.dockMode} onChange={(e) => set('dockMode', e.target.value as Settings['dockMode'])}>
-            <option value="both">{t.g_dockBoth}</option><option value="dock">{t.g_dockOnly}</option><option value="menubar">{t.g_menubarOnly}</option>
-          </select>
-        </div>
-      )}
-      <div className="set-row"><span>{t.g_markRead}</span>
-        <select value={s.markRead} onChange={(e) => set('markRead', e.target.value as Settings['markRead'])}>
-          <option value="open">{t.g_readOpen}</option><option value="delay">{t.g_readDelay}</option><option value="never">{t.g_readNever}</option>
-        </select>
-      </div>
-      {MAC && <Toggle label={t.g_linksBg} hint={t.g_linksBgHint} on={s.linksInBackground} set={(v) => set('linksInBackground', v)} />}
-      <div className="set-row"><span>{t.g_checkEvery}</span>
-        <select value={s.checkEvery} onChange={(e) => set('checkEvery', Number(e.target.value))}>
-          {every.map(([n, label]) => <option key={n} value={n}>{label}</option>)}
-        </select>
-      </div>
-      <div className="set-row"><span>{t.g_sound}</span>
-        <div className="row">
-          <select value={s.newMailSound} onChange={(e) => { const v = e.target.value as Settings['newMailSound']; set('newMailSound', v); if (v !== 'system' && v !== 'none') playNewMail(v) }}>
-            <option value="system">{t.g_soundSystem}</option>
-            {NEW_MAIL_SOUNDS.map((k) => <option key={k} value={k}>{t[`snd_${k}` as Key]}</option>)}
-            <option value="none">{t.g_soundNone}</option>
-          </select>
-          <button className="tool small" title={t.g_play} disabled={s.newMailSound === 'system' || s.newMailSound === 'none'} onClick={() => playNewMail(s.newMailSound as NewMailSound)}><Icon name="bell" size={15} /></button>
-        </div>
-      </div>
-      <Toggle label={t.g_actionSounds} hint={t.g_actionSoundsHint} on={s.actionSounds} set={(v) => set('actionSounds', v)} />
-      <div className="set-row"><span>{t.g_badge}</span>
-        <select value={s.dockBadge} onChange={(e) => set('dockBadge', e.target.value as Settings['dockBadge'])}>
-          <option value="inbox">{t.g_badgeInbox}</option><option value="all">{t.g_badgeAll}</option><option value="none">{t.g_badgeNone}</option>
-        </select>
-      </div>
-      <div className="set-row"><span>{t.g_notify}</span>
-        <select value={s.notifyFor} onChange={(e) => set('notifyFor', e.target.value as Settings['notifyFor'])}>
-          <option value="inbox">{t.g_notifyInbox}</option><option value="known">{t.g_notifyKnown}</option><option value="none">{t.g_notifyNone}</option>
-        </select>
-      </div>
-      {MAC && s.notifyFor !== 'none' && <Toggle label={t.g_notifyReply} hint={t.g_notifyReplyHint} on={s.notifyReply} set={(v) => set('notifyReply', v)} />}
-      <div className="set-row"><span>{t.g_downloads}</span>
-        <div className="row">
-          <span className="muted small ellipsis dl-name" title={s.downloadsFolder}>{s.downloadsFolder ? folderName : t.g_askEachTime}</span>
-          <button className="pill small" onClick={() => window.roarmail.pickFolder().then((p) => { if (p) set('downloadsFolder', p) })}>{t.g_choose}</button>
-          {s.downloadsFolder && <button className="pill small ghost" onClick={() => set('downloadsFolder', '')}>{t.g_askEachTime}</button>}
-        </div>
-      </div>
-      <Toggle label={t.g_retry} hint={t.g_retryHint} on={s.retrySending} set={(v) => set('retrySending', v)} />
-      <Toggle label={t.runAtLoginShort} hint={t.runAtLogin} on={s.runAtLogin} set={(v) => set('runAtLogin', v)} />
-      <div className="set-row"><span>{t.undoSend}</span>
-        <select value={s.undoSendSeconds} onChange={(e) => set('undoSendSeconds', Number(e.target.value))}>
-          {[0, 5, 10, 20, 30].map((n) => <option key={n} value={n}>{n ? `${n} ${t.seconds}` : t.off}</option>)}
-        </select>
-      </div>
-      <div className="set-row"><span>{t.swipeLeft}</span>
-        <select value={s.swipeLeft} onChange={(e) => set('swipeLeft', e.target.value as SwipeAction)}>
-          {swipes.map((w) => <option key={w} value={w}>{t[`sw_${w}` as Key]}</option>)}
-        </select>
-      </div>
-      <div className="set-row"><span>{t.swipeRight}</span>
-        <select value={s.swipeRight} onChange={(e) => set('swipeRight', e.target.value as SwipeAction)}>
-          {swipes.map((w) => <option key={w} value={w}>{t[`sw_${w}` as Key]}</option>)}
-        </select>
-      </div>
-    </div>
-  )
-}
-
 /** the updater's state, live (the desktop app only; the web has none) */
 function useUpdate() {
   const [u, setU] = useState<UpdateState | null>(null)
@@ -523,11 +620,10 @@ function useUpdate() {
   return u
 }
 
-/** Settings > Updates: this version, a Check now button, what the updater is doing, and updating by itself */
-function Updates({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
+/** System > Updates: this version, a Check now button, what the updater is doing, and updating by itself */
+function Updates({ s, set }: { s: Settings; set: Set }) {
   const u = useUpdate()
   const api = (window.roarmail as any).update
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { window.roarmail.setSetting(k, v); onChange({ ...s, [k]: v }) }
   const since = u?.checkedAt ? when(u.checkedAt) : ''
   const line = !u ? t.up_noUpdater
     : u.status === 'checking' ? t.up_checking
@@ -554,42 +650,31 @@ function Updates({ s, onChange }: { s: Settings; onChange: (s: Settings) => void
                 <Icon name="refresh" size={14} /> {t.up_check}</button>}
         </div>
       </div>
-      <Toggle label={t.up_auto} hint={t.up_autoHint} on={s.autoUpdate} set={(v) => set('autoUpdate', v)} />
-      <p className="muted small">{t.up_how}</p>
+      <Group note={t.up_how}>
+        <Toggle label={t.up_auto} hint={t.up_autoHint} on={s.autoUpdate} set={(v) => set('autoUpdate', v)} />
+      </Group>
     </div>
   )
 }
 
-/** Airmail's Advanced page: privacy mode, how search works, what is detected in messages, and the resets */
-function Advanced({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
+/** System > Advanced: the resets */
+function Advanced({ replace }: { replace: (s: Settings) => void }) {
   const [note, setNote] = useState('')
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { window.roarmail.setSetting(k, v); onChange({ ...s, [k]: v }) }
   const mb = (n: number) => (n > 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`)
   return (
     <div className="stack">
-      <Toggle label={t.ad_privacy} hint={t.ad_privacyHint} on={s.privacyMode} set={(v) => set('privacyMode', v)} />
-      <Toggle label={t.ad_detect} hint={t.ad_detectHint} on={s.detectLinks} set={(v) => set('detectLinks', v)} />
-
-      <h4 className="set-sub">{t.ad_search}</h4>
-      <Toggle label={t.ad_searchSpam} on={s.searchJunk} set={(v) => set('searchJunk', v)} />
-      <Toggle label={t.ad_searchTrash} on={s.searchTrash} set={(v) => set('searchTrash', v)} />
-      <Toggle label={t.ad_conversations} hint={t.ad_conversationsHint} on={s.searchConversations} set={(v) => set('searchConversations', v)} />
-      <Toggle label={t.ad_exact} hint={t.ad_exactHint} on={s.exactSearch} set={(v) => set('exactSearch', v)} />
-      <Toggle label={t.ad_online} hint={t.ad_onlineHint} on={s.onlineSearch} set={(v) => set('onlineSearch', v)} />
-      <p className="muted small">{t.ad_accentsNote}</p>
-
-      <h4 className="set-sub">{t.ad_reset}</h4>
-      <div className="set-row"><span>{t.ad_clearCache}<small className="muted block">{t.ad_clearCacheHint}</small></span>
-        <button className="pill small" onClick={async () => setNote(`${t.ad_freed} ${mb(await window.roarmail.clearCache())}`)}>{t.ad_clear}</button>
-      </div>
-      <div className="set-row"><span>{t.ad_resetSettings}<small className="muted block">{t.ad_resetHint}</small></span>
-        <button className="pill small ghost danger" onClick={async () => {
-          if (!confirm(t.ad_resetQ)) return
-          await window.roarmail.resetSettings()
-          const fresh = await window.roarmail.settings()
-          onChange(fresh); setNote(t.ad_resetDone)
-        }}>{t.ad_resetBtn}</button>
-      </div>
+      <Group title={t.ad_reset}>
+        <Line label={t.ad_clearCache} hint={t.ad_clearCacheHint}>
+          <button className="pill small" onClick={async () => setNote(`${t.ad_freed} ${mb(await window.roarmail.clearCache())}`)}>{t.ad_clear}</button>
+        </Line>
+        <Line label={t.ad_resetSettings} hint={t.ad_resetHint}>
+          <button className="pill small ghost danger" onClick={async () => {
+            if (!confirm(t.ad_resetQ)) return
+            await window.roarmail.resetSettings()
+            replace(await window.roarmail.settings()); setNote(t.ad_resetDone)
+          }}>{t.ad_resetBtn}</button>
+        </Line>
+      </Group>
       {note && <p className="small ok-text">{note}</p>}
     </div>
   )
@@ -601,10 +686,9 @@ const QUOTE_COLORS: [string, Key][] = [
 ]
 
 /** Apple Mail's "Fonts & Colours": the list, messages and fixed width; quoted text coloured by level */
-function Fonts({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
+function Fonts({ s, set }: { s: Settings; set: Set }) {
   const [local, setLocal] = useState<string[] | null>(null)
   const [noLocal, setNoLocal] = useState(false)
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { window.roarmail.setSetting(k, v); onChange({ ...s, [k]: v }) }
   // the fonts installed on this computer (Cera GR and the rest), asked for when the person wants them
   const loadLocal = async () => {
     try {
@@ -630,95 +714,80 @@ function Fonts({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }
   const levels: ['quote1' | 'quote2' | 'quote3', Key][] = [['quote1', 'f_level1'], ['quote2', 'f_level2'], ['quote3', 'f_level3']]
   return (
     <div className="stack">
-      <div className="set-row"><span>{t.f_list}</span>
-        <div className="row">{picker('listFont')}
-          <select value={s.listSize} onChange={(e) => set('listSize', Number(e.target.value))}>
-            {[12, 13, 14, 15, 16, 18].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </div>
-      </div>
-      <div className="set-row"><span>{t.f_message}</span>
-        <div className="row">{picker('messageFont')}
-          <select value={s.textSize} onChange={(e) => set('textSize', Number(e.target.value))}>
-            {TEXT_SIZES.map((n, i) => <option key={n} value={i}>{n}</option>)}
-          </select>
-        </div>
-      </div>
-      <div className="set-row"><span>{t.f_mono}</span>{picker('monoFont')}</div>
-      {!local && (
-        <div className="set-row"><span className="muted small">{noLocal ? t.f_noComputer : t.f_computerHint}</span>
-          {!noLocal && <button className="pill small" onClick={loadLocal}>{t.f_showComputer}</button>}
-        </div>
-      )}
-      <Toggle label={t.f_plainMono} on={s.plainMono} set={(v) => set('plainMono', v)} />
-      <Toggle label={t.f_quoteColors} on={s.quoteColors} set={(v) => set('quoteColors', v)} />
-      {s.quoteColors && (
-        <div className="quote-set">
-          <div className="quote-levels">
-            {levels.map(([k, label]) => (
-              <div className="row" key={k}>
-                <span className="muted small label-w">{t[label]}</span>
-                {QUOTE_COLORS.map(([hex, name]) => (
-                  <button key={hex} className={`swatch ${s[k] === hex ? 'on' : ''}`} title={t[name]} style={{ background: hex }} onClick={() => set(k, hex)} />
-                ))}
-              </div>
-            ))}
-          </div>
-          <div className="quote-preview" style={{ fontFamily: fontStack(s.messageFont) }}>
-            <div style={{ borderColor: s.quote1, color: s.quote1 }}>{t.f_level1}
-              <div style={{ borderColor: s.quote2, color: s.quote2 }}>{t.f_level2}
-                <div style={{ borderColor: s.quote3, color: s.quote3 }}>{t.f_level3}</div>
+      <Group title={t.sec_fonts} note={local ? undefined : noLocal ? t.f_noComputer : undefined}>
+        <Line label={t.f_list}>
+          {picker('listFont')}
+          <Choice value={s.listSize} onChange={(v) => set('listSize', v)} options={[12, 13, 14, 15, 16, 18].map((n) => [n, String(n)])} />
+        </Line>
+        <Line label={t.f_message}>
+          {picker('messageFont')}
+          <Choice value={s.textSize} onChange={(v) => set('textSize', v)} options={TEXT_SIZES.map((n, i) => [i, String(n)])} />
+        </Line>
+        <Line label={t.f_mono}>{picker('monoFont')}</Line>
+        {!local && !noLocal && <Line label={<span className="muted">{t.f_computerHint}</span>}><button className="pill small" onClick={loadLocal}>{t.f_showComputer}</button></Line>}
+        <Toggle label={t.f_plainMono} on={s.plainMono} set={(v) => set('plainMono', v)} />
+      </Group>
+      <Group title={t.sec_quotes}>
+        <Toggle label={t.f_quoteColors} on={s.quoteColors} set={(v) => set('quoteColors', v)} />
+        {s.quoteColors && (
+          <div className="quote-set">
+            <div className="quote-levels">
+              {levels.map(([k, label]) => (
+                <div className="row" key={k}>
+                  <span className="muted small label-w">{t[label]}</span>
+                  {QUOTE_COLORS.map(([hex, name]) => (
+                    <button key={hex} className={`swatch ${s[k] === hex ? 'on' : ''}`} title={t[name]} style={{ background: hex }} onClick={() => set(k, hex)} />
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div className="quote-preview" style={{ fontFamily: fontStack(s.messageFont) }}>
+              <div style={{ borderColor: s.quote1, color: s.quote1 }}>{t.f_level1}
+                <div style={{ borderColor: s.quote2, color: s.quote2 }}>{t.f_level2}
+                  <div style={{ borderColor: s.quote3, color: s.quote3 }}>{t.f_level3}</div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Group>
     </div>
   )
 }
 
-function Privacy() {
-  const [s, setS] = useState<Settings | null>(null)
+/** Privacy: privacy mode first, then the single switches, the lock and blocked senders */
+function Privacy({ s, set }: { s: Settings; set: Set }) {
   const [lock, setLock] = useState<LockState | null>(null)
   const [blocked, setBlocked] = useState<string[]>([])
   useEffect(() => {
-    window.roarmail.settings().then(setS)
     window.roarmail.lockState().then(setLock)
     window.roarmail.blockedSenders().then(setBlocked)
   }, [])
-  if (!s || !lock) return null
-  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { setS({ ...s, [k]: v }); window.roarmail.setSetting(k, v) }
   return (
     <div className="stack">
-      <Toggle label={t.blockTrackersShort} hint={t.blockTrackers} on={s.blockTrackers} set={(v) => set('blockTrackers', v)} />
-      <Toggle label={t.stripTrackingShort} hint={t.stripTracking} on={s.stripTracking} set={(v) => set('stripTracking', v)} />
-
-      <div className="panel">
-        <label className="check"><input type="checkbox" disabled={!lock.available} checked={s.lock && lock.available} onChange={(e) => set('lock', e.target.checked)} />
-          <Icon name="lock" size={15} /> {t.appLock}</label>
-        {!lock.available && <p className="muted small">{t.lockUnavailable}</p>}
-        {lock.available && s.lock && (
-          <div className="row">
-            <label className="grow">{t.lockAfter}
-              <select value={s.lockAfter} onChange={(e) => set('lockAfter', Number(e.target.value))}>
-                {[0, 1, 5, 15, 60].map((n) => <option key={n} value={n}>{n ? `${n} ${t.minutes}` : t.onlySleep}</option>)}
-              </select>
-            </label>
+      <Group>
+        <Toggle label={t.ad_privacy} hint={t.ad_privacyHint} on={s.privacyMode} set={(v) => set('privacyMode', v)} />
+      </Group>
+      <Group title={t.sec_trackers}>
+        <Toggle label={t.blockTrackersShort} hint={t.blockTrackers} on={s.blockTrackers || s.privacyMode} disabled={s.privacyMode} set={(v) => set('blockTrackers', v)} />
+        <Toggle label={t.stripTrackingShort} hint={t.stripTracking} on={s.stripTracking || s.privacyMode} disabled={s.privacyMode} set={(v) => set('stripTracking', v)} />
+      </Group>
+      <Group title={t.sec_lock} note={lock && !lock.available ? t.lockUnavailable : undefined}>
+        <Toggle label={t.appLock} disabled={!lock?.available} on={!!(s.lock && lock?.available)} set={(v) => set('lock', v)} />
+        {lock?.available && s.lock && (
+          <Line label={t.lockAfter}>
+            <Choice value={s.lockAfter} onChange={(v) => set('lockAfter', v)} options={[0, 1, 5, 15, 60].map((n) => [n, n ? `${n} ${t.minutes}` : t.onlySleep])} />
             <button className="pill small" onClick={() => window.roarmail.lockNow()}>{t.lockNow}</button>
-          </div>
+          </Line>
         )}
-      </div>
-
-      <div className="panel">
-        <b>{t.blockedSenders}</b>
-        {!blocked.length && <p className="muted small">{t.noneBlocked}</p>}
+      </Group>
+      <Group title={t.blockedSenders} note={!blocked.length ? t.noneBlocked : undefined}>
         {blocked.map((e) => (
-          <div className="row blocked-row" key={e}>
-            <span className="grow ellipsis">{e}</span>
+          <Line key={e} label={<span className="ellipsis">{e}</span>}>
             <button className="pill small ghost" onClick={async () => { await window.roarmail.blockSender(e, false); setBlocked(blocked.filter((x) => x !== e)) }}>{t.unblock}</button>
-          </div>
+          </Line>
         ))}
-      </div>
+      </Group>
     </div>
   )
 }

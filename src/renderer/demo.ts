@@ -179,6 +179,15 @@ export function createDemo(): MailApi & { update: any } {
     searchOnline: async (q, a) => api.search(q, a),
     pickAvatar: async () => false,
     emojiPanel: async () => {},
+    folderMenu: async () => null,
+    createFolder: async (accountId, parentId, name) => { const p = folders.find((f) => f.id === parentId); folders.push({ id: uid(), accountId, path: p ? `${p.path}/${name}` : name, name, role: null, unread: 0, total: 0, depth: p ? p.depth + 1 : 0 }); emit({ type: 'folders', accountId }) },
+    renameFolder: async (id, name) => { const f = folders.find((x) => x.id === id); if (f) { f.name = name; emit({ type: 'folders', accountId: f.accountId }) } },
+    deleteFolder: async (id) => { const i = folders.findIndex((x) => x.id === id); if (i >= 0) { const a = folders[i].accountId; folders.splice(i, 1); emit({ type: 'folders', accountId: a }) } },
+    setFolderColor: async (id, color) => { const f = folders.find((x) => x.id === id); if (f) { f.color = color; emit({ type: 'folders', accountId: f.accountId }) } },
+    hideFolder: async () => {},
+    hiddenFolders: async () => [],
+    markFolderRead: async (id) => { for (const m of msgs) if (m.folderId === id) m.seen = true; recount(); const f = folders.find((x) => x.id === id); if (f) changed(f.accountId) },
+    syncFolderAll: async () => 0,
     // the demo shows company icons straight from Google's icon service (the app keeps them on the computer)
     senderIcons: async (emails) => Object.fromEntries(emails.map((e) => { const d = e.split('@')[1] || ''; return [e, /gmail|outlook|icloud|yahoo/.test(d) || !d ? null : `https://www.google.com/s2/favicons?domain=${d}&sz=128`] })),
     unifiedFolders: async () => {

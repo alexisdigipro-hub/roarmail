@@ -67,7 +67,12 @@ export interface Folder {
   unread: number
   total: number
   depth: number
+  /** the colour chosen in its right-click menu; none = grey */
+  color?: string | null
 }
+
+/** what a folder's right-click menu asks for (the window then asks for a name, a colour or a yes) */
+export type FolderMenuChoice = 'new' | 'sub' | 'rename' | 'custom' | 'hide' | 'read' | 'sync' | 'delete' | 'nocolor' | `c:${string}`
 
 export interface Address { name?: string; address: string }
 
@@ -334,6 +339,17 @@ export interface MailApi {
   senderIcons(emails: string[]): Promise<Record<string, string | null>>
   /** the system's emoji picker, typing into the focused field (Mac and Windows) */
   emojiPanel(): Promise<void>
+  /** a folder's right-click menu (the Mac's own); resolves with what was picked, or null */
+  folderMenu(folderId: string, labels: Record<string, string>): Promise<FolderMenuChoice | null>
+  createFolder(accountId: string, parentId: string | null, name: string): Promise<void>
+  renameFolder(folderId: string, name: string): Promise<void>
+  deleteFolder(folderId: string): Promise<void>
+  setFolderColor(folderId: string, color: string | null): Promise<void>
+  hideFolder(folderId: string, hidden: boolean): Promise<void>
+  hiddenFolders(accountId: string): Promise<Folder[]>
+  markFolderRead(folderId: string): Promise<void>
+  /** every message of the folder, not only the recent ones the first sync takes */
+  syncFolderAll(folderId: string): Promise<number>
   /** the unified folders (All Inboxes, All Sent, All Trash…): every switched-on account's folder of that role together */
   unifiedFolders(): Promise<Folder[]>
   /** RoarMail as the computer's mail app (mailto: links) */

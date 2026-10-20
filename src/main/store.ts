@@ -10,10 +10,11 @@ import schema004 from './schema004.sql'
 import schema005 from './schema005.sql'
 import schema006 from './schema006.sql'
 import schema007 from './schema007.sql'
+import schema008 from './schema008.sql'
 
 export type DB = Database.Database
 
-const MIGRATIONS: string[] = [schema001, schema002, schema003, schema004, schema005, schema006, schema007]
+const MIGRATIONS: string[] = [schema001, schema002, schema003, schema004, schema005, schema006, schema007, schema008]
 
 export function openStore(): DB {
   const db = new Database(path.join(app.getPath('userData'), 'roarmail.db'))
