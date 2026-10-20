@@ -8,6 +8,7 @@ import { checkLink, isTracker, stripTracking, type LinkWarning } from '../privac
 import { FONTS, TEXT_SIZES, fontStack } from '../look'
 import { fullDate, size, t, when, type Key } from '../i18n'
 import { Icon } from './Icon'
+import { useSenderIcons } from '../senders'
 
 export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
@@ -103,6 +104,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
   const [images, setImages] = useState(false)
   const [blocked, setBlocked] = useState(false)
   const [note, setNote] = useState('')
+  const senderPic = useSenderIcons(m ? [m.fromEmail] : [], prefs.senderPictures)
 
   useEffect(() => {
     let live = true
@@ -125,7 +127,8 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
   return (
     <article className={`card ${isLast ? 'last' : ''}`}>
       <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }}>
-        <div className="avatar" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
+        {(() => { const pic = accounts.find((a) => a.email.toLowerCase() === m.fromEmail)?.avatar || senderPic(m.fromEmail); return (
+          <div className={`avatar ${pic ? 'pic' : ''}`} style={{ background: pic ? '#fff' : tint(m.fromEmail) }}>{pic ? <img src={pic} alt="" /> : initials(m.fromName || m.fromEmail)}</div>) })()}
         <div className="who">
           <div><b>{m.fromName || m.fromEmail}</b> {m.fromName && <span className="muted">&lt;{m.fromEmail}&gt;</span>}</div>
           <div className="muted small">{t.to}: {people(m.to)}{m.cc.length ? ` · ${t.cc}: ${people(m.cc)}` : ''}</div>

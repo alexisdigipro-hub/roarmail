@@ -1,6 +1,6 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
 import { Icon, folderIcon } from './components/Icon'
@@ -14,6 +14,7 @@ import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
 import { short } from './when'
 import { Splitter, useWidths } from './components/Splitter'
 import { actionSound, playNewMail, setActionSounds } from './sounds'
+import { useSenderIcons } from './senders'
 
 const api = window.roarmail
 const keyOf = (r: MessageRow) => r.threadId || r.id
@@ -128,6 +129,8 @@ export default function App() {
   }, [query, scope.accountId, prefs.onlineSearch])
 
   const list = results ?? rows
+  const senderPic = useSenderIcons(list.slice(0, 150).map((r) => r.fromEmail), prefs.senderPictures && prefs.listAvatars)
+  const [editUnified, setEditUnified] = useState(false)
   const chosen = list.filter((r) => selected.includes(keyOf(r)))
   const current = chosen.length === 1 ? chosen[0] : null
   const index = current ? list.indexOf(current) : -1
@@ -199,6 +202,39 @@ export default function App() {
       const [lo, hi] = a < b ? [a, b] : [b, a]
       setSelected(list.slice(lo, hi + 1).map(keyOf))
     } else openRow(r)
+  }
+
+  // drag mail onto a folder (Alex, 21 Oct 2026): the selection if the row is in it, else that row
+  const dragging = useRef<MessageRow[] | null>(null)
+  const [dropOn, setDropOn] = useState('')
+  const startDrag = (r: MessageRow, e: DragEvent) => {
+    const targets = selected.includes(keyOf(r)) ? chosen : [r]
+    dragging.current = targets
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', targets.map((x) => x.subject).join('\n'))
+    const ghost = document.createElement('div')
+    ghost.className = 'drag-ghost'
+    ghost.textContent = targets.length > 1 ? `${targets.length} ${t.messages}` : (r.subject || t.noSubject)
+    document.body.appendChild(ghost)
+    e.dataTransfer.setDragImage(ghost, 14, 14)
+    setTimeout(() => ghost.remove(), 0)
+  }
+  /** what a folder does with dropped mail: archive / trash by role, else a move into that very folder */
+  const dropTo = (f: Folder) => {
+    const run = () => {
+      const targets = dragging.current
+      dragging.current = null; setDropOn('')
+      if (!targets?.length) return
+      if (f.role === 'archive') act(targets, 'archive')
+      else if (f.role === 'trash') act(targets, 'trash')
+      else if (f.accountId !== 'all') act(targets.filter((x) => x.accountId === f.accountId), 'move', f.id)
+    }
+    const ok = f.role === 'archive' || f.role === 'trash' || (f.accountId !== 'all' && f.id !== scope.folderId && !(f.role === 'inbox' && !scope.folderId))
+    return ok ? {
+      onDragOver: (e: DragEvent) => { if (dragging.current) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dropOn !== f.id) setDropOn(f.id) } },
+      onDragLeave: () => setDropOn((d) => (d === f.id ? '' : d)),
+      onDrop: (e: DragEvent) => { e.preventDefault(); run() },
+    } : {}
   }
 
   const openMove = useCallback((targets: MessageRow[]) => {
@@ -324,14 +360,28 @@ export default function App() {
       {scope.accountId === 'all' && (
         <aside className="folders">
           <div className="drag" />
-          <div className="acct-name">
-            <b className="plain-case">{t.allAccounts}</b>
-            <span className="muted small">{accounts.length} {t.accounts.toLowerCase()}</span>
+          <div className="acct-name row-name">
+            <span className="grow name-col"><b className="plain-case">{t.allAccounts}</b>
+              <small className="muted block">{accounts.length} {t.accounts.toLowerCase()}</small></span>
+            <button className={`link small ${editUnified ? 'on' : ''}`} onClick={() => setEditUnified((v) => !v)}>{editUnified ? t.done : t.edit}</button>
           </div>
           <div className="folder-list list-lens lens" ref={folderLens}>
-          {folders.map((f) => (
-            <button key={f.id} className={`folder ${scope.role === f.role ? 'on' : ''}`} style={{ paddingLeft: 14 }}
-              onClick={() => setScope({ accountId: 'all', role: f.role! })}>
+          {folders.filter((f) => editUnified || f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)).map((f) => editUnified ? (
+            <label key={f.id} className={`folder pick ${f.role === 'inbox' ? 'fixed' : ''}`}>
+              <input type="checkbox" disabled={f.role === 'inbox'} checked={f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)}
+                onChange={(e) => {
+                  const now = new Set(prefs.unifiedShown.split(',').filter(Boolean))
+                  if (e.target.checked) now.add(f.role!); else now.delete(f.role!)
+                  const v = [...now].join(',')
+                  api.setSetting('unifiedShown', v); setPrefs((p) => ({ ...p, unifiedShown: v }))
+                  if (!e.target.checked && scope.role === f.role) setScope({ accountId: 'all', role: 'inbox' })
+                }} />
+              <Icon name={folderIcon(f.role)} size={16} />
+              <span className="grow ellipsis">{t[`all_${f.role}` as Key] || t[f.role as Key]}</span>
+            </label>
+          ) : (
+            <button key={f.id} className={`folder ${scope.role === f.role ? 'on' : ''} ${dropOn === f.id ? 'drop' : ''}`} style={{ paddingLeft: 14 }}
+              onClick={() => setScope({ accountId: 'all', role: f.role! })} {...dropTo(f)}>
               <Icon name={folderIcon(f.role)} size={16} />
               <span className="grow ellipsis">{t[`all_${f.role}` as Key] || t[f.role as Key]}</span>
               {counter(f) > 0 && <span className={`count ${(f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter) === 'total' ? 'total' : ''}`}>{counter(f)}</span>}
@@ -351,8 +401,8 @@ export default function App() {
           {folders.map((f) => {
             const on = scope.folderId ? scope.folderId === f.id : f.role === 'inbox'
             return (
-              <button key={f.id} className={`folder ${on ? 'on' : ''}`} style={{ paddingLeft: 14 + Math.min(f.depth, 4) * 14 }}
-                onClick={() => setScope(f.role === 'inbox' ? { accountId: f.accountId, role: 'inbox' } : { accountId: f.accountId, folderId: f.id })}>
+              <button key={f.id} className={`folder ${on ? 'on' : ''} ${dropOn === f.id ? 'drop' : ''}`} style={{ paddingLeft: 14 + Math.min(f.depth, 4) * 14 }}
+                onClick={() => setScope(f.role === 'inbox' ? { accountId: f.accountId, role: 'inbox' } : { accountId: f.accountId, folderId: f.id })} {...dropTo(f)}>
                 <Icon name={folderIcon(f.role)} size={16} />
                 <span className="grow ellipsis">{f.role ? t[f.role as Key] : f.name}</span>
                 {counter(f) > 0 && <span className={`count ${(f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter) === 'total' ? 'total' : ''}`}>{counter(f)}</span>}
@@ -447,8 +497,11 @@ export default function App() {
         </div>
         <div className="rows">
           {list.map((r) => (
-            <Row key={keyOf(r)} r={r} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
-              prefs={prefs} onClick={(e) => click(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
+            <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
+              prefs={prefs} onClick={(e) => click(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
+              onPick={() => { const k = keyOf(r); setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k) }}
+              onDrag={(e) => startDrag(r, e)} onDragEnd={() => { dragging.current = null; setDropOn('') }}
+              onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
           ))}
           {!list.length && (
             <div className="list-empty">
@@ -456,12 +509,14 @@ export default function App() {
             </div>
           )}
         </div>
-        <div className="list-foot muted small" title={t.shortcuts}>
-          {accounts.filter((a) => a.state !== 'online').map((a) => (
-            <span key={a.id} className={`state ${a.state}`}>{a.email}: {t[a.state as Key] || a.state}</span>
-          ))}
-          {accounts.every((a) => a.state === 'online') && <span className="ellipsis">{t.shortcuts}</span>}
-        </div>
+        {/* only when an account has trouble (the shortcuts line is gone: Alex, 21 Oct 2026; they are in Settings > Shortcuts) */}
+        {accounts.some((a) => a.state === 'offline' || a.state === 'error') && (
+          <div className="list-foot muted small">
+            {accounts.filter((a) => a.state === 'offline' || a.state === 'error').map((a) => (
+              <span key={a.id} className={`state ${a.state}`}>{a.email}: {t[a.state as Key] || a.state}</span>
+            ))}
+          </div>
+        )}
       </section>
       <Splitter col="list" width={widths.list} onChange={setWidth} title={t.resizeCol} />
 
@@ -513,11 +568,14 @@ export default function App() {
 }
 
 /** one conversation in the list: hover buttons, and a two-finger swipe on the trackpad */
-function Row({ r, on, acc, prefs, onClick, onAct, onSnooze, onSwipe }: {
-  r: MessageRow; on: boolean; acc?: Account; prefs: Settings
-  onClick: (e: MouseEvent) => void; onAct: (a: Action) => void; onSnooze: () => void; onSwipe: (side: 'left' | 'right') => void
+function Row({ r, pic, on, multi, acc, prefs, onClick, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
+  r: MessageRow; pic: string | null; on: boolean; multi: boolean; acc?: Account; prefs: Settings
+  onClick: (e: MouseEvent) => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
+  onDrag: (e: DragEvent) => void; onDragEnd: () => void; onSwipe: (side: 'left' | 'right') => void
 }) {
   const [dx, setDx] = useState(0)
+  // a picture that does not load falls back to the initials
+  const [badPic, setBadPic] = useState(false)
   const sum = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const LIMIT = 90
@@ -539,14 +597,21 @@ function Row({ r, on, acc, prefs, onClick, onAct, onSnooze, onSwipe }: {
   const armed = Math.abs(dx) >= LIMIT && side !== 'none'
 
   return (
-    <div className={`swipe ${dx ? 'moving' : ''}`} onWheel={onWheel}>
+    <div className={`swipe ${dx ? 'moving' : ''}`} onWheel={onWheel} draggable onDragStart={onDrag} onDragEnd={onDragEnd}>
       {dx !== 0 && (
         <div className={`swipe-under ${side} ${armed ? 'armed' : ''} ${dx < 0 ? 'left' : 'right'}`}>
           <Icon name={side === 'archive' ? 'archive' : side === 'trash' ? 'trash' : side === 'flag' ? 'star' : 'dot'} size={18} />
         </div>
       )}
       <div className={`msg ${on ? 'on' : ''} ${r.seen ? '' : 'unread'}`} style={dx ? { transform: `translateX(${dx}px)` } : undefined} onClick={onClick}>
-        <div className="avatar" style={{ background: tint(r.fromEmail) }}>{initials(r.fromName || r.fromEmail)}</div>
+        {/* the picture is also the row's checkbox: a click there adds it to the selection (or takes it out) */}
+        <div className={`pick-wrap ${on && multi ? 'picked' : ''} ${prefs.listAvatars ? '' : 'bare'}`} title={t.pickRow}
+          onClick={(e) => { e.stopPropagation(); onPick() }}>
+          {prefs.listAvatars && (pic && !badPic
+            ? <div className="avatar pic" style={{ background: '#fff' }}><img src={pic} alt="" onError={() => setBadPic(true)} /></div>
+            : <div className="avatar" style={{ background: tint(r.fromEmail) }}>{initials(r.fromName || r.fromEmail)}</div>)}
+          <span className="pick-mark"><Icon name="check" size={14} /></span>
+        </div>
         <div className="msg-body">
           <div className="row">
             {!r.seen && <i className="dot" />}
@@ -557,13 +622,14 @@ function Row({ r, on, acc, prefs, onClick, onAct, onSnooze, onSwipe }: {
             <span className="muted small">{when(r.date)}</span>
           </div>
           <div className="ellipsis subj">{r.subject || t.noSubject}</div>
-          <div className="snip muted">{r.snippet}</div>
+          {prefs.previewLines > 0 && <div className="snip muted" style={{ WebkitLineClamp: prefs.previewLines }}>{r.snippet}</div>}
         </div>
         {acc && <i className="acc-bar" style={{ background: acc.color }} />}
         <div className="quick" onClick={(e) => e.stopPropagation()}>
           <button title={r.seen ? t.markUnread : t.markRead} onClick={() => onAct(r.seen ? 'unseen' : 'seen')}><Icon name="dot" size={15} filled={!r.seen} /></button>
           <button title={r.flagged ? t.unflag : t.flag} onClick={() => onAct(r.flagged ? 'unflag' : 'flag')}><Icon name="star" size={15} filled={r.flagged} /></button>
           <button title={t.snoozeIt} onClick={() => onSnooze()}><Icon name="clock" size={15} /></button>
+          <button title={t.moveTo} onClick={() => onMove()}><Icon name="folder" size={15} /></button>
           <button title={t.archiveIt} onClick={() => onAct('archive')}><Icon name="archive" size={15} /></button>
           <button title={t.trashIt} onClick={() => onAct('trash')}><Icon name="trash" size={15} /></button>
         </div>

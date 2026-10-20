@@ -256,6 +256,14 @@ export interface Settings {
   onlineSearch: boolean
   /** links, email addresses and phone numbers in plain text become clickable */
   detectLinks: boolean
+  /** Appearance > List: pictures of senders from the web (Gravatar, company icons); off in privacy mode */
+  senderPictures: boolean
+  /** Appearance > List: lines of the message shown under the subject (0 = name and subject only) */
+  previewLines: number
+  /** Appearance > List: the round picture or initials at the start of each row */
+  listAvatars: boolean
+  /** the unified folders shown under All accounts (roles, comma separated; the inbox always shows) */
+  unifiedShown: string
   /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
   autoUpdate: boolean
 }
@@ -322,6 +330,8 @@ export interface MailApi {
   serverFolders(accountId: string): Promise<{ path: string; name: string }[]>
   /** asks for an image, makes it a round-ready square and keeps it as the account's picture; false = cancelled */
   pickAvatar(accountId: string): Promise<boolean>
+  /** pictures for these senders (Gravatar for people, the company's icon for its domain), kept on this computer; null = none */
+  senderIcons(emails: string[]): Promise<Record<string, string | null>>
   /** the system's emoji picker, typing into the focused field (Mac and Windows) */
   emojiPanel(): Promise<void>
   /** the unified folders (All Inboxes, All Sent, All Trash…): every switched-on account's folder of that role together */

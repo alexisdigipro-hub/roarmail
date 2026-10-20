@@ -144,6 +144,11 @@ const el = {
   fl_personHint: 'Διάλεξε ένα μήνυμα: δείχνει όλη την αλληλογραφία με τον αποστολέα του', fl_none: 'Καμία', fl_apply: 'Εφαρμογή',
   so_date: 'Ημερομηνία', so_sender: 'Αποστολέας', so_subject: 'Θέμα', so_unread: 'Αδιάβαστα πρώτα', so_attachments: 'Με συνημμένα πρώτα', so_account: 'Λογαριασμός',
   so_desc: 'Φθίνουσα', so_asc: 'Αύξουσα',
+  ap_list: 'Λίστα μηνυμάτων', ap_preview: 'Κείμενο κάτω από το θέμα', ap_previewNone: 'Κανένα (όνομα και θέμα)', ap_preview1: '1 γραμμή', ap_preview2: '2 γραμμές', ap_preview3: '3 γραμμές',
+  ap_avatars: 'Εικόνες στη λίστα', ap_avatarsHint: 'Η εικόνα ή τα αρχικά του αποστολέα στην αρχή κάθε μηνύματος.',
+  ap_senderPics: 'Εικόνες αποστολέων από το web', ap_senderPicsHint: 'Το Gravatar των ανθρώπων και το εικονίδιο των εταιρειών, όπως στα άλλα mail apps. Έρχονται από το Gravatar και την υπηρεσία εικονιδίων της Google, όχι από τον αποστολέα.',
+  ap_senderPicsOff: 'Κλειστό όσο είναι ανοιχτή η λειτουργία απορρήτου.',
+  pickRow: 'Επιλογή (κλικ στην εικόνα) · ⌘ κλικ για πολλά · Shift κλικ για σειρά',
 }
 const en: typeof el = {
   snoozed: 'Snoozed', snoozeIt: 'Snooze', snoozeUntil: 'Snooze until…', snoozedToast: 'Snoozed until', setAside: 'Set aside',
@@ -290,6 +295,11 @@ const en: typeof el = {
   fl_personHint: 'Pick a message: shows all mail with its sender', fl_none: 'None', fl_apply: 'Apply',
   so_date: 'Date', so_sender: 'Sender', so_subject: 'Subject', so_unread: 'Unread first', so_attachments: 'With attachments first', so_account: 'Account',
   so_desc: 'Descending', so_asc: 'Ascending',
+  ap_list: 'Message list', ap_preview: 'Text under the subject', ap_previewNone: 'None (name and subject)', ap_preview1: '1 line', ap_preview2: '2 lines', ap_preview3: '3 lines',
+  ap_avatars: 'Pictures in the list', ap_avatarsHint: 'The sender\'s picture or initials at the start of each message.',
+  ap_senderPics: 'Sender pictures from the web', ap_senderPicsHint: 'People\'s Gravatar and companies\' icons, as other mail apps show them. They come from Gravatar and Google\'s icon service, not from the sender.',
+  ap_senderPicsOff: 'Off while privacy mode is on.',
+  pickRow: 'Select (click the picture) · ⌘ click for several · Shift click for a range',
 }
 
 // Settings > General > Language: the choice is kept here too, so it applies before the settings arrive

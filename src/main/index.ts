@@ -262,6 +262,7 @@ app.whenReady().then(() => {
   handle('mail:removeAlias', (_e, id) => mail.removeAlias(id))
   handle('mail:serverFolders', (_e, id) => mail.serverFolders(id))
   handle('mail:unifiedFolders', () => mail.unifiedFolders())
+  handle('mail:senderIcons', (_e, emails: string[]) => mail.senderIcons(Array.isArray(emails) ? emails : []))
   handle('mail:emojiPanel', () => { if (app.isEmojiPanelSupported()) app.showEmojiPanel() })
   // Settings > Accounts > Picture: any image, cut to the middle square and made small (160 px) before it is kept
   handle('mail:pickAvatar', async (_e, id: string) => {

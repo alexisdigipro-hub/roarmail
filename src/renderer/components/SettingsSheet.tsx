@@ -135,6 +135,14 @@ function Appearance({ s, onChange }: { s: Settings; onChange: (s: Settings) => v
       <div className="set-row"><span>{t.textSize} <b className="muted">{TEXT_SIZES[s.textSize]}px</b></span>
         <input type="range" min={0} max={4} step={1} value={s.textSize} onChange={(e) => set('textSize', Number(e.target.value))} />
       </div>
+      <h4 className="set-sub">{t.ap_list}</h4>
+      <div className="set-row"><span>{t.ap_preview}</span>
+        <select value={s.previewLines} onChange={(e) => set('previewLines', Number(e.target.value))}>
+          <option value={0}>{t.ap_previewNone}</option><option value={1}>{t.ap_preview1}</option><option value={2}>{t.ap_preview2}</option><option value={3}>{t.ap_preview3}</option>
+        </select>
+      </div>
+      <Toggle label={t.ap_avatars} hint={t.ap_avatarsHint} on={s.listAvatars} set={(v) => set('listAvatars', v)} />
+      <Toggle label={t.ap_senderPics} hint={s.privacyMode ? t.ap_senderPicsOff : t.ap_senderPicsHint} on={s.senderPictures && !s.privacyMode} disabled={s.privacyMode} set={(v) => set('senderPictures', v)} />
       <h4 className="set-sub">{t.ap_lists}</h4>
       <Toggle label={t.ap_accColours} hint={t.ap_accColoursHint} on={s.accountColours} set={(v) => set('accountColours', v)} />
       <Toggle label={t.ap_accBadges} hint={t.ap_accBadgesHint} on={s.accountBadges} set={(v) => set('accountBadges', v)} />

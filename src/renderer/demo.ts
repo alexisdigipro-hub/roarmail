@@ -179,6 +179,8 @@ export function createDemo(): MailApi & { update: any } {
     searchOnline: async (q, a) => api.search(q, a),
     pickAvatar: async () => false,
     emojiPanel: async () => {},
+    // the demo shows company icons straight from Google's icon service (the app keeps them on the computer)
+    senderIcons: async (emails) => Object.fromEntries(emails.map((e) => { const d = e.split('@')[1] || ''; return [e, /gmail|outlook|icloud|yahoo/.test(d) || !d ? null : `https://www.google.com/s2/favicons?domain=${d}&sz=128`] })),
     unifiedFolders: async () => {
       recount()
       const order: FolderRole[] = ['inbox', 'snoozed', 'drafts', 'sent', 'archive', 'trash']

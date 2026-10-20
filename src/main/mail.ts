@@ -10,6 +10,7 @@ import nodemailer from 'nodemailer'
 import MailComposer from 'nodemailer/lib/mail-composer'
 import { simpleParser, type ParsedMail } from 'mailparser'
 import tls from 'tls'
+import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { app, net, shell } from 'electron'
@@ -20,6 +21,39 @@ import type {
   Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   Security, ServerConfig, Settings, Signature, SnoozedItem,
 } from '../shared/api'
+
+// senders at these are people, not companies: their picture is their Gravatar
+const PERSONAL = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'yahoo.com', 'yahoo.gr', 'ymail.com',
+  'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net', 'zoho.com', 'yandex.com', 'otenet.gr', 'hol.gr', 'windowslive.com'])
+/** mail.news.example.co.uk -> example.co.uk */
+function baseDomain(host: string) {
+  const p = host.split('.').filter(Boolean)
+  if (p.length <= 2) return p.join('.')
+  const second = ['co', 'com', 'org', 'net', 'gov', 'ac', 'edu', 'gr'].includes(p[p.length - 2]) && p[p.length - 1].length === 2
+  return p.slice(second ? -3 : -2).join('.')
+}
+function iconKey(email: string): string | null {
+  const m = email.match(/^[^@\s]+@([a-z0-9.-]+\.[a-z]{2,})$/)
+  if (!m) return null
+  return PERSONAL.has(m[1]) ? `g:${email}` : `d:${baseDomain(m[1])}`
+}
+async function fetchIcon(key: string): Promise<string | null> {
+  // a person: their Gravatar. A company: Google's icon service at 128 px (sharp in the list), else DuckDuckGo's;
+  // both answer 404 when they have none, and neither is the sender, so nobody learns that a mail was looked at
+  const urls = key.startsWith('g:')
+    ? [`https://www.gravatar.com/avatar/${createHash('md5').update(key.slice(2)).digest('hex')}?s=96&d=404`]
+    : [`https://www.google.com/s2/favicons?domain=${encodeURIComponent(key.slice(2))}&sz=128`, `https://icons.duckduckgo.com/ip3/${encodeURIComponent(key.slice(2))}.ico`]
+  for (const url of urls) {
+    const r = await net.fetch(url, { headers: { 'User-Agent': 'RoarMail' } }).catch(() => null)
+    if (!r || !r.ok) continue
+    const type = (r.headers.get('content-type') || '').split(';')[0].trim()
+    if (!/^image\//.test(type)) continue
+    const buf = Buffer.from(await r.arrayBuffer())
+    if (buf.length < 120 || buf.length > 300e3) continue
+    return `data:${type};base64,${buf.toString('base64')}`
+  }
+  return null
+}
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
 const FIRST_SYNC_LIMIT = 300
@@ -40,7 +74,8 @@ const SETTINGS: Settings = {
   language: 'auto', unifiedInbox: true, linksInBackground: false, dockMode: 'both', notifyReply: true, markRead: 'open',
   accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
-  autoUpdate: true,
+  autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true,
+  unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash',
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 /** only accounts that are switched on show anywhere */
@@ -309,6 +344,37 @@ export class MailService {
   setAvatar(id: string, dataUrl: string) {
     this.db.prepare('update accounts set avatar = ?, updated_at = ? where id = ?').run(dataUrl, now(), id)
     this.emit({ type: 'accounts' })
+  }
+
+  /**
+   * Pictures for senders, as other mail apps show them: a person at a mail provider (gmail.com, outlook.com…)
+   * gets their Gravatar, anyone else their company's icon (from Google's or DuckDuckGo's icon service, so the company
+   * never sees who looked). Kept here; a missing one is asked for again after a week. Off in privacy mode.
+   */
+  async senderIcons(emails: string[]): Promise<Record<string, string | null>> {
+    const out: Record<string, string | null> = {}
+    if (!this.settings().senderPictures) { for (const e of emails) out[e] = null; return out }
+    const get = this.db.prepare('select data, fetched_at from sender_icons where key = ?')
+    const put = this.db.prepare(`insert into sender_icons (key, data, fetched_at) values (?,?,?)
+      on conflict(key) do update set data = excluded.data, fetched_at = excluded.fetched_at`)
+    const todo = new Map<string, string[]>()
+    for (const raw of [...new Set(emails.map((e) => String(e || '').toLowerCase().trim()))].slice(0, 120)) {
+      const key = iconKey(raw)
+      if (!key) { out[raw] = null; continue }
+      const row = get.get(key) as Row | undefined
+      if (row && (row.data || now() - row.fetched_at < 7 * 864e5)) { out[raw] = row.data || null; continue }
+      todo.set(key, [...(todo.get(key) || []), raw])
+    }
+    const keys = [...todo.keys()]
+    // a few at a time
+    for (let i = 0; i < keys.length; i += 6) {
+      await Promise.all(keys.slice(i, i + 6).map(async (key) => {
+        const data = await fetchIcon(key).catch(() => null)
+        put.run(key, data, now())
+        for (const e of todo.get(key)!) out[e] = data
+      }))
+    }
+    return out
   }
 
   /** the unified folders: each role across every switched-on account, with the counts added up */
@@ -1465,7 +1531,8 @@ export class MailService {
     if (!['both', 'dock', 'menubar'].includes(s.dockMode)) s.dockMode = 'both'
     if (!['open', 'delay', 'never'].includes(s.markRead)) s.markRead = 'open'
     // Privacy mode wins over the single switches
-    if (s.privacyMode) { s.blockTrackers = true; s.stripTracking = true }
+    if (s.privacyMode) { s.blockTrackers = true; s.stripTracking = true; s.senderPictures = false }
+    s.previewLines = Math.max(0, Math.min(3, Math.round(s.previewLines)))
     for (const k of ['inboxCounter', 'folderCounter'] as const) if (!['unread', 'total', 'none'].includes(s[k])) s[k] = 'unread'
     if (!['system', 'dark', 'light'].includes(s.appearance)) s.appearance = 'system'
     if (!['simba', 'pumba'].includes(s.theme)) s.theme = 'simba'
