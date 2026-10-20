@@ -289,3 +289,38 @@ kbd { min-width: 34px; height: 26px; padding: 0 8px; display: inline-grid; place
 .roarme-sheet label.search input { flex: 1; height: auto; padding: 0; background: none; box-shadow: none; }
 .seg:not(.lens) > button.on { background: var(--glass-2); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1); }
 html[data-theme='simba'] .seg:not(.lens) > button.on { color: #2a1410; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 38%, #fff), color-mix(in srgb, var(--accent) 70%, #fff)); }
+
+/* ---------- Settings: General, Accounts, Fonts & colours (Oct 2026) ---------- */
+.set-sub { margin: 18px 0 2px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.set-row .row { gap: 8px; }
+.dl-name { max-width: 180px; }
+.ok-text { color: var(--ok); display: inline-flex; align-items: center; gap: 6px; }
+.acct-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.acct-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 220px; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 13px;
+  color: var(--text); background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); }
+.acct-chip:hover { background: var(--glass-2); }
+.acct-chip.on { background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge), var(--glow); }
+.acct-chip.disabled { opacity: .55; }
+.acct-chip.add { padding: 0 10px; color: var(--muted); }
+.acct-chip .acc-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.acct-detail { display: flex; flex-direction: column; gap: 12px; }
+.acct-detail > .row:first-child .grow { display: flex; flex-direction: column; min-width: 0; }
+.acct-detail .row.two { align-items: flex-end; gap: 10px; }
+.acct-detail label.port { width: 92px; flex: none; }
+.acct-detail .set-row select { max-width: 300px; }
+.aliases { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--edge); }
+.aliases p { margin: 0 0 4px; }
+.aliases input { height: 34px; padding: 0 12px; border: 0; border-radius: var(--r); background: var(--field); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge); }
+.quote-set { display: flex; gap: 18px; align-items: stretch; padding: 10px 0; flex-wrap: wrap; }
+.quote-levels { display: flex; flex-direction: column; gap: 10px; }
+.quote-levels .swatch { width: 20px; height: 20px; }
+.quote-preview { flex: 1; min-width: 200px; padding: 12px 14px; border-radius: var(--r); background: #fff; font-size: 13.5px; }
+.quote-preview div { padding: 2px 0 2px 10px; border-left: 2px solid; margin-top: 6px; }
+.quote-preview > div { margin-top: 0; }
+/* the list's own font and size (Settings > Fonts & colours) */
+.rows { font-family: var(--list-font, var(--font)); font-size: var(--list-fs, 14px); }
+.rows .subj { font-size: .965em; }
+.rows .snip { font-size: .895em; }
+/* a switch row inside a sheet: label, hint and switch on one line (sheet labels are columns otherwise) */
+.sheet label.toggle { flex-direction: row; align-items: center; gap: 16px; margin: 0; font-size: 14px; color: var(--text); text-align: left; }
+.quote-levels .label-w { width: 110px; white-space: nowrap; }

@@ -1,5 +1,5 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
-import { LOOK_DEFAULTS, applyLook, useLens } from './look'
+import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListScope, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
 import { t, when, type Key } from './i18n'
@@ -13,6 +13,7 @@ import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
 import { short } from './when'
 import { Splitter, useWidths } from './components/Splitter'
+import { actionSound, playNewMail, setActionSounds } from './sounds'
 
 const api = window.roarmail
 const keyOf = (r: MessageRow) => r.threadId || r.id
@@ -39,7 +40,7 @@ export default function App() {
   const [workOpen, setWorkOpen] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
   const [outbox, setOutbox] = useState<OutboxItem[]>([])
-  const [prefs, setPrefs] = useState<Settings>({ ...LOOK_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false })
+  const [prefs, setPrefs] = useState<Settings>({ ...LOOK_DEFAULTS, ...GENERAL_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false })
   const [locked, setLocked] = useState(false)
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
   const [update, setUpdate] = useState<{ status: string; version: string } | null>(null)
@@ -79,8 +80,16 @@ export default function App() {
     if (e.type === 'compose') setCompose({ kind: 'new', to: e.to, subject: e.subject, body: e.body })
     if (e.type === 'outbox') loadOutbox()
     if (e.type === 'opFailed') flash({ text: `${t.opFailed} (${e.error})` })
+    if (e.type === 'sound') playNewMail(e.sound)
     if (e.type === 'lock') { setLocked(e.locked); if (!e.locked) { loadAccounts(); loadOutbox(); loadFolders(); loadRows(); api.settings().then(setPrefs) } }
   }), [])
+  useEffect(() => setActionSounds(!!prefs.actionSounds), [prefs.actionSounds])
+  // a short note from anywhere in the window (an attachment saved to the downloads folder)
+  useEffect(() => {
+    const h = (e: Event) => flash({ text: String((e as CustomEvent).detail || ''), ms: 3500 })
+    window.addEventListener('roarmail-toast', h)
+    return () => window.removeEventListener('roarmail-toast', h)
+  }, [])
   useEffect(() => {
     api.update?.state().then(setUpdate).catch(() => {})
     return api.update?.on(setUpdate)
@@ -121,6 +130,7 @@ export default function App() {
     try {
       const token = await api.act(ids, action, folderId)
       if (token) {
+        actionSound(action === 'archive' ? 'archive' : action === 'trash' ? 'trash' : 'archive')
         const word = action === 'archive' ? t.archived : action === 'move' ? t.moved : folderRole === 'trash' ? t.deleted : t.trashed
         flash({ text: targets.length > 1 ? `${word} · ${targets.length}` : word, undo: () => { api.undo(token).then((ok) => { if (ok) { loadRows(); setSelected(keys) } }) } })
       }
@@ -187,6 +197,7 @@ export default function App() {
 
   const sent = (outboxId: string, at?: number) => {
     setCompose(null)
+    if (!at) actionSound('send')
     loadOutbox()
     if (at) flash({ text: `${t.scheduledFor} ${short(at)}`, ms: 4000 })
     else if (prefs.undoSendSeconds > 0) {
@@ -278,7 +289,7 @@ export default function App() {
         <aside className="folders">
           <div className="drag" />
           <div className="acct-name">
-            <b>{accountOf(scope.accountId)?.displayName || accountOf(scope.accountId)?.email.split('@')[0]}</b>
+            <b>{accountOf(scope.accountId)?.description || accountOf(scope.accountId)?.displayName || accountOf(scope.accountId)?.email.split('@')[0]}</b>
             <span className="muted small">{accountOf(scope.accountId)?.email}</span>
           </div>
           <div className="folder-list list-lens lens" ref={folderLens}>

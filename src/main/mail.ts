@@ -17,14 +17,13 @@ import type { DB } from './store'
 import { now, uuid } from './store'
 import { seal, open } from './vault'
 import type {
-  Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
+  Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   Security, ServerConfig, Settings, Signature, SnoozedItem,
 } from '../shared/api'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
 const FIRST_SYNC_LIMIT = 300
 const PREFETCH = 40
-const POLL_MS = 5 * 60e3
 const UNDO_MS = 5e3
 
 /** every setting and its default; stored as text in the settings table */
@@ -34,7 +33,14 @@ const SETTINGS: Settings = {
   runAtLogin: false, appearance: 'system',
   theme: 'simba', accent: 'red', font: 'system', density: 'standard', radius: 12,
   motion: true, focusRings: false, glass: true, textSize: 2, lite: false,
+  checkEvery: 5, newMailSound: 'system', actionSounds: false, dockBadge: 'inbox', notifyFor: 'inbox',
+  downloadsFolder: '', retrySending: true, searchTrash: true, searchJunk: true,
+  listFont: 'system', listSize: 14, messageFont: 'system', monoFont: 'mono', plainMono: false,
+  quoteColors: true, quote1: '#6d5dfc', quote2: '#1fa3b8', quote3: '#3fae49',
 }
+const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
+/** only accounts that are switched on show anywhere */
+const ON = 'f.account_id in (select id from accounts where enabled = 1)'
 
 type Row = Record<string, any>
 type MoveKind = 'archive' | 'trash' | 'move' | 'delete'
@@ -60,11 +66,15 @@ const toRow = (r: Row): MessageRow => ({
   count: r.n || 1,
 })
 
-const toAccount = (r: Row, state: Account['state'], error?: string): Account => ({
+const toAccount = (r: Row, state: Account['state'], error: string | undefined, aliases: Account['aliases']): Account => ({
   id: r.id, email: r.email, displayName: r.display_name, color: r.color, provider: r.provider,
   imapHost: r.imap_host, imapPort: r.imap_port, imapTls: r.imap_tls,
   smtpHost: r.smtp_host, smtpPort: r.smtp_port, smtpTls: r.smtp_tls, username: r.username,
   signatureId: r.signature_id || null, state, error,
+  enabled: !!r.enabled, description: r.description || '', aliases,
+  attachments: ['all', 'recent', 'none'].includes(r.attachments) ? r.attachments : 'recent',
+  roles: (() => { try { return JSON.parse(r.roles_json || '{}') } catch { return {} } })(),
+  trashDays: r.trash_days || 0, junkDays: r.junk_days || 0,
 })
 
 // the text version of HTML mail carries [image: …] and [https://…] marks; a snippet reads better without them
@@ -148,6 +158,7 @@ export class MailService {
   private state = new Map<string, { state: Account['state']; error?: string }>()
   private retry = new Map<string, NodeJS.Timeout>()
   private poll: NodeJS.Timeout | null = null
+  private lastClean = 0
   private ticker: NodeJS.Timeout | null = null
   private busyAccounts = new Set<string>()
   private sending = new Set<string>()
@@ -177,10 +188,17 @@ export class MailService {
     return { imapHost: r.imap_host, imapPort: r.imap_port, imapTls: r.imap_tls, smtpHost: r.smtp_host, smtpPort: r.smtp_port, smtpTls: r.smtp_tls, username: r.username }
   }
 
-  accounts(): Account[] {
+  accounts(): Account[] { return this.allAccounts().filter((a) => a.enabled) }
+
+  /** the switched-off ones too, for Settings > Accounts */
+  allAccounts(): Account[] {
+    const aliases = this.db.prepare('select id, email, name from identities where account_id = ? and is_default = 0 order by email')
     return (this.db.prepare(`select a.*, i.signature_id from accounts a left join identities i on i.account_id = a.id and i.is_default = 1
-      where a.enabled = 1 order by a.sort, a.created_at`).all() as Row[])
-      .map((r) => { const s = this.state.get(r.id); return toAccount(r, s?.state || 'connecting', s?.error) })
+      order by a.sort, a.created_at`).all() as Row[])
+      .map((r) => {
+        const s = this.state.get(r.id)
+        return toAccount(r, r.enabled ? s?.state || 'connecting' : 'offline', r.enabled ? s?.error : undefined, aliases.all(r.id) as Account['aliases'])
+      })
   }
 
   async test(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }> {
@@ -225,7 +243,24 @@ export class MailService {
     return this.accounts().find((a) => a.id === id)!
   }
 
-  updateAccount(id: string, patch: { displayName?: string; color?: string; signatureId?: string | null }) {
+  updateAccount(id: string, patch: AccountPatch) {
+    const set = (col: string, v: unknown) => this.db.prepare(`update accounts set ${col} = ?, updated_at = ? where id = ?`).run(v, now(), id)
+    if (patch.description != null) set('description', String(patch.description).trim().slice(0, 80))
+    if (patch.attachments && ['all', 'recent', 'none'].includes(patch.attachments)) { set('attachments', patch.attachments); this.prefetch(id).catch(() => {}) }
+    if (patch.trashDays != null) set('trash_days', Math.max(0, Math.round(Number(patch.trashDays) || 0)))
+    if (patch.junkDays != null) set('junk_days', Math.max(0, Math.round(Number(patch.junkDays) || 0)))
+    if (patch.roles) {
+      const roles: Record<string, string> = {}
+      for (const k of ROLE_KEYS) if (typeof patch.roles[k] === 'string' && patch.roles[k]) roles[k] = patch.roles[k]!
+      set('roles_json', JSON.stringify(roles))
+      this.applyRoles(id)
+    }
+    if (patch.enabled != null) {
+      set('enabled', patch.enabled ? 1 : 0)
+      if (patch.enabled) this.startAccount(id); else { this.stopAccount(id); this.state.delete(id) }
+      this.emit({ type: 'messages', accountId: id })
+      this.badge()
+    }
     if (patch.displayName != null) {
       this.db.prepare('update accounts set display_name = ?, updated_at = ? where id = ?').run(patch.displayName, now(), id)
       this.db.prepare('update identities set name = ? where account_id = ? and is_default = 1').run(patch.displayName, id)
@@ -233,6 +268,57 @@ export class MailService {
     if (patch.color) this.db.prepare('update accounts set color = ?, updated_at = ? where id = ?').run(patch.color, now(), id)
     if (patch.signatureId !== undefined) this.db.prepare('update identities set signature_id = ? where account_id = ? and is_default = 1').run(patch.signatureId, id)
     this.emit({ type: 'accounts' })
+  }
+
+  /** new servers (or a new password): tested first, then the account connects again with them */
+  async updateServer(id: string, cfg: ServerConfig, password?: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const r = this.accountRow(id)
+    const pass = password || open(r.secret)
+    const t = await this.test({ ...cfg, email: r.email, displayName: r.display_name, provider: r.provider }, pass)
+    if (!t.ok) return t
+    const c = t.cfg
+    this.db.prepare(`update accounts set imap_host = ?, imap_port = ?, imap_tls = ?, smtp_host = ?, smtp_port = ?, smtp_tls = ?, username = ?,
+      secret = ?, updated_at = ? where id = ?`).run(c.imapHost, c.imapPort, c.imapTls, c.smtpHost, c.smtpPort, c.smtpTls, c.username, seal(pass), now(), id)
+    this.stopAccount(id)
+    if (r.enabled) this.startAccount(id)
+    this.emit({ type: 'accounts' })
+    return { ok: true }
+  }
+
+  addAlias(accountId: string, email: string, name: string) {
+    const e = String(email || '').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new Error('bad-address')
+    this.accountRow(accountId)
+    if (this.db.prepare('select 1 from identities where account_id = ? and lower(email) = ?').get(accountId, e)) return
+    this.db.prepare('insert into identities (id, account_id, email, name, is_default) values (?,?,?,?,0)').run(uuid(), accountId, e, String(name || '').trim())
+    this.emit({ type: 'accounts' })
+  }
+
+  removeAlias(id: string) {
+    this.db.prepare('delete from identities where id = ? and is_default = 0').run(id)
+    this.emit({ type: 'accounts' })
+  }
+
+  /** every folder of the account, for choosing which is Sent, Trash and the rest */
+  serverFolders(accountId: string): { path: string; name: string }[] {
+    return (this.db.prepare('select path, name from folders where account_id = ? and special is null order by path').all(accountId) as Row[])
+      .filter((r) => r.path.toUpperCase() !== 'INBOX').map((r) => ({ path: r.path, name: r.name }))
+  }
+
+  /** the folders chosen in Settings take their roles; a folder the server marked loses a role given elsewhere */
+  private applyRoles(accountId: string) {
+    const r = this.accountRow(accountId)
+    let roles: Record<string, string> = {}
+    try { roles = JSON.parse(r.roles_json || '{}') } catch { /* none */ }
+    this.db.transaction(() => {
+      for (const k of ROLE_KEYS) {
+        const p = roles[k]
+        if (!p || !this.db.prepare('select 1 from folders where account_id = ? and path = ?').get(accountId, p)) continue
+        this.db.prepare('update folders set role = null where account_id = ? and role = ? and path <> ?').run(accountId, k, p)
+        this.db.prepare('update folders set role = ? where account_id = ? and path = ?').run(k, accountId, p)
+      }
+    })()
+    this.emit({ type: 'folders', accountId })
   }
 
   async remove(id: string) {
@@ -276,8 +362,20 @@ export class MailService {
 
   startAll() {
     for (const a of this.accounts()) this.startAccount(a.id)
-    if (!this.poll) this.poll = setInterval(() => this.refresh().catch(() => {}), POLL_MS)
+    this.schedulePoll()
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000)
+  }
+
+  /** Settings > General > Check for new messages: every N minutes, or only when asked (no live inbox either) */
+  schedulePoll() {
+    if (this.poll) clearInterval(this.poll)
+    this.poll = null
+    const every = this.settings().checkEvery
+    if (every > 0) this.poll = setInterval(() => this.refresh().catch(() => {}), every * 60e3)
+    for (const a of this.accounts()) {
+      if (every > 0 && !this.idle.has(a.id) && this.state.get(a.id)?.state === 'online') this.startIdle(a.id)
+      if (every === 0) { const i = this.idle.get(a.id); this.idle.delete(a.id); i?.close() }
+    }
   }
 
   private async startAccount(id: string) {
@@ -288,7 +386,7 @@ export class MailService {
       if (inbox) await this.syncFolder(id, inbox.id, false)
       this.setState(id, 'online')
       this.prefetch(id).catch(() => {})
-      this.startIdle(id)
+      if (this.settings().checkEvery > 0) this.startIdle(id)
       // the other important folders, quietly after the inbox (Sent completes the conversations)
       for (const role of ['sent', 'drafts', 'archive', 'trash'] as FolderRole[]) {
         const f = this.folderByRole(id, role)
@@ -360,7 +458,7 @@ export class MailService {
         if (inbox) await this.syncFolder(id, inbox.id, true)
         await this.prefetch(id)
         this.setState(id, 'online')
-        if (!this.idle.has(id)) this.startIdle(id)
+        if (!this.idle.has(id) && this.settings().checkEvery > 0) this.startIdle(id)
       } catch (e) {
         this.setState(id, 'offline', friendly(e))
       } finally {
@@ -407,6 +505,7 @@ export class MailService {
       }
       for (const [p, r] of known) if (!seen.has(p)) this.db.prepare('delete from folders where id = ?').run(r.id)
     })()
+    this.applyRoles(accountId)
     // folders never opened show the server's own unread count; synced ones count from the cache
     for (const f of this.db.prepare('select id, uidvalidity from folders where account_id = ?').all(accountId) as Row[]) {
       if (f.uidvalidity) this.recount(f.id)
@@ -572,9 +671,12 @@ export class MailService {
     fs.rmSync(emlPath(id), { force: true })
   }
 
+  /** the number on the Dock icon (Settings > General): unread in the inboxes, unread in every folder that holds mail, or none */
   badge() {
-    const n = (this.db.prepare(`select count(*) n from messages m join message_folders mf on mf.message_id = m.id
-      join folders f on f.id = mf.folder_id where f.role = 'inbox' and m.seen = 0 and m.pending_op is null`).get() as Row).n as number
+    const mode = this.settings().dockBadge
+    const where = mode === 'all' ? `coalesce(f.role, '') not in ('trash', 'spam', 'sent', 'drafts')` : `f.role = 'inbox'`
+    const n = mode === 'none' ? 0 : (this.db.prepare(`select count(distinct m.id) n from messages m join message_folders mf on mf.message_id = m.id
+      join folders f on f.id = mf.folder_id where ${where} and ${ON} and m.seen = 0 and m.pending_op is null`).get() as Row).n as number
     try { app.setBadgeCount(n) } catch { /* not on this system */ }
   }
 
@@ -590,7 +692,7 @@ export class MailService {
     const rows = this.db.prepare(`select m.*, max(m.date) as last_date, count(*) as n, sum(m.seen = 0) as unread_n,
         sum(m.flagged) as flag_n, sum(m.has_attachments) as att_n, group_concat(m.id) as ids
       from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
-      where ${where} and m.pending_op is null
+      where ${where} and ${ON} and m.pending_op is null
       group by coalesce(m.thread_id, m.id)
       having last_date < @cut
       order by last_date desc limit @limit`)
@@ -647,8 +749,11 @@ export class MailService {
 
   /** download the newest bodies in the background, for snippets and search */
   async prefetch(accountId: string) {
+    // Settings > Accounts > Download attachments: every message, the newest ones, or none with attachments until opened
+    const mode = (this.db.prepare('select attachments from accounts where id = ?').get(accountId) as Row)?.attachments || 'recent'
     const ids = this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
-      where m.account_id = ? and m.body_text is null and f.role = 'inbox' order by m.date desc limit ?`).all(accountId, PREFETCH) as Row[]
+      where m.account_id = ? and m.body_text is null and f.role = 'inbox' ${mode === 'none' ? 'and m.has_attachments = 0' : ''}
+      order by m.date desc limit ?`).all(accountId, mode === 'all' ? PREFETCH * 5 : PREFETCH) as Row[]
     if (!ids.length) return
     for (const r of ids) { try { await this.parsed(r.id) } catch { /* next time */ } }
     this.emit({ type: 'messages', accountId })
@@ -723,8 +828,13 @@ export class MailService {
   search(query: string, accountId?: string): MessageRow[] {
     const terms = query.trim().split(/\s+/).filter(Boolean).map((t) => `"${t.replace(/"/g, '""')}"*`)
     if (!terms.length) return []
+    // Settings > General: Trash and Junk in the results or not
+    const s = this.settings()
+    const skip = [s.searchTrash ? '' : `'trash'`, s.searchJunk ? '' : `'spam'`].filter(Boolean)
+    const notIn = skip.length ? `and not exists (select 1 from message_folders mf join folders f on f.id = mf.folder_id where mf.message_id = m.id and f.role in (${skip.join(',')}))` : ''
     const rows = this.db.prepare(`select m.* from messages_fts s join messages m on m.rowid = s.rowid
-      where messages_fts match @q ${accountId ? 'and m.account_id = @a' : ''} and m.pending_op is null order by m.date desc limit 200`)
+      where messages_fts match @q ${accountId ? 'and m.account_id = @a' : ''} and m.account_id in (select id from accounts where enabled = 1)
+      and m.pending_op is null ${notIn} order by m.date desc limit 200`)
       .all({ q: terms.join(' '), a: accountId }) as Row[]
     return rows.map(toRow)
   }
@@ -828,9 +938,23 @@ export class MailService {
     for (const o of due) if (!this.sending.has(o.id)) this.deliver(o)
     this.wakeSnoozed()
     this.checkReminders()
+    if (now() - this.lastClean > 60 * 60e3) { this.lastClean = now(); this.eraseOld() }
     if (now() - this.lastDraftPush > 30e3) {
       const drafts = this.db.prepare(`select * from drafts where push = 1 and id not in (select draft_id from outbox)`).all() as Row[]
       if (drafts.length) { this.lastDraftPush = now(); for (const d of drafts) this.pushDraft(d).catch(() => {}) }
+    }
+  }
+
+  /** Settings > Accounts: what sat in Trash or Junk longer than the chosen days goes for good (it arrived there when cached) */
+  private eraseOld() {
+    for (const a of this.db.prepare('select id, trash_days, junk_days from accounts where enabled = 1').all() as Row[]) {
+      for (const [role, days] of [['trash', a.trash_days], ['spam', a.junk_days]] as [string, number][]) {
+        if (!days) continue
+        const old = this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
+          where f.account_id = ? and f.role = ? and m.created_at < ? and m.pending_op is null`).all(a.id, role, now() - days * 864e5) as Row[]
+        // in Trash, trash means delete for good; Junk goes to Trash first
+        if (old.length) this.act(old.map((r) => r.id), 'trash', undefined, true).catch(() => {})
+      }
     }
   }
 
@@ -906,13 +1030,15 @@ export class MailService {
   // ---------- drafts ----------
 
   private draftRow(d: Draft, id: string, push: number) {
-    this.db.prepare(`insert into drafts (id, account_id, reply_to_message, mode, to_json, cc_json, bcc_json, subject, html, plain,
+    this.db.prepare(`insert into drafts (id, account_id, identity_id, reply_to_message, mode, to_json, cc_json, bcc_json, subject, html, plain,
         attachments_json, replaces_message_id, push, updated_at)
-      values (@id, @account_id, @reply, 'new', @to, @cc, @bcc, @subject, @html, 0, @atts, @replaces, @push, @updated)
-      on conflict(id) do update set account_id = excluded.account_id, to_json = excluded.to_json, cc_json = excluded.cc_json,
+      values (@id, @account_id, @identity, @reply, 'new', @to, @cc, @bcc, @subject, @html, 0, @atts, @replaces, @push, @updated)
+      on conflict(id) do update set account_id = excluded.account_id, identity_id = excluded.identity_id, to_json = excluded.to_json, cc_json = excluded.cc_json,
         bcc_json = excluded.bcc_json, subject = excluded.subject, html = excluded.html, attachments_json = excluded.attachments_json,
         replaces_message_id = excluded.replaces_message_id, push = excluded.push, updated_at = excluded.updated_at`).run({
-      id, account_id: d.accountId, reply: d.replyToMessageId && this.db.prepare('select 1 from messages where id = ?').get(d.replyToMessageId) ? d.replyToMessageId : null,
+      id, account_id: d.accountId,
+      identity: d.identityId && this.db.prepare('select 1 from identities where id = ? and account_id = ?').get(d.identityId, d.accountId) ? d.identityId : null,
+      reply: d.replyToMessageId && this.db.prepare('select 1 from messages where id = ?').get(d.replyToMessageId) ? d.replyToMessageId : null,
       to: JSON.stringify({ to: d.to, inReplyTo: d.inReplyTo || null, references: d.references || null, text: d.text }),
       cc: d.cc || '', bcc: d.bcc || '', subject: d.subject, html: d.html, atts: JSON.stringify(d.attachments || []),
       replaces: d.replacesMessageId || null, push, updated: now(),
@@ -922,7 +1048,7 @@ export class MailService {
   private draftOf(r: Row): Draft {
     const meta = JSON.parse(r.to_json || '{}')
     return {
-      id: r.id, accountId: r.account_id, to: meta.to || '', cc: r.cc_json || '', bcc: r.bcc_json || '', subject: r.subject, html: r.html,
+      id: r.id, accountId: r.account_id, identityId: r.identity_id || undefined, to: meta.to || '', cc: r.cc_json || '', bcc: r.bcc_json || '', subject: r.subject, html: r.html,
       text: meta.text || '', inReplyTo: meta.inReplyTo || undefined, references: meta.references || undefined,
       replyToMessageId: r.reply_to_message || undefined, replacesMessageId: r.replaces_message_id || undefined,
       attachments: JSON.parse(r.attachments_json || '[]'),
@@ -980,8 +1106,12 @@ export class MailService {
 
   private compose(d: Draft, messageId: string) {
     const r = this.accountRow(d.accountId)
+    // an alias of the account (Settings > Accounts), else the account's own address
+    const alias = d.identityId ? this.db.prepare('select email, name from identities where id = ? and account_id = ?').get(d.identityId, d.accountId) as Row : undefined
+    const name = alias ? alias.name || r.display_name : r.display_name
+    const address = alias ? alias.email : r.email
     return new MailComposer({
-      from: r.display_name ? { name: r.display_name, address: r.email } : r.email,
+      from: name ? { name, address } : address,
       to: d.to || undefined, cc: d.cc || undefined, bcc: d.bcc || undefined, subject: d.subject,
       html: d.html, text: d.text, messageId, date: new Date(),
       inReplyTo: d.inReplyTo || undefined, references: d.references || undefined,
@@ -1077,7 +1207,7 @@ export class MailService {
       this.emit({ type: 'messages', accountId: d.accountId })
     } catch (e) {
       const code = friendly(e)
-      if (transient(code)) {
+      if (transient(code) && this.settings().retrySending) {
         this.db.prepare(`update outbox set status = 'queued', attempts = attempts + 1, send_at = ?, last_error = ? where id = ?`)
           .run(now() + Math.min(30e3 * (o.attempts + 1), 5 * 60e3), code, o.id)
       } else {
@@ -1212,12 +1342,19 @@ export class MailService {
     s.lockAfter = Math.max(0, s.lockAfter)
     s.radius = Math.max(4, Math.min(16, s.radius))
     s.textSize = Math.max(0, Math.min(4, s.textSize))
+    s.checkEvery = [0, 1, 5, 15, 30, 60].includes(s.checkEvery) ? s.checkEvery : 5
+    s.listSize = Math.max(11, Math.min(20, s.listSize))
+    if (!['inbox', 'all', 'none'].includes(s.dockBadge)) s.dockBadge = 'inbox'
+    if (!['inbox', 'known', 'none'].includes(s.notifyFor)) s.notifyFor = 'inbox'
     if (!['system', 'dark', 'light'].includes(s.appearance)) s.appearance = 'system'
     if (!['simba', 'pumba'].includes(s.theme)) s.theme = 'simba'
     return s
   }
 
   setSetting(key: keyof Settings, value: unknown) {
+    if (!(key in SETTINGS)) return
     this.db.prepare(`insert into settings (key, value) values (?, ?) on conflict(key) do update set value = excluded.value`).run(key, String(value))
+    if (key === 'checkEvery') this.schedulePoll()
+    if (key === 'dockBadge') this.badge()
   }
 }

@@ -71,6 +71,12 @@ export function Composer({ seed, accounts, onClose, onSent }: {
 }) {
   const init = useRef(prefill(seed, accounts)).current
   const [accountId, setAccountId] = useState(init.accountId)
+  // an alias (Settings > Accounts): the draft's, or the one a replied-to message was sent to
+  const [identityId, setIdentityId] = useState<string>(() => {
+    if (seed.draft?.identityId) return seed.draft.identityId
+    const got = [...(seed.source?.to || []), ...(seed.source?.cc || [])].map((x) => x.address.toLowerCase())
+    return accounts.find((a) => a.id === init.accountId)?.aliases.find((x) => got.includes(x.email.toLowerCase()))?.id || ''
+  })
   const [to, setTo] = useState(init.to)
   const [cc, setCc] = useState(init.cc)
   const [bcc, setBcc] = useState(init.bcc)
@@ -102,7 +108,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   }
 
   const draft = (): Draft => ({
-    id: draftId.current, accountId, to, cc, bcc, subject,
+    id: draftId.current, accountId, identityId: identityId || undefined, to, cc, bcc, subject,
     html: body.current?.innerHTML || '', text: body.current?.innerText || '',
     ...replyMeta(), replacesMessageId: seed.draft?.replacesMessageId, attachments: files,
   })
@@ -221,10 +227,17 @@ export function Composer({ seed, accounts, onClose, onSent }: {
           <b>{title}</b>
           <button className="tool" onClick={() => close()} title={t.discard}><Icon name="close" /></button>
         </div>
-        {accounts.length > 1 && (
+        {(accounts.length > 1 || accounts.some((a) => a.aliases.length)) && (
           <div className="field"><span>{t.from}</span>
-            <select value={accountId} onChange={(e) => { setAccountId(e.target.value); placeSignature(sigs, e.target.value); dirty.current = true }}>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.displayName ? `${a.displayName} <${a.email}>` : a.email}</option>)}
+            <select value={`${accountId}|${identityId}`} onChange={(e) => {
+              const [a, i] = e.target.value.split('|')
+              if (a !== accountId) placeSignature(sigs, a)
+              setAccountId(a); setIdentityId(i || ''); dirty.current = true
+            }}>
+              {accounts.flatMap((a) => [
+                <option key={a.id} value={`${a.id}|`}>{a.displayName ? `${a.displayName} <${a.email}>` : a.email}</option>,
+                ...a.aliases.map((x) => <option key={x.id} value={`${a.id}|${x.id}`}>{(x.name || a.displayName) ? `${x.name || a.displayName} <${x.email}>` : x.email}</option>),
+              ])}
             </select>
           </div>
         )}

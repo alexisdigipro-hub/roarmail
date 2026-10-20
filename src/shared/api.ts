@@ -28,6 +28,28 @@ export interface Account {
   signatureId: string | null
   state: 'connecting' | 'online' | 'offline' | 'error'
   error?: string
+  /** off: kept on this computer but not synced, hidden from the lists (Settings > Accounts) */
+  enabled: boolean
+  /** a name for the account itself, shown above its folders ("Work", "Studio"); empty = the sender name */
+  description: string
+  /** other addresses this account sends as (the From picker) */
+  aliases: Alias[]
+  /** what is downloaded ahead: every message with its attachments, the newest ones, or attachments only when opened */
+  attachments: 'all' | 'recent' | 'none'
+  /** the folders RoarMail uses for each role, chosen in Settings > Accounts (path, or '' for the server's choice) */
+  roles: Partial<Record<'drafts' | 'sent' | 'spam' | 'trash' | 'archive', string>>
+  /** erase what sat in Trash / Junk longer than this many days (0 = never) */
+  trashDays: number
+  junkDays: number
+}
+
+export interface Alias { id: string; email: string; name: string }
+
+/** Settings > Accounts > Server: what can be changed after the account is added */
+export interface AccountPatch {
+  displayName?: string; color?: string; signatureId?: string | null
+  enabled?: boolean; description?: string; attachments?: Account['attachments']
+  roles?: Account['roles']; trashDays?: number; junkDays?: number
 }
 
 export interface Folder {
@@ -105,6 +127,8 @@ export interface Draft {
   inReplyTo?: string
   references?: string
   replyToMessageId?: string
+  /** an alias of the account to send as (identities); none = the account's own address */
+  identityId?: string
   /** the server draft (a message in Drafts) this one replaces */
   replacesMessageId?: string
   attachments?: string[] // local file paths
@@ -145,7 +169,41 @@ export interface Settings {
   textSize: number
   /** power saving: no blur, no animation */
   lite: boolean
+
+  // Settings > General (Oct 2026, from Apple Mail's)
+  /** minutes between checks of every folder; the inbox also listens live (IDLE). 0 = only when asked */
+  checkEvery: number
+  /** the sound for new mail: the system's notification sound, one of RoarMail's, or none */
+  newMailSound: 'system' | 'none' | NewMailSound
+  /** short sounds on send, archive and delete */
+  actionSounds: boolean
+  /** the number on the Dock / taskbar icon: unread in the inboxes, unread everywhere, or nothing */
+  dockBadge: 'inbox' | 'all' | 'none'
+  /** notifications for new mail: every inbox, only people you have written to, or none */
+  notifyFor: 'inbox' | 'known' | 'none'
+  /** where attachments are saved; '' = ask every time */
+  downloadsFolder: string
+  /** sending again later when the outgoing server cannot be reached */
+  retrySending: boolean
+  /** search also looks in Trash and Junk */
+  searchTrash: boolean
+  searchJunk: boolean
+
+  // Settings > Fonts & colours: a FONTS key, or 'local:<family>' for a font installed on this computer
+  listFont: string
+  /** list text size in px */
+  listSize: number
+  /** the font of messages without their own (plain text and simple mail) */
+  messageFont: string
+  monoFont: string
+  /** plain text messages in the fixed-width font */
+  plainMono: boolean
+  /** quoted text coloured by level, with these three colours */
+  quoteColors: boolean
+  quote1: string; quote2: string; quote3: string
 }
+
+export type NewMailSound = 'roar' | 'chime' | 'drop' | 'pop' | 'breeze'
 
 export interface LockState { available: boolean; enabled: boolean; locked: boolean; method: 'touchid' | 'none' }
 export type SwipeAction = 'archive' | 'trash' | 'flag' | 'seen' | 'snooze' | 'none'
@@ -179,13 +237,26 @@ export type MailEvent =
   | { type: 'lock'; locked: boolean }
   | { type: 'roarme' }
   | { type: 'transfer'; file: string; progress: number }
+  | { type: 'sound'; sound: NewMailSound }
 
 export interface MailApi {
   platform: string
   autodetect(email: string): Promise<ServerConfig>
   testAccount(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }>
   addAccount(cfg: ServerConfig, password: string): Promise<Account>
-  updateAccount(id: string, patch: { displayName?: string; color?: string; signatureId?: string | null }): Promise<void>
+  updateAccount(id: string, patch: AccountPatch): Promise<void>
+  /** every account, the switched-off ones too (Settings > Accounts); accounts() lists only the ones on */
+  allAccounts(): Promise<Account[]>
+  /** Settings > Accounts > Server: tests the new servers (and password, when given) before keeping them */
+  updateServer(id: string, cfg: ServerConfig, password?: string): Promise<{ ok: true } | { ok: false; error: string }>
+  addAlias(accountId: string, email: string, name: string): Promise<void>
+  removeAlias(id: string): Promise<void>
+  /** every folder of an account, for the role pickers (hidden ones too) */
+  serverFolders(accountId: string): Promise<{ path: string; name: string }[]>
+  /** RoarMail as the computer's mail app (mailto: links) */
+  isDefaultMail(): Promise<boolean>
+  makeDefaultMail(): Promise<boolean>
+  pickFolder(): Promise<string | null>
   removeAccount(id: string): Promise<void>
   accounts(): Promise<Account[]>
   folders(accountId: string): Promise<Folder[]>
@@ -243,7 +314,8 @@ export interface MailApi {
   fileSizes(files: string[]): Promise<number[]>
   pickFiles(): Promise<string[]>
   openAttachment(id: string): Promise<void>
-  saveAttachment(id: string): Promise<void>
+  /** into Settings' downloads folder (returns where it went), or asks where; null = cancelled */
+  saveAttachment(id: string): Promise<string | null>
   openExternal(url: string): Promise<void>
   refresh(accountId?: string): Promise<void>
   on(cb: (e: MailEvent) => void): () => void

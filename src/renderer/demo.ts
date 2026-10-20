@@ -1,6 +1,6 @@
 // The web demo (themadlions.com/roarmail): the same screens over a MailApi that lives in memory, filled with
 // sample mail. Nothing connects anywhere and nothing is kept; it shows the app and how it feels.
-import { LOOK_DEFAULTS } from './look'
+import { GENERAL_DEFAULTS, LOOK_DEFAULTS } from './look'
 import type {
   Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailApi, MailEvent, MessageFull, MessageRow, OutboxItem,
   Settings, Signature, SnoozedItem,
@@ -19,9 +19,10 @@ const H = 3600e3
 const now = Date.now()
 const uid = () => Math.random().toString(36).slice(2, 10)
 
+const extra = { enabled: true, description: '', aliases: [], attachments: 'recent' as const, roles: {}, trashDays: 0, junkDays: 0 }
 const accounts: Account[] = [
-  { id: 'a1', email: 'alex@themadlions.com', displayName: 'Alex', color: '#d40000', provider: 'imap', imapHost: 'linux207.papaki.gr', imapPort: 993, imapTls: 'tls', smtpHost: 'linux207.papaki.gr', smtpPort: 465, smtpTls: 'tls', username: 'alex@themadlions.com', signatureId: 's1', state: 'online' },
-  { id: 'a2', email: 'roar.demo@gmail.com', displayName: 'Alex K.', color: '#2f9bff', provider: 'gmail', imapHost: 'imap.gmail.com', imapPort: 993, imapTls: 'tls', smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpTls: 'tls', username: 'roar.demo@gmail.com', signatureId: null, state: 'online' },
+  { id: 'a1', email: 'alex@themadlions.com', displayName: 'Alex', color: '#d40000', provider: 'imap', imapHost: 'linux207.papaki.gr', imapPort: 993, imapTls: 'tls', smtpHost: 'linux207.papaki.gr', smtpPort: 465, smtpTls: 'tls', username: 'alex@themadlions.com', signatureId: 's1', state: 'online', ...extra },
+  { id: 'a2', email: 'roar.demo@gmail.com', displayName: 'Alex K.', color: '#2f9bff', provider: 'gmail', imapHost: 'imap.gmail.com', imapPort: 993, imapTls: 'tls', smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpTls: 'tls', username: 'roar.demo@gmail.com', signatureId: null, state: 'online', ...extra },
 ]
 
 const roles: [FolderRole, string][] = [['inbox', 'INBOX'], ['snoozed', 'Snoozed'], ['drafts', 'Drafts'], ['sent', 'Sent'], ['archive', 'Archive'], ['trash', 'Trash']]
@@ -71,7 +72,7 @@ const msgs: DemoMsg[] = [
 ]
 
 const sigs: Signature[] = [{ id: 's1', name: 'THEMADLIONS', html: '<b>Alex Konstantinidis</b><br>THEMADLIONS · themadlions.com' }]
-let settings: Settings = { ...LOOK_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false }
+let settings: Settings = { ...LOOK_DEFAULTS, ...GENERAL_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false }
 const outbox: (OutboxItem & { draft: Draft })[] = []
 const snoozes: (SnoozedItem & { msgId: string; origin: string; timer?: ReturnType<typeof setTimeout> })[] = []
 const pending = new Map<string, { ids: string[]; from: Map<string, string>; timer: ReturnType<typeof setTimeout> }>()
@@ -157,9 +158,17 @@ export function createDemo(): MailApi & { update: any } {
     autodetect: async (email) => ({ email, displayName: '', username: email, provider: 'imap', imapHost: `mail.${email.split('@')[1] || 'example.com'}`, imapPort: 993, imapTls: 'tls', smtpHost: `mail.${email.split('@')[1] || 'example.com'}`, smtpPort: 465, smtpTls: 'tls' }),
     testAccount: async () => ({ ok: false, error: 'Στο demo δεν συνδέονται λογαριασμοί. Κατέβασε την εφαρμογή για Mac ή Windows. / The demo cannot connect accounts; download the app.' }),
     addAccount: async () => { throw new Error('demo') },
-    updateAccount: async (id, patch) => { const a = accounts.find((x) => x.id === id); if (a) Object.assign(a, patch.displayName != null ? { displayName: patch.displayName } : {}, patch.color ? { color: patch.color } : {}, patch.signatureId !== undefined ? { signatureId: patch.signatureId } : {}); emit({ type: 'accounts' }) },
+    updateAccount: async (id, patch) => { const a = accounts.find((x) => x.id === id); if (a) Object.assign(a, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); emit({ type: 'accounts' }) },
+    allAccounts: async () => accounts.map((a) => ({ ...a })),
+    updateServer: async () => ({ ok: false, error: 'Στο demo δεν αλλάζουν οι servers. / The demo cannot change servers.' }),
+    addAlias: async (id, email, name) => { const a = accounts.find((x) => x.id === id); if (a) a.aliases = [...a.aliases, { id: uid(), email, name }]; emit({ type: 'accounts' }) },
+    removeAlias: async (aid) => { for (const a of accounts) a.aliases = a.aliases.filter((x) => x.id !== aid); emit({ type: 'accounts' }) },
+    serverFolders: async (id) => folders.filter((f) => f.accountId === id && f.role !== 'inbox' && f.role !== 'snoozed').map((f) => ({ path: f.path, name: f.name })),
+    isDefaultMail: async () => false,
+    makeDefaultMail: async () => false,
+    pickFolder: async () => null,
     removeAccount: async () => {},
-    accounts: async () => accounts.map((a) => ({ ...a })),
+    accounts: async () => accounts.filter((a) => a.enabled).map((a) => ({ ...a })),
     folders: async (accountId) => { recount(); return folders.filter((f) => f.accountId === accountId).map((f) => ({ ...f })) },
     messages: async (scope) => list(scope),
     thread: async (key) => msgs.filter((m) => (m.threadId === key || m.id === key) && !pendingHas(m.id)).sort((a, b) => a.date - b.date).map((m) => row(m)),
@@ -274,7 +283,7 @@ export function createDemo(): MailApi & { update: any } {
     fileSizes: async (files) => files.map((f) => demoSizes[f] ?? 240e3),
     pickFiles: async () => ['Demo/Elysium_trailer_ProRes.mov'],
     openAttachment: async () => { alert('Demo: τα συνημμένα ανοίγουν στην εφαρμογή. / Attachments open in the app.') },
-    saveAttachment: async () => { alert('Demo: τα συνημμένα αποθηκεύονται στην εφαρμογή. / Attachments are saved in the app.') },
+    saveAttachment: async () => { alert('Demo: τα συνημμένα αποθηκεύονται στην εφαρμογή. / Attachments are saved in the app.'); return null },
     openExternal: async (url) => {
       const m = url.match(/^roarmail:\/\/message\/([^?]+)/)
       if (m) { const x = msgs.find((y) => y.id === decodeURIComponent(m[1])); if (x) emit({ type: 'open', messageId: x.threadId || x.id, subject: x.subject }); return }

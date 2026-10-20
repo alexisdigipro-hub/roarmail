@@ -6,10 +6,11 @@ import { app } from 'electron'
 import schema001 from './schema.sql'
 import schema002 from './schema002.sql'
 import schema003 from './schema003.sql'
+import schema004 from './schema004.sql'
 
 export type DB = Database.Database
 
-const MIGRATIONS: string[] = [schema001, schema002, schema003]
+const MIGRATIONS: string[] = [schema001, schema002, schema003, schema004]
 
 export function openStore(): DB {
   const db = new Database(path.join(app.getPath('userData'), 'roarmail.db'))

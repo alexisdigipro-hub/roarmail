@@ -7,7 +7,7 @@ import { openStore } from './store'
 import { MailService } from './mail'
 import { autodetect } from './autodetect'
 import { RoarMe } from './roarme'
-import type { LockState, MailEvent, MessageRow } from '../shared/api'
+import type { LockState, MailEvent, MessageRow, NewMailSound } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const updater = require('./updater.js')
 
@@ -130,17 +130,25 @@ app.whenReady().then(() => {
     else win?.webContents.once('did-finish-load', () => setTimeout(() => emit(ev), 300))
   }
 
-  const notify = (accountId: string, rows: MessageRow[]) => {
+  // Settings > General: who notifies, and which sound plays (RoarMail's own sounds play in the window, even when it is in front)
+  const known = db.prepare('select 1 from contacts where email = ? and use_count > 0')
+  const notify = (accountId: string, all: MessageRow[]) => {
+    const s = mail.settings()
+    const rows = s.notifyFor === 'none' ? [] : s.notifyFor === 'known' ? all.filter((r) => known.get(r.fromEmail.toLowerCase())) : all
+    if (!rows.length) return
+    const own = s.newMailSound !== 'system' && s.newMailSound !== 'none'
+    if (own) emit({ type: 'sound', sound: s.newMailSound as NewMailSound })
     if (!Notification.isSupported() || win?.isFocused()) return
+    const silent = s.newMailSound !== 'system'
     const list = rows.slice(0, 3)
     for (const r of list) {
       const n = locked
-        ? new Notification({ title: 'RoarMail', body: '✉︎', silent: false })
-        : new Notification({ title: r.fromName || r.fromEmail, body: r.subject || '(no subject)', silent: false })
+        ? new Notification({ title: 'RoarMail', body: '✉︎', silent })
+        : new Notification({ title: r.fromName || r.fromEmail, body: r.subject || '(no subject)', silent })
       n.on('click', () => { show(); emit({ type: 'open', messageId: r.threadId || r.id }) })
       n.show()
     }
-    if (rows.length > list.length) new Notification({ title: 'RoarMail', body: `+${rows.length - list.length}` }).show()
+    if (rows.length > list.length) new Notification({ title: 'RoarMail', body: `+${rows.length - list.length}`, silent: true }).show()
   }
 
   const mail = new MailService(db, emit, notify)
@@ -221,6 +229,18 @@ app.whenReady().then(() => {
   handle('mail:discardDraft', (_e, id) => mail.discardDraft(id))
   handle('mail:draftFromMessage', (_e, id) => mail.draftFromMessage(id))
   handle('mail:updateAccount', (_e, id, patch) => mail.updateAccount(id, patch))
+  handle('mail:allAccounts', () => mail.allAccounts())
+  handle('mail:updateServer', (_e, id, cfg, pass) => mail.updateServer(id, cfg, pass || undefined))
+  handle('mail:addAlias', (_e, id, email, name) => mail.addAlias(id, email, name))
+  handle('mail:removeAlias', (_e, id) => mail.removeAlias(id))
+  handle('mail:serverFolders', (_e, id) => mail.serverFolders(id))
+  // Settings > General > Default mail app: mailto: links open RoarMail (the packaged app declares mailto, see package.json)
+  handle('mail:isDefaultMail', () => app.isDefaultProtocolClient('mailto'))
+  handle('mail:makeDefaultMail', () => { app.setAsDefaultProtocolClient('mailto'); return app.isDefaultProtocolClient('mailto') })
+  handle('mail:pickFolder', async () => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
+    return r.canceled ? null : r.filePaths[0] || null
+  })
   handle('mail:signatures', () => mail.signatures())
   handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))
   handle('mail:deleteSignature', (_e, id) => mail.deleteSignature(id))
@@ -294,10 +314,21 @@ app.whenReady().then(() => {
     fs.writeFileSync(file, a.content)
     await shell.openPath(file)
   })
+  // Settings > General > Downloads folder: saved straight there (a free name), or asked every time
   handle('mail:saveAttachment', async (_e, id) => {
     const a = await mail.attachment(id)
+    const dir = mail.settings().downloadsFolder
+    if (dir && fs.existsSync(dir)) {
+      const ext = path.extname(a.filename), base = path.basename(a.filename, ext)
+      let file = path.join(dir, a.filename)
+      for (let i = 2; fs.existsSync(file); i++) file = path.join(dir, `${base} ${i}${ext}`)
+      fs.writeFileSync(file, a.content)
+      return file
+    }
     const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('downloads'), a.filename) })
-    if (!r.canceled && r.filePath) fs.writeFileSync(r.filePath, a.content)
+    if (r.canceled || !r.filePath) return null
+    fs.writeFileSync(r.filePath, a.content)
+    return r.filePath
   })
 
   createWindow()

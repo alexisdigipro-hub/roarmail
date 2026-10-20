@@ -16,7 +16,22 @@ import type { Settings } from '../shared/api'
 export const LOOK_DEFAULTS = {
   theme: 'simba', accent: 'red', font: 'system', density: 'standard', radius: 12,
   motion: true, focusRings: false, glass: true, textSize: 2, lite: false,
+  listFont: 'system', listSize: 14, messageFont: 'system', monoFont: 'mono', plainMono: false,
+  quoteColors: true, quote1: '#6d5dfc', quote2: '#1fa3b8', quote3: '#3fae49',
 } as const satisfies Partial<Settings>
+
+/** Settings > General, as the main process starts them (src/main/mail.ts SETTINGS) */
+export const GENERAL_DEFAULTS = {
+  checkEvery: 5, newMailSound: 'system', actionSounds: false, dockBadge: 'inbox', notifyFor: 'inbox',
+  downloadsFolder: '', retrySending: true, searchTrash: true, searchJunk: true,
+} as const satisfies Partial<Settings>
+
+/** a font setting as CSS: one of FONTS, or a font installed on this computer ('local:<family>') */
+export function fontStack(key: string | undefined, fallback = FONTS[0][2]) {
+  if (key?.startsWith('local:')) return `"${key.slice(6).replace(/["\\]/g, '')}", ${fallback}`
+  return FONTS.find(([k]) => k === key)?.[2] || fallback
+}
+export const fontName = (key: string) => (key.startsWith('local:') ? key.slice(6) : FONTS.find(([k]) => k === key)?.[1] || key)
 
 // RoarMe's accents (prefs.js ACCENTS), same order and values
 export const ACCENTS: [string, string, string][] = [
@@ -61,6 +76,9 @@ export function applyLook(s: Settings) {
   r.style.setProperty('--r', `${rad}px`)
   r.style.setProperty('--R', `${Math.round(rad * 1.6)}px`)
   r.style.setProperty('--fs', `${TEXT_SIZES[s.textSize ?? 2] ?? 15.5}px`)
+  // Settings > Fonts & colours: the message list's own font and size
+  if (s.listFont && s.listFont !== 'system') r.style.setProperty('--list-font', fontStack(s.listFont)); else r.style.removeProperty('--list-font')
+  r.style.setProperty('--list-fs', `${Number(s.listSize) || 14}px`)
   if (s.motion === false) r.dataset.still = '1'; else delete r.dataset.still
   if (s.focusRings) r.dataset.focus = 'bold'; else delete r.dataset.focus
   r.dataset.surface = s.glass === false ? 'solid' : 'glass'
