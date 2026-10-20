@@ -243,6 +243,18 @@ export interface Settings {
   onlineSearch: boolean
   /** links, email addresses and phone numbers in plain text become clickable */
   detectLinks: boolean
+  /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
+  autoUpdate: boolean
+}
+
+/** the updater (src/main/updater.js), as Settings > Updates shows it */
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'installing' | 'error'
+  version: string; progress: number; error: string
+  /** this RoarMail's version */
+  current: string
+  /** when GitHub last answered (0 = not yet) */
+  checkedAt: number
 }
 
 export type NewMailSound = 'roar' | 'chime' | 'drop' | 'pop' | 'breeze'

@@ -332,3 +332,10 @@ html[data-theme='simba'] .seg:not(.lens) > button.on { color: #2a1410; backgroun
   font-size: 10.5px; font-weight: 700; color: var(--accent-ink); background: var(--accent); box-shadow: 0 0 0 2px var(--bg), 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); }
 .count.total { background: var(--glass-2); color: var(--muted); box-shadow: none; }
 small.block { display: block; margin-top: 2px; font-size: 12px; }
+
+/* Settings > Updates */
+.update-panel { display: flex; flex-direction: column; gap: 10px; }
+.update-panel .brand { font-size: 18px; letter-spacing: .12em; }
+.update-panel p { margin: 0; }
+.update-bar { height: 6px; border-radius: 6px; background: var(--glass-2); overflow: hidden; }
+.update-bar i { display: block; height: 100%; background: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); transition: width .3s; }

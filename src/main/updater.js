@@ -10,7 +10,8 @@ const path = require('path')
 const REPO = 'alexisdigipro-hub/roarmail'
 const EVERY = 2 * 3600e3
 
-let state = { status: 'idle', version: '', progress: 0, error: '' }
+// current: this version; checkedAt: the last answer from GitHub (Settings > Updates shows "up to date" from it)
+let state = { status: 'idle', version: '', progress: 0, error: '', current: app.getVersion(), checkedAt: 0 }
 let file = ''
 let timer = null
 let busy = false
@@ -44,12 +45,14 @@ async function latest() {
 }
 
 async function check() {
-  if (!app.isPackaged || busy || state.status === 'ready') return state
+  if (busy || state.status === 'ready') return state
+  // a copy run from the source has nothing to update: it says so instead of checking
+  if (!app.isPackaged) { send({ status: 'idle', error: 'dev', checkedAt: Date.now() }); return state }
   busy = true
   try {
     send({ status: 'checking', error: '' })
     const { tag, version } = await latest()
-    if (!tag || !version || !newer(version, app.getVersion())) { send({ status: 'idle', version: '' }); return state }
+    if (!tag || !version || !newer(version, app.getVersion())) { send({ status: 'idle', version: '', checkedAt: Date.now() }); return state }
     const name = `RoarMail-${version}-beta-${SUFFIX()}`
     fs.mkdirSync(dir(), { recursive: true })
     // anything older left from before goes
@@ -79,7 +82,7 @@ async function check() {
       fs.renameSync(part, target)
     }
     file = target
-    send({ status: 'ready', version, progress: 100 })
+    send({ status: 'ready', version, progress: 100, checkedAt: Date.now() })
     if (notified !== version && Notification.isSupported()) {
       notified = version
       const n = new Notification({ title: `RoarMail ${version} is ready`, body: 'Restart RoarMail to update. It takes a few seconds.' })

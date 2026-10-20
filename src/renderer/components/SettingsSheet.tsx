@@ -2,17 +2,17 @@
 // sliding to the open one), the page on the right with a big title. Appearance carries RoarMe's look settings.
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, LockState, NewMailSound, Settings, Signature, SwipeAction, Tls } from '../../shared/api'
-import { t, type Key } from '../i18n'
+import type { Account, LockState, NewMailSound, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
+import { t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
 import { Icon } from './Icon'
 import { RoarMeAccount } from './RoarMe'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
-type Page = 'general' | 'accounts' | 'roarme' | 'appearance' | 'fonts' | 'signatures' | 'privacy' | 'expert' | 'keys'
+type Page = 'general' | 'accounts' | 'roarme' | 'appearance' | 'fonts' | 'signatures' | 'privacy' | 'expert' | 'updates' | 'keys'
 const PAGES: [Page, string][] = [
-  ['general', 'gear'], ['accounts', 'inbox'], ['roarme', 'roar'], ['appearance', 'palette'], ['fonts', 'type'], ['signatures', 'compose'], ['privacy', 'shield'], ['expert', 'sliders'], ['keys', 'keyboard'],
+  ['general', 'gear'], ['accounts', 'inbox'], ['roarme', 'roar'], ['appearance', 'palette'], ['fonts', 'type'], ['signatures', 'compose'], ['privacy', 'shield'], ['expert', 'sliders'], ['updates', 'download'], ['keys', 'keyboard'],
 ]
 const MAC = window.roarmail.platform === 'darwin'
 
@@ -23,6 +23,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
   const [sigs, setSigs] = useState<Signature[]>([])
   const [prefs, setPrefs] = useState<Settings | null>(null)
   const nav = useLens<HTMLDivElement>(page)
+  const upd = useUpdate()
   const loadSigs = () => window.roarmail.signatures().then(setSigs)
   useEffect(() => { loadSigs(); window.roarmail.settings().then(setPrefs) }, [])
 
@@ -32,6 +33,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
     if (p === 'appearance') return prefs.theme === 'pumba' ? 'Pumba' : 'Simba'
     if (p === 'signatures') return sigs.length ? String(sigs.length) : ''
     if (p === 'privacy') return prefs.lock ? t.appLockShort : ''
+    if (p === 'updates') return upd?.status === 'ready' ? t.up_readyShort : upd?.current || ''
     return ''
   }
 
@@ -63,6 +65,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
             {page === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
             {page === 'privacy' && <Privacy />}
             {page === 'general' && <General />}
+            {page === 'updates' && prefs && <Updates s={prefs} onChange={(n) => { setPrefs(n); onLook(n) }} />}
             {page === 'expert' && prefs && <Advanced s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
             {page === 'fonts' && prefs && <Fonts s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
             {page === 'keys' && <Shortcuts />}
@@ -488,6 +491,55 @@ function General() {
           {swipes.map((w) => <option key={w} value={w}>{t[`sw_${w}` as Key]}</option>)}
         </select>
       </div>
+    </div>
+  )
+}
+
+/** the updater's state, live (the desktop app only; the web has none) */
+function useUpdate() {
+  const [u, setU] = useState<UpdateState | null>(null)
+  useEffect(() => {
+    const api = (window.roarmail as any).update
+    if (!api) return undefined
+    api.state().then(setU).catch(() => {})
+    return api.on(setU)
+  }, [])
+  return u
+}
+
+/** Settings > Updates: this version, a Check now button, what the updater is doing, and updating by itself */
+function Updates({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
+  const u = useUpdate()
+  const api = (window.roarmail as any).update
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { window.roarmail.setSetting(k, v); onChange({ ...s, [k]: v }) }
+  const since = u?.checkedAt ? when(u.checkedAt) : ''
+  const line = !u ? t.up_noUpdater
+    : u.status === 'checking' ? t.up_checking
+    : u.status === 'downloading' ? `${t.up_downloading} ${u.version} · ${u.progress}%`
+    : u.status === 'ready' ? `${t.up_ready} ${u.version}`
+    : u.status === 'installing' ? t.up_installing
+    : u.status === 'error' ? `${t.up_error} (${u.error})`
+    : u.error === 'dev' ? t.up_dev
+    : u.checkedAt ? `${t.up_latest} · ${t.up_checked} ${since}` : ''
+  return (
+    <div className="stack">
+      <div className="panel update-panel">
+        <div className="row">
+          <div className="brand"><b>ROAR</b><i>MAIL</i></div>
+          <span className="grow" />
+          <b className="muted">{u?.current ? `${t.up_version} ${u.current}` : ''}</b>
+        </div>
+        {u?.status === 'downloading' && <div className="update-bar"><i style={{ width: `${u.progress}%` }} /></div>}
+        <p className={`small ${u?.status === 'error' ? 'error' : u?.status === 'ready' ? 'ok-text' : 'muted'}`}>{line}</p>
+        <div className="row end">
+          {u?.status === 'ready'
+            ? <button className="pill primary" onClick={() => api.install()}>{t.up_restart}</button>
+            : <button className="pill" disabled={!api || u?.status === 'checking' || u?.status === 'downloading'} onClick={() => api.check()}>
+                <Icon name="refresh" size={14} /> {t.up_check}</button>}
+        </div>
+      </div>
+      <Toggle label={t.up_auto} hint={t.up_autoHint} on={s.autoUpdate} set={(v) => set('autoUpdate', v)} />
+      <p className="muted small">{t.up_how}</p>
     </div>
   )
 }

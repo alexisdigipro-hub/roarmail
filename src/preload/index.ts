@@ -81,6 +81,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   update: {
     state: () => ipcRenderer.invoke('mail:update-state'),
     install: () => ipcRenderer.invoke('mail:update-install'),
+    check: () => ipcRenderer.invoke('mail:update-check'),
     on: (cb: (s: unknown) => void) => {
       const h = (_e: unknown, s: unknown) => cb(s)
       ipcRenderer.on('mail:update', h)

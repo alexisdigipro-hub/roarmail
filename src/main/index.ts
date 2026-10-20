@@ -364,6 +364,13 @@ app.whenReady().then(() => {
   mail.badge()
   powerMonitor.on('resume', () => setTimeout(() => mail.reconnectAll(), 3e3))
   updater.start(ipcMain, () => { quitting = true })
+  // Settings > Updates > Update by itself: a downloaded update installs when RoarMail is not being used
+  // (window closed or in the background and nobody at the computer for two minutes), then RoarMail opens again
+  setInterval(() => {
+    if (!mail.settings().autoUpdate || updater.getState().status !== 'ready') return
+    const away = !win || !win.isVisible() || (!win.isFocused() && powerMonitor.getSystemIdleTime() >= 120)
+    if (away) updater.restart(() => { quitting = true })
+  }, 60e3)
 
   const mac = process.platform === 'darwin'
   Menu.setApplicationMenu(Menu.buildFromTemplate([

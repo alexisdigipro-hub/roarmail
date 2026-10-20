@@ -125,6 +125,12 @@ const el = {
   ad_reset: 'Καθαρισμός', ad_clearCache: 'Άδειασμα αποθηκευμένων μηνυμάτων', ad_clearCacheHint: 'Ελευθερώνει χώρο. Τα μηνύματα ξανακατεβαίνουν όταν τα ανοίγεις.',
   ad_clear: 'Άδειασμα', ad_freed: 'Ελευθερώθηκαν', ad_resetSettings: 'Επαναφορά ρυθμίσεων', ad_resetHint: 'Όλες οι ρυθμίσεις όπως ήταν στην αρχή. Λογαριασμοί και μηνύματα μένουν.',
   ad_resetQ: 'Να γυρίσουν όλες οι ρυθμίσεις στις αρχικές;', ad_resetDone: 'Οι ρυθμίσεις γύρισαν στις αρχικές.', ad_resetBtn: 'Επαναφορά',
+  updates: 'Ενημερώσεις', up_version: 'Έκδοση', up_check: 'Έλεγχος για ενημέρωση', up_checking: 'Ελέγχω για νέα έκδοση…',
+  up_downloading: 'Κατεβαίνει η', up_ready: 'Έτοιμη για εγκατάσταση η', up_readyShort: 'Νέα έκδοση', up_installing: 'Εγκαθίσταται…',
+  up_error: 'Ο έλεγχος δεν έγινε', up_latest: 'Έχεις την τελευταία έκδοση', up_checked: 'έλεγχος', up_restart: 'Επανεκκίνηση και ενημέρωση',
+  up_dev: 'Αυτό το αντίγραφο τρέχει από τον κώδικα: δεν ενημερώνεται.', up_noUpdater: 'Οι ενημερώσεις γίνονται στην εφαρμογή για Mac και Windows.',
+  up_auto: 'Ενημέρωση μόνη της', up_autoHint: 'Όταν κατέβει μια νέα έκδοση, εγκαθίσταται όταν δεν χρησιμοποιείς το RoarMail και ανοίγει ξανά μόνο του.',
+  up_how: 'Το RoarMail ελέγχει για νέα έκδοση κάθε 2 ώρες και την κατεβάζει στο παρασκήνιο. Αν κλείσεις την εφαρμογή, η ενημέρωση γίνεται εκείνη τη στιγμή.',
 }
 const en: typeof el = {
   snoozed: 'Snoozed', snoozeIt: 'Snooze', snoozeUntil: 'Snooze until…', snoozedToast: 'Snoozed until', setAside: 'Set aside',
@@ -252,6 +258,12 @@ const en: typeof el = {
   ad_reset: 'Clean up', ad_clearCache: 'Clear the message cache', ad_clearCacheHint: 'Frees space. Messages download again when opened.',
   ad_clear: 'Clear', ad_freed: 'Freed', ad_resetSettings: 'Reset settings', ad_resetHint: 'Every setting as it was at the start. Accounts and mail stay.',
   ad_resetQ: 'Put every setting back to how it started?', ad_resetDone: 'Settings are back to how they started.', ad_resetBtn: 'Reset',
+  updates: 'Updates', up_version: 'Version', up_check: 'Check for updates', up_checking: 'Checking for a new version…',
+  up_downloading: 'Downloading', up_ready: 'Ready to install:', up_readyShort: 'New version', up_installing: 'Installing…',
+  up_error: 'The check did not work', up_latest: 'You have the latest version', up_checked: 'checked', up_restart: 'Restart and update',
+  up_dev: 'This copy runs from the source code: it does not update.', up_noUpdater: 'Updates happen in the app for Mac and Windows.',
+  up_auto: 'Update by itself', up_autoHint: 'When a new version has downloaded, it installs while you are not using RoarMail and opens again by itself.',
+  up_how: 'RoarMail looks for a new version every 2 hours and downloads it in the background. Quitting the app installs it then.',
 }
 
 // Settings > General > Language: the choice is kept here too, so it applies before the settings arrive
