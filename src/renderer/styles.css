@@ -1,26 +1,39 @@
 /* RoarMail, in the THEMADLIONS family look (RoarMe "Lions"): near-black graphite, Jost, Rosso Corsa #d40000,
    panels as soft tiles with a hairline, controls as pills. Light follows the system. */
+/* RoarMail wears RoarMe's main theme, Simba (RoarMe "ember" in red, Alex 20 Oct): graphite glass panels that float
+   on a soft graphite backdrop, one red accent that glows, the chosen thing lit from inside, 12px corners,
+   the system font for reading and Jost only for the wordmark. Light follows the system. */
 :root {
-  --bg: #0b0b0c; --panel: #121214; --panel-2: #18181b; --panel-3: #1f1f23;
-  --glass: rgba(255, 255, 255, .06); --glass-2: rgba(255, 255, 255, .1);
-  --edge: rgba(255, 255, 255, .08); --edge-2: rgba(255, 255, 255, .15);
-  --text: #f2f0ec; --muted: #9a978f;
+  --bg: #1b1e23; --panel: rgba(44, 49, 57, .62); --panel-2: rgba(52, 58, 67, .92); --panel-3: rgba(64, 70, 80, .95);
+  --side: rgba(58, 64, 74, .55);
+  --glass: rgba(255, 255, 255, .055); --glass-2: rgba(255, 255, 255, .1);
+  --edge: rgba(255, 255, 255, .1); --edge-2: rgba(255, 255, 255, .16);
+  --text: #eef0f3; --muted: rgba(214, 220, 228, .58);
   --accent: #d40000; --accent-2: #ff3b30; --accent-ink: #fff;
-  --sel: rgba(212, 0, 0, .16); --sel-edge: rgba(212, 0, 0, .55);
-  --danger: #ff5a4e; --ok: #4cd07d;
-  --shadow: 0 30px 70px rgba(0, 0, 0, .55);
-  --font: Jost, Futura, 'Century Gothic', 'Avenir Next', system-ui, sans-serif;
+  --sel: color-mix(in srgb, var(--accent) 18%, transparent); --sel-edge: color-mix(in srgb, var(--accent) 60%, transparent);
+  --glow: 0 0 24px color-mix(in srgb, var(--accent) 24%, transparent);
+  --field: rgba(0, 0, 0, .2);
+  --danger: #ff5a5a; --ok: #4ade80;
+  --blur: blur(26px) saturate(140%);
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 30px 70px rgba(0, 0, 0, .45);
+  --float: rgba(40, 45, 53, .96);
+  --r: 12px; --R: 19px;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Inter, Roboto, sans-serif;
+  --brand: Jost, Futura, 'Century Gothic', 'Avenir Next', system-ui, sans-serif;
+  --gap: 14px;
   --top: 40px;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f3f0e8; --panel: #ffffff; --panel-2: #f7f5f0; --panel-3: #ebe7dd;
-    --glass: rgba(0, 0, 0, .04); --glass-2: rgba(0, 0, 0, .07);
-    --edge: rgba(0, 0, 0, .09); --edge-2: rgba(0, 0, 0, .16);
-    --text: #151412; --muted: #6f6a60;
-    --sel: rgba(212, 0, 0, .09); --sel-edge: rgba(212, 0, 0, .45);
-    --shadow: 0 24px 56px rgba(40, 30, 20, .16);
+    --bg: #eceef1; --panel: rgba(255, 255, 255, .62); --panel-2: rgba(255, 255, 255, .96); --panel-3: #ffffff;
+    --side: rgba(255, 255, 255, .5);
+    --glass: rgba(20, 24, 30, .045); --glass-2: rgba(20, 24, 30, .08);
+    --edge: rgba(20, 24, 30, .1); --edge-2: rgba(20, 24, 30, .16);
+    --text: #1b1f25; --muted: rgba(27, 31, 37, .55);
+    --field: rgba(255, 255, 255, .8);
+    --shadow: inset 0 1px 0 #fff, 0 22px 50px rgba(30, 36, 46, .14);
+    --float: rgba(255, 255, 255, .97);
     color-scheme: light;
   }
 }
@@ -29,6 +42,7 @@
 html, body, #root { height: 100%; margin: 0; }
 body {
   font: 14px/1.45 var(--font); color: var(--text); background: var(--bg);
+  background: radial-gradient(1200px 700px at 50% -12%, #4b525d 0%, transparent 62%), linear-gradient(180deg, #2b3038 0%, #1c1f24 55%, #15171b 100%);
   -webkit-font-smoothing: antialiased; user-select: none; overflow: hidden;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -265,3 +279,84 @@ iframe.body { display: block; width: 100%; border: 0; border-radius: 14px; backg
 .sig-edit { flex: 1; display: flex; flex-direction: column; }
 .editor.sig { flex: none; min-height: 160px; padding: 12px 14px; border-radius: 12px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); }
 .sig-empty { flex: 1; display: grid; place-items: center; }
+
+
+/* =====================================================================
+   Simba (RoarMe's main theme): the columns float as glass cards on the graphite backdrop
+   ===================================================================== */
+@media (prefers-color-scheme: light) {
+  body { background: radial-gradient(1200px 700px at 50% -12%, #ffffff 0%, transparent 62%), linear-gradient(180deg, #f1f2f4 0%, #e3e6ea 100%); }
+}
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(520px 420px at 82% 88%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 70%),
+    radial-gradient(420px 360px at 12% 10%, rgba(255, 255, 255, .05) 0%, transparent 70%);
+}
+.app { position: relative; background: none; padding: var(--gap); gap: var(--gap); }
+.app::before { content: ''; position: fixed; inset: 0 0 auto 0; height: var(--gap); -webkit-app-region: drag; }
+:is(.rail, .folders, .list, .viewer) {
+  border: 1px solid var(--edge); border-radius: var(--R); background: var(--panel); box-shadow: var(--shadow);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); overflow: hidden;
+}
+.rail, .folders { background: var(--side); }
+.rail { padding-top: 46px; }
+[data-platform='win32'] .rail { padding-top: 14px; }
+.folders { padding-top: 46px; }
+.list-head { padding-top: 40px; }
+.list { background: var(--panel); }
+.viewer .toolbar { padding-top: 0; height: 54px; }
+.brand b, .empty-mark b, .zero { font-family: var(--brand); }
+.brand i, .empty-mark i { font-family: var(--brand); color: var(--accent); text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 60%, transparent); }
+.zero { text-shadow: 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* the chosen thing, lit from inside */
+.msg.on, .folder.on, .suggest li.on {
+  background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge), var(--glow);
+}
+.folder.on .ic { color: var(--accent-2); }
+.msg, .folder, .suggest li, .folded { border-radius: var(--r); }
+.swipe { border-radius: var(--r); }
+.swipe .msg { background: transparent; }
+.swipe.moving .msg { background: var(--panel-2); }
+.acc.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--c, var(--accent)), 0 0 18px color-mix(in srgb, var(--c, var(--accent)) 55%, transparent); }
+.acc.all { background: linear-gradient(135deg, #4d5561, #2b3038); color: #e9ecf0; }
+.avatar { background-image: linear-gradient(135deg, rgba(255, 255, 255, .14), rgba(0, 0, 0, .12)); }
+.dot { box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent); }
+.count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center; font-size: 11px; font-weight: 600;
+  background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* controls: graphite glass, 12px corners, the main one red and glowing */
+.pill { border-radius: var(--r); font-weight: 600; letter-spacing: 0; background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); }
+.pill:hover { background: var(--glass-2); }
+.pill.primary { background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent), 0 6px 24px color-mix(in srgb, var(--accent) 45%, transparent); }
+.pill.primary:hover { background: var(--accent); filter: brightness(1.08); }
+.pill.ghost { background: transparent; box-shadow: none; }
+.tool { border-radius: var(--r); }
+.search { border-radius: var(--r); background: var(--field); box-shadow: inset 0 0 0 1px var(--edge); }
+.search:focus-within { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.sheet input, .sheet select { border-radius: var(--r); background: var(--field); }
+.sheet input:focus, .sheet select:focus { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.link { color: var(--accent-2); }
+.toast .link { color: var(--accent-2); }
+
+/* sheets, menus and the toast float as glass */
+.sheet { border-radius: calc(var(--R) + 4px); background: var(--float); box-shadow: var(--shadow), inset 0 0 0 1px var(--edge-2);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.sheet-wrap { background: rgba(10, 12, 15, .45); }
+.suggest, .toast, .quick { background: var(--float); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-radius: var(--r); }
+.toast { border-radius: 999px; }
+.tabs { padding: 3px; border-radius: 999px; background: rgba(0, 0, 0, .25); box-shadow: inset 0 0 0 1px var(--edge); }
+.tab { height: 30px; }
+.tab.on { color: #2a1410; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 38%, #fff), color-mix(in srgb, var(--accent) 70%, #fff));
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 50%, transparent); }
+.panel, .att, .chip, .banner, .outbox-bar { border-radius: var(--r); }
+.outbox-bar.failed { box-shadow: inset 0 0 0 1px var(--sel-edge), var(--glow); }
+.swatch.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
+iframe.body { border-radius: var(--r); }
+.list-foot { border-top-color: var(--edge); }
+@media (prefers-color-scheme: light) {
+  .tabs { background: rgba(20, 24, 30, .06); }
+  .acc.all { background: linear-gradient(135deg, #d8dce2, #b9bfc8); color: #1b1f25; }
+  .sheet-wrap { background: rgba(40, 46, 56, .25); }
+}
