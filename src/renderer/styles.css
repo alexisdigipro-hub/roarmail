@@ -52,7 +52,9 @@ input, select { -webkit-user-select: text; user-select: text; }
 .row { display: flex; align-items: center; gap: 8px; }
 .row.end { justify-content: flex-end; }
 .ic { flex: none; display: block; }
-.drag { position: absolute; inset: 0 0 auto 0; height: var(--top); -webkit-app-region: drag; }
+/* the strip that drags the window sits behind what is in it: since the Mac buttons got their own strip (0.8.1)
+   the list's header moved up into it, and the strip in front swallowed the clicks on the new message button */
+.drag { position: absolute; inset: 0 0 auto 0; z-index: -1; height: var(--top); -webkit-app-region: drag; }
 button, input, select, label, .no-drag { -webkit-app-region: no-drag; }
 
 .boot { height: 100%; display: grid; place-items: center; }
