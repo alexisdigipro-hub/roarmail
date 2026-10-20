@@ -44,7 +44,7 @@ function createWindow() {
     title: 'RoarMail',
     ...(mac
       ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 28, y: 30 } }
-      : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: '#1b1e23', symbolColor: '#eef0f3', height: 40 } }),
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: nativeTheme.shouldUseDarkColors ? { color: '#1b1e23', symbolColor: '#eef0f3', height: 40 } : { color: '#eceef1', symbolColor: '#1b1f25', height: 40 } }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true,
@@ -102,6 +102,16 @@ app.whenReady().then(() => {
 
   const mail = new MailService(db, emit, notify)
 
+  // Settings > General > Appearance: the whole app (and the system's own controls) follow it
+  const applyAppearance = (v: string) => {
+    nativeTheme.themeSource = v === 'dark' || v === 'light' ? v : 'system'
+    if (process.platform === 'win32') {
+      const dark = nativeTheme.shouldUseDarkColors
+      win?.setTitleBarOverlay?.({ color: dark ? '#1b1e23' : '#eceef1', symbolColor: dark ? '#eef0f3' : '#1b1f25', height: 40 })
+    }
+  }
+  applyAppearance(mail.settings().appearance)
+
   handle('mail:platform', () => process.platform)
   handle('mail:autodetect', (_e, email: string) => autodetect(email))
   handle('mail:testAccount', (_e, cfg, pass) => mail.test(cfg, pass))
@@ -132,7 +142,7 @@ app.whenReady().then(() => {
   handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))
   handle('mail:deleteSignature', (_e, id) => mail.deleteSignature(id))
   handle('mail:settings', () => mail.settings())
-  handle('mail:setSetting', (_e, k, v) => mail.setSetting(k, v))
+  handle('mail:setSetting', (_e, k, v) => { mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v) })
   handle('mail:refresh', (_e, id) => mail.refresh(id))
   handle('mail:openExternal', (_e, url) => openSafe(url))
   handle('mail:unsubscribe', (_e, id) => mail.unsubscribe(id))

@@ -42,7 +42,7 @@ const emlPath = (id: string) => path.join(mailDir(), `${id}.eml`)
 const toRow = (r: Row): MessageRow => ({
   id: r.id, accountId: r.account_id, threadId: r.thread_id || null,
   fromName: r.from_name || '', fromEmail: r.from_email || '',
-  subject: r.subject || '', snippet: r.snippet || '', date: r.date,
+  subject: r.subject || '', snippet: cleanText(r.snippet || '').replace(/\s+/g, ' ').trim(), date: r.date,
   seen: r.unread_n != null ? r.unread_n === 0 : !!r.seen,
   flagged: r.flag_n != null ? r.flag_n > 0 : !!r.flagged,
   answered: !!r.answered,
@@ -58,7 +58,9 @@ const toAccount = (r: Row, state: Account['state'], error?: string): Account => 
   signatureId: r.signature_id || null, state, error,
 })
 
-const snippetOf = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 220)
+// the text version of HTML mail carries [image: …] and [https://…] marks; a snippet reads better without them
+const cleanText = (s: string) => s.replace(/\[(?:image:[^\]]*|https?:[^\]\s]*|cid:[^\]]*)\]/gi, ' ')
+const snippetOf = (text: string) => cleanText(text).replace(/\s+/g, ' ').trim().slice(0, 220)
 const msgIds = (s: string | null | undefined) => (s ? s.match(/<[^>]+>/g) || [] : [])
 const fmtAddr = (a: Address) => (a.name ? `${a.name.replace(/[",]/g, '')} <${a.address}>` : a.address)
 
@@ -1091,6 +1093,7 @@ export class MailService {
       stripTracking: m.get('stripTracking') !== 'false',
       lock: m.get('lock') === 'true',
       lockAfter: Math.max(0, Number(m.get('lockAfter') ?? 15)),
+      appearance: (['dark', 'light'].includes(m.get('appearance')) ? m.get('appearance') : 'system') as Settings['appearance'],
     }
   }
 

@@ -70,7 +70,7 @@ const msgs: DemoMsg[] = [
 ]
 
 const sigs: Signature[] = [{ id: 's1', name: 'THEMADLIONS', html: '<b>Alex Konstantinidis</b><br>THEMADLIONS · themadlions.com' }]
-let settings: Settings = { undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15 }
+let settings: Settings = { undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system' }
 const outbox: (OutboxItem & { draft: Draft })[] = []
 const pending = new Map<string, { ids: string[]; from: Map<string, string>; timer: ReturnType<typeof setTimeout> }>()
 const listeners = new Set<(e: MailEvent) => void>()

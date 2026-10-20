@@ -122,6 +122,11 @@ function General() {
   const swipes: SwipeAction[] = ['archive', 'trash', 'flag', 'seen', 'none']
   return (
     <div className="stack">
+      <label>{t.appearance}
+        <select value={s.appearance} onChange={(e) => set('appearance', e.target.value as Settings['appearance'])}>
+          <option value="system">{t.ap_system}</option><option value="dark">{t.ap_dark}</option><option value="light">{t.ap_light}</option>
+        </select>
+      </label>
       <label>{t.undoSend}
         <select value={s.undoSendSeconds} onChange={(e) => set('undoSendSeconds', Number(e.target.value))}>
           {[0, 5, 10, 20, 30].map((n) => <option key={n} value={n}>{n ? `${n} ${t.seconds}` : t.off}</option>)}

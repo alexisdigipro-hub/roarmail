@@ -1,5 +1,6 @@
 // Greek and English; the app follows the system language.
 const el = {
+  appearance: 'Εμφάνιση', ap_system: 'Αυτόματα, όπως το σύστημα', ap_dark: 'Σκούρο', ap_light: 'Ανοιχτό',
   privacy: 'Απόρρητο', blockTrackers: 'Μπλοκάρισμα tracking pixels (και όταν φαίνονται οι εικόνες)', stripTracking: 'Καθάρισμα συνδέσμων από utm και παρόμοια',
   appLock: 'Κλείδωμα με Touch ID', lockAfter: 'Κλείδωμα μετά από', minutes: 'λεπτά', onlySleep: 'Μόνο στο άνοιγμα και στον ύπνο', lockNow: 'Κλείδωμα τώρα',
   lockUnavailable: 'Χρειάζεται Mac με Touch ID. Στα Windows έρχεται σύντομα με Windows Hello.', blockedSenders: 'Μπλοκαρισμένοι αποστολείς', noneBlocked: 'Κανένας',
@@ -50,6 +51,7 @@ const el = {
   shortcuts: 'Συντομεύσεις: C νέο · R απάντηση · A σε όλους · F προώθηση · E αρχείο · # κάδος · M μετακίνηση · S αστέρι · U αδιάβαστο · Z αναίρεση · / αναζήτηση',
 }
 const en: typeof el = {
+  appearance: 'Appearance', ap_system: 'Automatic, like the system', ap_dark: 'Dark', ap_light: 'Light',
   privacy: 'Privacy', blockTrackers: 'Block tracking pixels (even when images are shown)', stripTracking: 'Clean utm and similar tags off links',
   appLock: 'Lock with Touch ID', lockAfter: 'Lock after', minutes: 'minutes', onlySleep: 'Only at start and after sleep', lockNow: 'Lock now',
   lockUnavailable: 'Needs a Mac with Touch ID. Windows Hello is coming.', blockedSenders: 'Blocked senders', noneBlocked: 'None',

@@ -30,7 +30,7 @@ export default function App() {
   const [moving, setMoving] = useState<{ accountId: string; ids: string[]; exclude?: string } | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [outbox, setOutbox] = useState<OutboxItem[]>([])
-  const [prefs, setPrefs] = useState<Settings>({ undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15 })
+  const [prefs, setPrefs] = useState<Settings>({ undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system' })
   const [locked, setLocked] = useState(false)
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
   const [update, setUpdate] = useState<{ status: string; version: string } | null>(null)

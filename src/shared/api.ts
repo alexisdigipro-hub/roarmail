@@ -123,6 +123,8 @@ export interface Settings {
   /** ask for Touch ID on start, after sleep and after lockAfter minutes away */
   lock: boolean
   lockAfter: number
+  /** follow the system, or always dark / always light */
+  appearance: 'system' | 'dark' | 'light'
 }
 
 export interface LockState { available: boolean; enabled: boolean; locked: boolean; method: 'touchid' | 'none' }
