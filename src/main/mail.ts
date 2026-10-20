@@ -1,6 +1,10 @@
 // The mail engine. Talks IMAP and SMTP straight from this computer to the user's own mail servers:
 // no RoarMail server sits in between. Mail is cached in the local database (headers, text for search)
 // and as .eml files (the full message, parsed again when opened).
+//
+// Every change the user makes (read, star, archive, move, send) is written to the local database at once
+// and queued; a small runner takes the queue to the server. That gives undo (archive, trash and move wait a
+// few seconds, sending waits the "undo send" delay) and offline use (the queue waits for the connection).
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
 import MailComposer from 'nodemailer/lib/mail-composer'
@@ -13,15 +17,18 @@ import type { DB } from './store'
 import { now, uuid } from './store'
 import { seal, open } from './vault'
 import type {
-  Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, ServerConfig,
+  Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
+  ServerConfig, Settings, Signature,
 } from '../shared/api'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
 const FIRST_SYNC_LIMIT = 300
 const PREFETCH = 40
 const POLL_MS = 5 * 60e3
+const UNDO_MS = 5e3
 
 type Row = Record<string, any>
+type MoveKind = 'archive' | 'trash' | 'move' | 'delete'
 
 const ROLE_BY_USE: Record<string, FolderRole> = {
   '\\Inbox': 'inbox', '\\Sent': 'sent', '\\Drafts': 'drafts', '\\Trash': 'trash', '\\Junk': 'spam',
@@ -31,19 +38,29 @@ const ROLE_BY_USE: Record<string, FolderRole> = {
 const mailDir = () => path.join(app.getPath('userData'), 'mail')
 const emlPath = (id: string) => path.join(mailDir(), `${id}.eml`)
 
+/** a list row from a grouped query (conversation) or a plain message row */
 const toRow = (r: Row): MessageRow => ({
-  id: r.id, accountId: r.account_id, fromName: r.from_name || '', fromEmail: r.from_email || '',
+  id: r.id, accountId: r.account_id, threadId: r.thread_id || null,
+  fromName: r.from_name || '', fromEmail: r.from_email || '',
   subject: r.subject || '', snippet: r.snippet || '', date: r.date,
-  seen: !!r.seen, flagged: !!r.flagged, answered: !!r.answered, hasAttachments: !!r.has_attachments,
+  seen: r.unread_n != null ? r.unread_n === 0 : !!r.seen,
+  flagged: r.flag_n != null ? r.flag_n > 0 : !!r.flagged,
+  answered: !!r.answered,
+  hasAttachments: r.att_n != null ? r.att_n > 0 : !!r.has_attachments,
+  ids: r.ids ? String(r.ids).split(',') : [r.id],
+  count: r.n || 1,
 })
 
 const toAccount = (r: Row, state: Account['state'], error?: string): Account => ({
   id: r.id, email: r.email, displayName: r.display_name, color: r.color, provider: r.provider,
   imapHost: r.imap_host, imapPort: r.imap_port, imapTls: r.imap_tls,
-  smtpHost: r.smtp_host, smtpPort: r.smtp_port, smtpTls: r.smtp_tls, username: r.username, state, error,
+  smtpHost: r.smtp_host, smtpPort: r.smtp_port, smtpTls: r.smtp_tls, username: r.username,
+  signatureId: r.signature_id || null, state, error,
 })
 
 const snippetOf = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 220)
+const msgIds = (s: string | null | undefined) => (s ? s.match(/<[^>]+>/g) || [] : [])
+const fmtAddr = (a: Address) => (a.name ? `${a.name.replace(/[",]/g, '')} <${a.address}>` : a.address)
 
 function hasAttachment(node: any): boolean {
   if (!node) return false
@@ -87,10 +104,11 @@ function friendly(e: any): string {
   const m = String(e?.responseText || e?.response || e?.message || e)
   if (e?.authenticationFailed || /auth|login|credentials|password/i.test(m)) return 'auth'
   if (/ENOTFOUND|EAI_AGAIN/.test(m)) return 'host'
-  if (/ETIMEDOUT|timeout|ECONNREFUSED|ECONNRESET/i.test(m)) return 'network'
+  if (/ETIMEDOUT|timeout|ECONNREFUSED|ECONNRESET|EPIPE|ENETUNREACH|EHOSTUNREACH|closed|Connection not available/i.test(m)) return 'network'
   if (/certificate|altname|self.signed/i.test(m)) return 'certificate'
   return m.slice(0, 300)
 }
+const transient = (code: string) => code === 'network' || code === 'host'
 
 export class MailService {
   private worker = new Map<string, ImapFlow>()
@@ -99,9 +117,18 @@ export class MailService {
   private state = new Map<string, { state: Account['state']; error?: string }>()
   private retry = new Map<string, NodeJS.Timeout>()
   private poll: NodeJS.Timeout | null = null
+  private ticker: NodeJS.Timeout | null = null
+  private busyAccounts = new Set<string>()
+  private sending = new Set<string>()
+  private lastDraftPush = 0
 
   constructor(private db: DB, private emit: (e: MailEvent) => void, private notify: (accountId: string, rows: MessageRow[]) => void) {
     fs.mkdirSync(mailDir(), { recursive: true })
+    // anything cut off by a crash or quit goes back in the queue
+    db.prepare(`update operations set status = 'queued' where status = 'running'`).run()
+    db.prepare(`update outbox set status = 'queued' where status = 'sending'`).run()
+    // drafts left open when the app closed go to the server's Drafts folder
+    db.prepare(`update drafts set push = 1 where id not in (select draft_id from outbox)`).run()
   }
 
   // ---------- accounts ----------
@@ -116,12 +143,13 @@ export class MailService {
   }
 
   accounts(): Account[] {
-    return (this.db.prepare('select * from accounts where enabled = 1 order by sort, created_at').all() as Row[])
+    return (this.db.prepare(`select a.*, i.signature_id from accounts a left join identities i on i.account_id = a.id and i.is_default = 1
+      where a.enabled = 1 order by a.sort, a.created_at`).all() as Row[])
       .map((r) => { const s = this.state.get(r.id); return toAccount(r, s?.state || 'connecting', s?.error) })
   }
 
   async test(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }> {
-    let c = { ...cfg }
+    const c = { ...cfg }
     const tryImap = async () => { const cl = new ImapFlow(imapOptions(c, password)); await cl.connect(); await cl.logout() }
     const trySmtp = async () => { const t = smtpTransport(c, password); try { await t.verify() } finally { t.close() } }
     try {
@@ -162,13 +190,25 @@ export class MailService {
     return this.accounts().find((a) => a.id === id)!
   }
 
+  updateAccount(id: string, patch: { displayName?: string; color?: string; signatureId?: string | null }) {
+    if (patch.displayName != null) {
+      this.db.prepare('update accounts set display_name = ?, updated_at = ? where id = ?').run(patch.displayName, now(), id)
+      this.db.prepare('update identities set name = ? where account_id = ? and is_default = 1').run(patch.displayName, id)
+    }
+    if (patch.color) this.db.prepare('update accounts set color = ?, updated_at = ? where id = ?').run(patch.color, now(), id)
+    if (patch.signatureId !== undefined) this.db.prepare('update identities set signature_id = ? where account_id = ? and is_default = 1').run(patch.signatureId, id)
+    this.emit({ type: 'accounts' })
+  }
+
   async remove(id: string) {
     this.stopAccount(id)
     const ids = this.db.prepare('select id from messages where account_id = ?').all(id) as Row[]
     this.db.prepare('delete from accounts where id = ?').run(id)
     for (const r of ids) fs.rmSync(emlPath(r.id), { force: true })
+    this.db.prepare('delete from threads where id not in (select distinct thread_id from messages where thread_id is not null)').run()
     this.state.delete(id)
     this.emit({ type: 'accounts' })
+    this.emit({ type: 'outbox' })
     this.badge()
   }
 
@@ -202,6 +242,7 @@ export class MailService {
   startAll() {
     for (const a of this.accounts()) this.startAccount(a.id)
     if (!this.poll) this.poll = setInterval(() => this.refresh().catch(() => {}), POLL_MS)
+    if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000)
   }
 
   private async startAccount(id: string) {
@@ -213,13 +254,14 @@ export class MailService {
       this.setState(id, 'online')
       this.prefetch(id).catch(() => {})
       this.startIdle(id)
-      // the other important folders, quietly after the inbox
+      // the other important folders, quietly after the inbox (Sent completes the conversations)
       for (const role of ['sent', 'drafts', 'archive', 'trash'] as FolderRole[]) {
         const f = this.folderByRole(id, role)
         if (f) await this.syncFolder(id, f.id, false).catch(() => {})
       }
     } catch (e) {
-      this.setState(id, friendly(e) === 'network' || friendly(e) === 'host' ? 'offline' : 'error', friendly(e))
+      const code = friendly(e)
+      this.setState(id, transient(code) ? 'offline' : 'error', code)
       this.scheduleRetry(id)
     }
   }
@@ -309,23 +351,33 @@ export class MailService {
 
   private async syncFolders(accountId: string) {
     const list = await this.run(accountId, (c) => c.list({ statusQuery: { messages: true, unseen: true } }))
-    const known = new Map((this.db.prepare('select id, path from folders where account_id = ?').all(accountId) as Row[]).map((r) => [r.path, r.id]))
+    const known = new Map((this.db.prepare('select id, path, role from folders where account_id = ?').all(accountId) as Row[]).map((r) => [r.path, r]))
     const seen = new Set<string>()
     const up = this.db.prepare(`insert into folders (id, account_id, path, name, delimiter, role, unread, total)
       values (@id, @account_id, @path, @name, @delimiter, @role, @unread, @total)
-      on conflict(account_id, path) do update set name = excluded.name, role = excluded.role, unread = excluded.unread, total = excluded.total`)
+      on conflict(account_id, path) do update set name = excluded.name, role = excluded.role, total = excluded.total`)
     this.db.transaction(() => {
       for (const f of list) {
         if (f.flags?.has('\\Noselect') || f.flags?.has('\\NonExistent')) continue
         seen.add(f.path)
-        const role = f.path.toUpperCase() === 'INBOX' ? 'inbox' : ROLE_BY_USE[f.specialUse as string] || null
+        const old = known.get(f.path)
+        // a role we gave a folder ourselves (the Archive we created) stays
+        const role = f.path.toUpperCase() === 'INBOX' ? 'inbox' : ROLE_BY_USE[f.specialUse as string] || old?.role || null
         up.run({
-          id: known.get(f.path) || uuid(), account_id: accountId, path: f.path, name: f.name, delimiter: f.delimiter || null, role,
+          id: old?.id || uuid(), account_id: accountId, path: f.path, name: f.name, delimiter: f.delimiter || null, role,
           unread: f.status?.unseen ?? 0, total: f.status?.messages ?? 0,
         })
       }
-      for (const [p, id] of known) if (!seen.has(p)) this.db.prepare('delete from folders where id = ?').run(id)
+      for (const [p, r] of known) if (!seen.has(p)) this.db.prepare('delete from folders where id = ?').run(r.id)
     })()
+    // folders never opened show the server's own unread count; synced ones count from the cache
+    for (const f of this.db.prepare('select id, uidvalidity from folders where account_id = ?').all(accountId) as Row[]) {
+      if (f.uidvalidity) this.recount(f.id)
+      else {
+        const s = list.find((x) => x.path === (this.db.prepare('select path from folders where id = ?').get(f.id) as Row).path)
+        this.db.prepare('update folders set unread = ? where id = ?').run(s?.status?.unseen ?? 0, f.id)
+      }
+    }
     this.emit({ type: 'folders', accountId })
   }
 
@@ -334,15 +386,14 @@ export class MailService {
     const folder = this.db.prepare('select * from folders where id = ?').get(folderId) as Row
     if (!folder) return
     const acc = this.accountRow(accountId)
+    const gmail = acc.provider === 'gmail'
     const fresh: MessageRow[] = []
     await this.run(accountId, async (c) => {
       const lock = await c.getMailboxLock(folder.path)
       try {
         const mb = c.mailbox as any
         const uidValidity = Number(mb.uidValidity)
-        if (folder.uidvalidity && folder.uidvalidity !== uidValidity) {
-          this.dropFolderMessages(folderId)
-        }
+        if (folder.uidvalidity && folder.uidvalidity !== uidValidity) this.dropFolderMessages(folderId)
         const max = (this.db.prepare('select max(uid) m from message_folders where folder_id = ?').get(folderId) as Row).m as number | null
         let range: string | number[] | null = null
         if (max == null) {
@@ -356,34 +407,40 @@ export class MailService {
           range = `${max + 1}:*`
         }
 
-        // flags of what we already have, and what disappeared
+        // flags of what we already have, and what disappeared on the server
         if (max != null) {
           const min = (this.db.prepare('select min(uid) m from message_folders where folder_id = ?').get(folderId) as Row).m as number
-          const local = new Map((this.db.prepare('select uid, message_id from message_folders where folder_id = ?').all(folderId) as Row[]).map((r) => [r.uid, r.message_id]))
+          const local = new Map((this.db.prepare(`select mf.uid, mf.message_id, m.pending_op from message_folders mf join messages m on m.id = mf.message_id
+            where mf.folder_id = ?`).all(folderId) as Row[]).map((r) => [r.uid, r]))
+          // flags with a change still waiting in the queue keep the local value
+          const waiting = new Set((this.db.prepare(`select payload from operations where status in ('queued','running') and account_id = ?
+            and kind in ('seen','unseen','flag','unflag')`).all(accountId) as Row[]).flatMap((o) => JSON.parse(o.payload).ids as string[]))
           const remote = new Set<number>()
           const setFlags = this.db.prepare('update messages set seen = ?, flagged = ?, answered = ? where id = ?')
           const updates: [number, number, number, string][] = []
           for await (const m of c.fetch(`${min}:${max}`, { uid: true, flags: true }, { uid: true })) {
             remote.add(m.uid)
-            const id = local.get(m.uid)
-            if (id) updates.push([m.flags?.has('\\Seen') ? 1 : 0, m.flags?.has('\\Flagged') ? 1 : 0, m.flags?.has('\\Answered') ? 1 : 0, id])
+            const l = local.get(m.uid)
+            if (l && !waiting.has(l.message_id)) updates.push([m.flags?.has('\\Seen') ? 1 : 0, m.flags?.has('\\Flagged') ? 1 : 0, m.flags?.has('\\Answered') ? 1 : 0, l.message_id])
           }
           this.db.transaction(() => {
             for (const u of updates) setFlags.run(...u)
-            for (const [uid, id] of local) if (!remote.has(uid)) this.deleteMessage(id)
+            for (const [uid, l] of local) if (!remote.has(uid) && !l.pending_op) this.deleteMessage(l.message_id)
           })()
         }
 
         if (range) {
-          const ins = this.db.prepare(`insert into messages (id, account_id, message_id, in_reply_to, refs, from_name, from_email, to_json, cc_json,
+          const ins = this.db.prepare(`insert into messages (id, account_id, message_id, in_reply_to, refs, gm_thrid, from_name, from_email, to_json, cc_json,
             reply_to, subject, snippet, date, seen, flagged, answered, has_attachments, size, list_unsubscribe, created_at)
-            values (@id, @account_id, @message_id, @in_reply_to, @refs, @from_name, @from_email, @to_json, @cc_json,
+            values (@id, @account_id, @message_id, @in_reply_to, @refs, @gm_thrid, @from_name, @from_email, @to_json, @cc_json,
             @reply_to, @subject, '', @date, @seen, @flagged, @answered, @has_attachments, @size, @list_unsubscribe, @created_at)`)
           const link = this.db.prepare('insert or ignore into message_folders (message_id, folder_id, uid) values (?,?,?)')
           const contact = this.db.prepare(`insert into contacts (email, name, last_used, use_count) values (?,?,?,0)
             on conflict(email) do update set name = coalesce(contacts.name, excluded.name)`)
           const batch: Row[] = []
-          for await (const m of c.fetch(range, { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }, { uid: true })) {
+          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+          if (gmail) query.threadId = true
+          for await (const m of c.fetch(range, query as any, { uid: true })) {
             if (max != null && m.uid <= max) continue
             batch.push(m as any)
           }
@@ -395,7 +452,8 @@ export class MailService {
               const header = (name: string) => (headers.match(new RegExp(`^${name}:\\s*([\\s\\S]*?)(?=\\r?\\n\\S|$)`, 'im')) || [])[1]?.replace(/\r?\n\s+/g, ' ').trim()
               const row = {
                 id: uuid(), account_id: accountId, message_id: env.messageId || null, in_reply_to: env.inReplyTo || null,
-                refs: header('references') || null, from_name: from.name || '', from_email: (from.address || '').toLowerCase(),
+                refs: header('references') || null, gm_thrid: m.threadId ? String(m.threadId) : null,
+                from_name: from.name || '', from_email: (from.address || '').toLowerCase(),
                 to_json: JSON.stringify(env.to || []), cc_json: JSON.stringify(env.cc || []), reply_to: env.replyTo?.[0]?.address || null,
                 subject: env.subject || '', date: new Date(env.date || m.internalDate || now()).getTime(),
                 seen: m.flags?.has('\\Seen') ? 1 : 0, flagged: m.flags?.has('\\Flagged') ? 1 : 0, answered: m.flags?.has('\\Answered') ? 1 : 0,
@@ -415,15 +473,47 @@ export class MailService {
         lock.release()
       }
     })
+    this.assignThreads(accountId)
     this.emit({ type: 'messages', accountId })
     this.emit({ type: 'folders', accountId })
     if (folder.role === 'inbox') this.badge()
-    if (fresh.length) this.notify(accountId, fresh)
+    if (fresh.length) {
+      const tid = this.db.prepare('select thread_id from messages where id = ?')
+      this.notify(accountId, fresh.map((r) => ({ ...r, threadId: (tid.get(r.id) as Row)?.thread_id || null })))
+    }
+  }
+
+  /** put new messages into conversations: Gmail's own thread id, else References / In-Reply-To */
+  private assignThreads(accountId: string) {
+    const rows = this.db.prepare(`select id, message_id, in_reply_to, refs, gm_thrid, subject, date from messages
+      where account_id = ? and thread_id is null order by date`).all(accountId) as Row[]
+    if (!rows.length) return
+    const byGm = this.db.prepare('select thread_id from messages where account_id = ? and gm_thrid = ? and thread_id is not null limit 1')
+    const byMsgId = this.db.prepare('select thread_id from messages where account_id = ? and message_id = ? and thread_id is not null limit 1')
+    const byChild = this.db.prepare(`select thread_id from messages where account_id = ? and thread_id is not null
+      and (in_reply_to = ? or instr(refs, ?) > 0) limit 1`)
+    const newThread = this.db.prepare('insert into threads (id, account_id, gm_thrid, subject, last_date) values (?,?,?,?,?)')
+    const set = this.db.prepare('update messages set thread_id = ? where id = ?')
+    this.db.transaction(() => {
+      for (const r of rows) {
+        let tid: string | undefined
+        if (r.gm_thrid) tid = (byGm.get(accountId, r.gm_thrid) as Row)?.thread_id
+        if (!tid) {
+          for (const p of [r.in_reply_to, ...msgIds(r.refs).reverse()].filter(Boolean)) {
+            tid = (byMsgId.get(accountId, p) as Row)?.thread_id
+            if (tid) break
+          }
+        }
+        if (!tid && r.message_id) tid = (byChild.get(accountId, r.message_id, r.message_id) as Row)?.thread_id
+        if (!tid) { tid = uuid(); newThread.run(tid, accountId, r.gm_thrid, r.subject, r.date) }
+        set.run(tid, r.id)
+      }
+    })()
   }
 
   private recount(folderId: string) {
     this.db.prepare(`update folders set unread = (select count(*) from message_folders mf join messages m on m.id = mf.message_id
-      where mf.folder_id = ? and m.seen = 0) where id = ?`).run(folderId, folderId)
+      where mf.folder_id = ? and m.seen = 0 and m.pending_op is null) where id = ?`).run(folderId, folderId)
   }
 
   private dropFolderMessages(folderId: string) {
@@ -438,26 +528,35 @@ export class MailService {
 
   badge() {
     const n = (this.db.prepare(`select count(*) n from messages m join message_folders mf on mf.message_id = m.id
-      join folders f on f.id = mf.folder_id where f.role = 'inbox' and m.seen = 0`).get() as Row).n as number
+      join folders f on f.id = mf.folder_id where f.role = 'inbox' and m.seen = 0 and m.pending_op is null`).get() as Row).n as number
     try { app.setBadgeCount(n) } catch { /* not on this system */ }
   }
 
-  // ---------- messages ----------
+  // ---------- reading ----------
 
+  /** the list: one row per conversation, its newest message on top */
   list(scope: ListScope, before?: number): MessageRow[] {
     const limit = 120
     const cut = before ?? Number.MAX_SAFE_INTEGER
-    let rows: Row[]
-    if (scope.folderId) {
-      rows = this.db.prepare(`select m.* from messages m join message_folders mf on mf.message_id = m.id
-        where mf.folder_id = ? and m.date < ? order by m.date desc limit ?`).all(scope.folderId, cut, limit) as Row[]
-    } else {
-      const role = scope.role || 'inbox'
-      const accountFilter = scope.accountId === 'all' ? '' : 'and f.account_id = @account'
-      rows = this.db.prepare(`select m.* from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
-        where f.role = @role ${accountFilter} and m.date < @cut order by m.date desc limit @limit`)
-        .all({ role, account: scope.accountId, cut, limit }) as Row[]
-    }
+    const where = scope.folderId
+      ? 'mf.folder_id = @folder'
+      : `f.role = @role ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
+    const rows = this.db.prepare(`select m.*, max(m.date) as last_date, count(*) as n, sum(m.seen = 0) as unread_n,
+        sum(m.flagged) as flag_n, sum(m.has_attachments) as att_n, group_concat(m.id) as ids
+      from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
+      where ${where} and m.pending_op is null
+      group by coalesce(m.thread_id, m.id)
+      having last_date < @cut
+      order by last_date desc limit @limit`)
+      .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit }) as Row[]
+    return rows.map(toRow)
+  }
+
+  /** every message of a conversation in this account, in any folder, oldest first */
+  thread(key: string): MessageRow[] {
+    const isThread = !!this.db.prepare('select 1 from threads where id = ?').get(key)
+    const rows = this.db.prepare(`select m.* from messages m where ${isThread ? 'm.thread_id = ?' : 'm.id = ?'} and m.pending_op is null
+      group by coalesce(m.message_id, m.id) order by m.date`).all(key) as Row[]
     return rows.map(toRow)
   }
 
@@ -516,10 +615,12 @@ export class MailService {
     const contact = this.db.prepare('select images_allowed from contacts where email = ?').get(row.from_email) as Row
     const list = (a: any): Address[] => (a ? (Array.isArray(a) ? a : [a]).flatMap((x: any) => x.value || []) : [])
       .map((x: any) => ({ name: x.name || undefined, address: x.address || '' }))
+    const refs = Array.isArray(mail.references) ? mail.references.join(' ') : mail.references
     return {
       ...toRow({ ...fresh, seen: 1 }),
       to: list(mail.to), cc: list(mail.cc), replyTo: mail.replyTo?.value?.[0]?.address,
       messageId: mail.messageId || row.message_id || undefined,
+      references: refs || undefined,
       html: typeof mail.html === 'string' ? mail.html : undefined, text: mail.text || undefined,
       attachments: mail.attachments
         .map((a, i) => ({ id: `${id}:${i}`, filename: a.filename || 'attachment', mime: a.contentType, size: a.size, inline: !!(a.related || (a.contentDisposition === 'inline' && a.cid)) }))
@@ -542,7 +643,7 @@ export class MailService {
     const terms = query.trim().split(/\s+/).filter(Boolean).map((t) => `"${t.replace(/"/g, '""')}"*`)
     if (!terms.length) return []
     const rows = this.db.prepare(`select m.* from messages_fts s join messages m on m.rowid = s.rowid
-      where messages_fts match @q ${accountId ? 'and m.account_id = @a' : ''} order by m.date desc limit 200`)
+      where messages_fts match @q ${accountId ? 'and m.account_id = @a' : ''} and m.pending_op is null order by m.date desc limit 200`)
       .all({ q: terms.join(' '), a: accountId }) as Row[]
     return rows.map(toRow)
   }
@@ -557,106 +658,375 @@ export class MailService {
     this.db.prepare(`insert into contacts (email, images_allowed) values (?, 1) on conflict(email) do update set images_allowed = 1`).run(sender.toLowerCase())
   }
 
-  // ---------- actions ----------
+  // ---------- actions: local at once, then the queue ----------
 
-  async act(ids: string[], action: Action) {
-    // group by account and folder, change the cache at once, then tell the server
-    const groups = new Map<string, { accountId: string; folder: Row; uids: number[]; ids: string[] }>()
-    for (const id of ids) {
-      const r = this.db.prepare(`select m.account_id, f.*, mf.uid as uid from messages m join message_folders mf on mf.message_id = m.id
-        join folders f on f.id = mf.folder_id where m.id = ?`).get(id) as Row
-      if (!r) continue
-      const key = r.id as string
-      if (!groups.has(key)) groups.set(key, { accountId: r.account_id, folder: r, uids: [], ids: [] })
-      groups.get(key)!.uids.push(r.uid); groups.get(key)!.ids.push(id)
+  async act(ids: string[], action: Action, targetFolderId?: string): Promise<string | null> {
+    if (!ids.length) return null
+    const marks = ids.map(() => '?').join(',')
+    const rows = this.db.prepare(`select m.id, m.account_id, f.id as folder_id, f.path, f.role, mf.uid from messages m
+      join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id where m.id in (${marks})`).all(...ids) as Row[]
+    const groups = new Map<string, { accountId: string; folderId: string; path: string; role: string | null; uids: number[]; ids: string[] }>()
+    for (const r of rows) {
+      if (!groups.has(r.folder_id)) groups.set(r.folder_id, { accountId: r.account_id, folderId: r.folder_id, path: r.path, role: r.role, uids: [], ids: [] })
+      groups.get(r.folder_id)!.uids.push(r.uid); groups.get(r.folder_id)!.ids.push(r.id)
     }
-    const flagCol = action === 'seen' || action === 'unseen' ? 'seen' : action === 'flag' || action === 'unflag' ? 'flagged' : null
-    if (flagCol) {
-      const v = action === 'seen' || action === 'flag' ? 1 : 0
-      const st = this.db.prepare(`update messages set ${flagCol} = ? where id = ?`)
-      this.db.transaction(() => { for (const id of ids) st.run(v, id) })()
-    }
+    const addOp = this.db.prepare(`insert into operations (id, account_id, kind, payload, status, created_at, run_at) values (?,?,?,?, 'queued', ?, ?)`)
     const accounts = new Set<string>()
-    for (const g of groups.values()) {
-      accounts.add(g.accountId)
-      const range = g.uids.join(',')
-      if (flagCol) {
-        const flag = flagCol === 'seen' ? '\\Seen' : '\\Flagged'
-        const add = action === 'seen' || action === 'flag'
-        this.recount(g.folder.id)
-        await this.run(g.accountId, async (c) => {
-          const lock = await c.getMailboxLock(g.folder.path)
-          try { add ? await c.messageFlagsAdd(range, [flag], { uid: true }) : await c.messageFlagsRemove(range, [flag], { uid: true }) } finally { lock.release() }
-        })
-        continue
-      }
-      const target = this.folderByRole(g.accountId, action === 'archive' ? 'archive' : 'trash')
-        || (action === 'archive' ? this.folderByRole(g.accountId, 'all') : undefined)
-      if (target && target.id === g.folder.id) continue
-      this.db.transaction(() => { for (const id of g.ids) this.deleteMessage(id) })()
-      this.recount(g.folder.id)
-      this.emit({ type: 'messages', accountId: g.accountId })
-      await this.run(g.accountId, async (c) => {
-        const lock = await c.getMailboxLock(g.folder.path)
-        try {
-          if (target) await c.messageMove(range, target.path, { uid: true })
-          else if (action === 'trash') await c.messageDelete(range, { uid: true })
-          else throw new Error('no-archive')
-        } finally { lock.release() }
-      })
-      if (target) this.syncFolder(g.accountId, target.id, false).catch(() => {})
+    const tokens: string[] = []
+
+    if (action === 'seen' || action === 'unseen' || action === 'flag' || action === 'unflag') {
+      const col = action === 'seen' || action === 'unseen' ? 'seen' : 'flagged'
+      const v = action === 'seen' || action === 'flag' ? 1 : 0
+      const st = this.db.prepare(`update messages set ${col} = ? where id = ?`)
+      this.db.transaction(() => {
+        for (const id of ids) st.run(v, id)
+        for (const g of groups.values()) {
+          accounts.add(g.accountId)
+          addOp.run(uuid(), g.accountId, action, JSON.stringify({ folderId: g.folderId, path: g.path, uids: g.uids, ids: g.ids }), now(), now())
+          this.recount(g.folderId)
+        }
+      })()
+    } else {
+      const hide = this.db.prepare('update messages set pending_op = ? where id = ?')
+      this.db.transaction(() => {
+        for (const g of groups.values()) {
+          let target: Row | undefined
+          if (action === 'move') target = this.db.prepare('select * from folders where id = ? and account_id = ?').get(targetFolderId, g.accountId) as Row
+          else target = this.folderByRole(g.accountId, action === 'archive' ? 'archive' : 'trash')
+          if (action === 'move' && !target) continue
+          if (target && target.id === g.folderId) continue
+          // trash in Trash deletes for good; archive with no Archive folder makes one when the op runs
+          const kind: MoveKind = action === 'trash' && g.role === 'trash' ? 'delete' : action === 'move' ? 'move' : action
+          const opId = uuid()
+          accounts.add(g.accountId)
+          tokens.push(opId)
+          for (const id of g.ids) hide.run(opId, id)
+          addOp.run(opId, g.accountId, kind, JSON.stringify({ folderId: g.folderId, path: g.path, uids: g.uids, ids: g.ids, targetId: target?.id || null }), now(), now() + UNDO_MS)
+          this.recount(g.folderId)
+        }
+      })()
     }
     for (const a of accounts) { this.emit({ type: 'messages', accountId: a }); this.emit({ type: 'folders', accountId: a }) }
     this.badge()
+    setTimeout(() => this.tick(), 0)
+    return tokens.length ? tokens.join(',') : null
   }
 
-  // ---------- sending ----------
-
-  async send(d: Draft) {
-    const r = this.accountRow(d.accountId)
-    const pass = open(r.secret)
-    const domain = r.email.split('@')[1] || 'roarmail.local'
-    const messageId = `<${uuid()}@${domain}>`
-    const opts = {
-      from: r.display_name ? { name: r.display_name, address: r.email } : r.email,
-      to: d.to, cc: d.cc || undefined, bcc: d.bcc || undefined, subject: d.subject,
-      html: d.html, text: d.text, messageId, date: new Date(),
-      inReplyTo: d.inReplyTo || undefined, references: d.references || undefined,
-      attachments: (d.attachments || []).map((p) => ({ path: p, filename: path.basename(p) })),
-      headers: { 'X-Mailer': `RoarMail ${app.getVersion()}` },
+  /** bring back what an archive / trash / move hid, if it has not reached the server yet */
+  undo(token: string): boolean {
+    let ok = false
+    const accounts = new Set<string>()
+    for (const opId of token.split(',')) {
+      const op = this.db.prepare(`select * from operations where id = ? and status = 'queued'`).get(opId) as Row
+      if (!op) continue
+      this.db.transaction(() => {
+        this.db.prepare('delete from operations where id = ?').run(opId)
+        this.db.prepare('update messages set pending_op = null where pending_op = ?').run(opId)
+        this.recount(JSON.parse(op.payload).folderId)
+      })()
+      accounts.add(op.account_id)
+      ok = true
     }
-    const t = smtpTransport(this.cfgOf(r), pass)
-    try { await t.sendMail(opts) } catch (e) { throw new Error(friendly(e)) } finally { t.close() }
+    for (const a of accounts) { this.emit({ type: 'messages', accountId: a }); this.emit({ type: 'folders', accountId: a }) }
+    this.badge()
+    return ok
+  }
 
-    // remember the people written to, for autocomplete
-    const addrs = [d.to, d.cc, d.bcc].filter(Boolean).join(',').split(/[,;]/).map((x) => x.trim()).filter(Boolean)
-    const up = this.db.prepare(`insert into contacts (email, name, last_used, use_count) values (?,?,?,1)
-      on conflict(email) do update set last_used = excluded.last_used, use_count = contacts.use_count + 1`)
-    for (const a of addrs) {
-      const m = a.match(/^(.*?)<([^>]+)>$/)
-      up.run((m ? m[2] : a).trim().toLowerCase(), m ? m[1].replace(/"/g, '').trim() || null : null, now())
+  /** the runner: due operations per account (one at a time each), due sends, drafts for the server */
+  private tick() {
+    const ops = this.db.prepare(`select * from operations where status = 'queued' and run_at <= ? order by created_at`).all(now()) as Row[]
+    for (const accountId of new Set(ops.map((o) => o.account_id as string))) {
+      if (this.busyAccounts.has(accountId)) continue
+      this.busyAccounts.add(accountId)
+      const mine = ops.filter((o) => o.account_id === accountId)
+      ;(async () => { for (const op of mine) await this.execOp(op) })().finally(() => this.busyAccounts.delete(accountId))
     }
+    const due = this.db.prepare(`select * from outbox where status = 'queued' and send_at <= ?`).all(now()) as Row[]
+    for (const o of due) if (!this.sending.has(o.id)) this.deliver(o)
+    if (now() - this.lastDraftPush > 30e3) {
+      const drafts = this.db.prepare(`select * from drafts where push = 1 and id not in (select draft_id from outbox)`).all() as Row[]
+      if (drafts.length) { this.lastDraftPush = now(); for (const d of drafts) this.pushDraft(d).catch(() => {}) }
+    }
+  }
 
-    // Gmail and Microsoft keep a copy in Sent by themselves; other servers need one put there
-    if (r.provider !== 'gmail' && r.provider !== 'microsoft') {
-      const sent = this.folderByRole(d.accountId, 'sent')
-      if (sent) {
+  private async execOp(op: Row) {
+    const live = this.db.prepare(`select status from operations where id = ?`).get(op.id) as Row
+    if (!live || live.status !== 'queued') return
+    this.db.prepare(`update operations set status = 'running' where id = ?`).run(op.id)
+    const p = JSON.parse(op.payload) as { folderId: string; path: string; uids: number[]; ids: string[]; targetId: string | null }
+    const range = p.uids.join(',')
+    const kind = op.kind as string
+    try {
+      let target: Row | undefined = p.targetId ? this.db.prepare('select * from folders where id = ?').get(p.targetId) as Row : undefined
+      if (kind === 'archive' && !target) target = await this.ensureArchive(op.account_id)
+      await this.run(op.account_id, async (c) => {
+        const lock = await c.getMailboxLock(p.path)
         try {
-          const raw = await new MailComposer({ ...opts, bcc: undefined }).compile().build()
-          await this.run(d.accountId, (c) => c.append(sent.path, raw, ['\\Seen']))
-        } catch { /* sending worked; the copy is a nicety */ }
+          if (kind === 'seen') await c.messageFlagsAdd(range, ['\\Seen'], { uid: true })
+          else if (kind === 'unseen') await c.messageFlagsRemove(range, ['\\Seen'], { uid: true })
+          else if (kind === 'flag') await c.messageFlagsAdd(range, ['\\Flagged'], { uid: true })
+          else if (kind === 'unflag') await c.messageFlagsRemove(range, ['\\Flagged'], { uid: true })
+          else if (kind === 'delete' || (kind === 'trash' && !target)) await c.messageDelete(range, { uid: true })
+          else if (target) await c.messageMove(range, target.path, { uid: true })
+        } finally { lock.release() }
+      })
+      this.db.transaction(() => {
+        if (!['seen', 'unseen', 'flag', 'unflag'].includes(kind)) {
+          for (const r of this.db.prepare('select id from messages where pending_op = ?').all(op.id) as Row[]) this.deleteMessage(r.id)
+        }
+        this.db.prepare('delete from operations where id = ?').run(op.id)
+      })()
+      if (target) this.syncFolder(op.account_id, target.id, false).catch(() => {})
+    } catch (e) {
+      const code = friendly(e)
+      if (transient(code)) {
+        // offline: try again later, the change stays visible here meanwhile
+        this.db.prepare(`update operations set status = 'queued', attempts = attempts + 1, run_at = ?, last_error = ? where id = ?`)
+          .run(now() + Math.min(60e3 * (op.attempts + 1), 5 * 60e3), code, op.id)
+      } else {
+        this.db.transaction(() => {
+          this.db.prepare(`update operations set status = 'failed', last_error = ? where id = ?`).run(code, op.id)
+          this.db.prepare('update messages set pending_op = null where pending_op = ?').run(op.id)
+          this.recount(p.folderId)
+        })()
+        this.emit({ type: 'opFailed', error: code })
+        // the server's truth wins: read the folder again
+        this.syncFolder(op.account_id, p.folderId, false).catch(() => {})
       }
     }
-    if (d.replyToMessageId) {
-      try {
-        const { folder, uid } = this.location(d.replyToMessageId)
-        this.db.prepare('update messages set answered = 1 where id = ?').run(d.replyToMessageId)
-        await this.run(d.accountId, async (c) => {
-          const lock = await c.getMailboxLock(folder.path)
-          try { await c.messageFlagsAdd(String(uid), ['\\Answered'], { uid: true }) } finally { lock.release() }
-        })
-      } catch { /* the reply went out */ }
+    this.emit({ type: 'messages', accountId: op.account_id })
+    this.emit({ type: 'folders', accountId: op.account_id })
+    this.badge()
+  }
+
+  /** servers without an Archive folder (most shared hosting) get one, like Airmail does */
+  private async ensureArchive(accountId: string): Promise<Row | undefined> {
+    const have = this.folderByRole(accountId, 'archive') || this.folderByRole(accountId, 'all')
+    if (have) return have
+    const existing = this.db.prepare(`select * from folders where account_id = ? and lower(name) = 'archive'`).get(accountId) as Row
+    if (existing) {
+      this.db.prepare(`update folders set role = 'archive' where id = ?`).run(existing.id)
+      return existing
     }
-    this.emit({ type: 'messages', accountId: d.accountId })
+    // servers with a personal namespace (Plesk's "INBOX.") want it in front of the name
+    const created = await this.run(accountId, (c) => c.mailboxCreate(`${(c as any).namespace?.prefix || ''}Archive`)) as any
+    const p = created?.path || 'Archive'
+    const id = uuid()
+    this.db.prepare(`insert into folders (id, account_id, path, name, role) values (?,?,?,?, 'archive')
+      on conflict(account_id, path) do update set role = 'archive'`).run(id, accountId, p, 'Archive')
+    this.emit({ type: 'folders', accountId })
+    return this.folderByRole(accountId, 'archive')
+  }
+
+  // ---------- drafts ----------
+
+  private draftRow(d: Draft, id: string, push: number) {
+    this.db.prepare(`insert into drafts (id, account_id, reply_to_message, mode, to_json, cc_json, bcc_json, subject, html, plain,
+        attachments_json, replaces_message_id, push, updated_at)
+      values (@id, @account_id, @reply, 'new', @to, @cc, @bcc, @subject, @html, 0, @atts, @replaces, @push, @updated)
+      on conflict(id) do update set account_id = excluded.account_id, to_json = excluded.to_json, cc_json = excluded.cc_json,
+        bcc_json = excluded.bcc_json, subject = excluded.subject, html = excluded.html, attachments_json = excluded.attachments_json,
+        replaces_message_id = excluded.replaces_message_id, push = excluded.push, updated_at = excluded.updated_at`).run({
+      id, account_id: d.accountId, reply: d.replyToMessageId && this.db.prepare('select 1 from messages where id = ?').get(d.replyToMessageId) ? d.replyToMessageId : null,
+      to: JSON.stringify({ to: d.to, inReplyTo: d.inReplyTo || null, references: d.references || null, text: d.text }),
+      cc: d.cc || '', bcc: d.bcc || '', subject: d.subject, html: d.html, atts: JSON.stringify(d.attachments || []),
+      replaces: d.replacesMessageId || null, push, updated: now(),
+    })
+  }
+
+  private draftOf(r: Row): Draft {
+    const meta = JSON.parse(r.to_json || '{}')
+    return {
+      id: r.id, accountId: r.account_id, to: meta.to || '', cc: r.cc_json || '', bcc: r.bcc_json || '', subject: r.subject, html: r.html,
+      text: meta.text || '', inReplyTo: meta.inReplyTo || undefined, references: meta.references || undefined,
+      replyToMessageId: r.reply_to_message || undefined, replacesMessageId: r.replaces_message_id || undefined,
+      attachments: JSON.parse(r.attachments_json || '[]'),
+    }
+  }
+
+  /** save while writing (toServer false), or put it in the server's Drafts folder when the composer closes */
+  saveDraft(d: Draft, toServer: boolean): string {
+    const id = d.id || uuid()
+    this.draftRow(d, id, toServer ? 1 : 0)
+    if (toServer) { this.lastDraftPush = 0; setTimeout(() => this.tick(), 0) }
+    return id
+  }
+
+  discardDraft(id: string) {
+    this.db.prepare('delete from drafts where id = ? and id not in (select draft_id from outbox)').run(id)
+  }
+
+  private async pushDraft(r: Row) {
+    const d = this.draftOf(r)
+    const folder = this.folderByRole(d.accountId, 'drafts')
+    if (!folder) { this.db.prepare('update drafts set push = 0 where id = ?').run(r.id); return }
+    const raw = await this.compose(d, `<${uuid()}@${this.accountRow(d.accountId).email.split('@')[1] || 'roarmail.local'}>`).compile().build()
+    await this.run(d.accountId, (c) => c.append(folder.path, raw, ['\\Draft', '\\Seen']))
+    this.db.prepare('delete from drafts where id = ?').run(r.id)
+    if (d.replacesMessageId) this.dropServerMessage(d.replacesMessageId)
+    this.syncFolder(d.accountId, folder.id, false).catch(() => {})
+  }
+
+  /** a message of the Drafts folder, back into the composer */
+  async draftFromMessage(id: string): Promise<Draft> {
+    const { row, mail } = await this.parsed(id)
+    const addrs = (a: any) => (a ? (Array.isArray(a) ? a : [a]).flatMap((x: any) => x.value || []) : []).map((x: any) => fmtAddr({ name: x.name, address: x.address })).join(', ')
+    const refs = Array.isArray(mail.references) ? mail.references.join(' ') : mail.references
+    const html = typeof mail.html === 'string' ? mail.html : (mail.text || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!)).replace(/\n/g, '<br>')
+    return {
+      accountId: row.account_id, to: addrs(mail.to), cc: addrs(mail.cc), bcc: addrs(mail.bcc), subject: mail.subject || '',
+      html, text: mail.text || '', inReplyTo: mail.inReplyTo || undefined, references: refs || undefined, replacesMessageId: id,
+    }
+  }
+
+  /** remove a message for good (an old draft): through the queue, no undo */
+  private dropServerMessage(id: string) {
+    const loc = this.db.prepare(`select m.account_id, f.id as folder_id, f.path, mf.uid from messages m join message_folders mf on mf.message_id = m.id
+      join folders f on f.id = mf.folder_id where m.id = ?`).get(id) as Row
+    if (!loc) return
+    const opId = uuid()
+    this.db.prepare('update messages set pending_op = ? where id = ?').run(opId, id)
+    this.db.prepare(`insert into operations (id, account_id, kind, payload, status, created_at, run_at) values (?,?, 'delete', ?, 'queued', ?, ?)`)
+      .run(opId, loc.account_id, JSON.stringify({ folderId: loc.folder_id, path: loc.path, uids: [loc.uid], ids: [id], targetId: null }), now(), now())
+    this.emit({ type: 'messages', accountId: loc.account_id })
+  }
+
+  // ---------- sending: the outbox ----------
+
+  private compose(d: Draft, messageId: string) {
+    const r = this.accountRow(d.accountId)
+    return new MailComposer({
+      from: r.display_name ? { name: r.display_name, address: r.email } : r.email,
+      to: d.to || undefined, cc: d.cc || undefined, bcc: d.bcc || undefined, subject: d.subject,
+      html: d.html, text: d.text, messageId, date: new Date(),
+      inReplyTo: d.inReplyTo || undefined, references: d.references || undefined,
+      attachments: (d.attachments || []).filter((p) => fs.existsSync(p)).map((p) => ({ path: p, filename: path.basename(p) })),
+      headers: { 'X-Mailer': `RoarMail ${app.getVersion()}` },
+    })
+  }
+
+  send(d: Draft): string {
+    const id = d.id || uuid()
+    this.draftRow(d, id, 0)
+    const outId = uuid()
+    const delay = this.settings().undoSendSeconds * 1000
+    this.db.prepare(`insert into outbox (id, draft_id, send_at, status) values (?,?,?, 'queued')`).run(outId, id, now() + delay)
+    this.emit({ type: 'outbox' })
+    setTimeout(() => this.tick(), delay + 50)
+    return outId
+  }
+
+  cancelSend(outboxId: string): Draft | null {
+    const o = this.db.prepare(`select * from outbox where id = ? and status in ('queued','failed')`).get(outboxId) as Row
+    if (!o || this.sending.has(outboxId)) return null
+    const r = this.db.prepare('select * from drafts where id = ?').get(o.draft_id) as Row
+    this.db.prepare('delete from outbox where id = ?').run(outboxId)
+    this.emit({ type: 'outbox' })
+    return r ? this.draftOf(r) : null
+  }
+
+  retrySend(outboxId: string) {
+    this.db.prepare(`update outbox set status = 'queued', send_at = ?, last_error = null where id = ?`).run(now(), outboxId)
+    this.emit({ type: 'outbox' })
+    setTimeout(() => this.tick(), 0)
+  }
+
+  outbox(): OutboxItem[] {
+    return (this.db.prepare(`select o.*, d.to_json, d.subject from outbox o join drafts d on d.id = o.draft_id order by o.send_at`).all() as Row[])
+      .map((r) => ({ id: r.id, to: JSON.parse(r.to_json || '{}').to || '', subject: r.subject, sendAt: r.send_at, status: r.status, error: r.last_error || undefined }))
+  }
+
+  private async deliver(o: Row) {
+    this.sending.add(o.id)
+    this.db.prepare(`update outbox set status = 'sending' where id = ?`).run(o.id)
+    this.emit({ type: 'outbox' })
+    const dr = this.db.prepare('select * from drafts where id = ?').get(o.draft_id) as Row
+    try {
+      if (!dr) throw new Error('draft missing')
+      const d = this.draftOf(dr)
+      const r = this.accountRow(d.accountId)
+      const domain = r.email.split('@')[1] || 'roarmail.local'
+      const messageId = `<${uuid()}@${domain}>`
+      const mail = this.compose(d, messageId)
+      const raw = await mail.compile().build()
+      const envelope = mail.compile().getEnvelope()
+      const t = smtpTransport(this.cfgOf(r), open(r.secret))
+      try { await t.sendMail({ envelope, raw }) } finally { t.close() }
+
+      // sent: the draft goes, the people written to are remembered for autocomplete
+      this.db.prepare('delete from drafts where id = ?').run(dr.id)
+      const up = this.db.prepare(`insert into contacts (email, name, last_used, use_count) values (?,?,?,1)
+        on conflict(email) do update set last_used = excluded.last_used, use_count = contacts.use_count + 1`)
+      for (const a of [d.to, d.cc, d.bcc].filter(Boolean).join(',').split(/[,;]/).map((x) => x.trim()).filter(Boolean)) {
+        const m = a.match(/^(.*?)<([^>]+)>$/)
+        up.run((m ? m[2] : a).trim().toLowerCase(), m ? m[1].replace(/"/g, '').trim() || null : null, now())
+      }
+      this.emit({ type: 'outbox' })
+
+      // Gmail and Microsoft keep a copy in Sent by themselves; other servers need one put there
+      const sent = this.folderByRole(d.accountId, 'sent')
+      if (sent && r.provider !== 'gmail' && r.provider !== 'microsoft') {
+        try {
+          const copy = await this.compose({ ...d, bcc: undefined }, messageId).compile().build()
+          await this.run(d.accountId, (c) => c.append(sent.path, copy, ['\\Seen']))
+        } catch { /* sending worked; the copy is a nicety */ }
+      }
+      if (sent) this.syncFolder(d.accountId, sent.id, false).catch(() => {})
+      if (d.replacesMessageId) this.dropServerMessage(d.replacesMessageId)
+      if (d.replyToMessageId && this.db.prepare('select 1 from messages where id = ?').get(d.replyToMessageId)) {
+        this.db.prepare('update messages set answered = 1 where id = ?').run(d.replyToMessageId)
+        try {
+          const { folder, uid } = this.location(d.replyToMessageId)
+          await this.run(d.accountId, async (c) => {
+            const lock = await c.getMailboxLock(folder.path)
+            try { await c.messageFlagsAdd(String(uid), ['\\Answered'], { uid: true }) } finally { lock.release() }
+          })
+        } catch { /* the reply went out */ }
+      }
+      this.emit({ type: 'messages', accountId: d.accountId })
+    } catch (e) {
+      const code = friendly(e)
+      if (transient(code)) {
+        this.db.prepare(`update outbox set status = 'queued', attempts = attempts + 1, send_at = ?, last_error = ? where id = ?`)
+          .run(now() + Math.min(30e3 * (o.attempts + 1), 5 * 60e3), code, o.id)
+      } else {
+        this.db.prepare(`update outbox set status = 'failed', last_error = ? where id = ?`).run(code, o.id)
+      }
+      this.emit({ type: 'outbox' })
+    } finally {
+      this.sending.delete(o.id)
+    }
+  }
+
+  // ---------- signatures and settings ----------
+
+  signatures(): Signature[] {
+    return (this.db.prepare('select id, name, html from signatures order by created_at').all() as Row[]).map((r) => ({ id: r.id, name: r.name, html: r.html }))
+  }
+
+  saveSignature(s: Signature): Signature {
+    const id = s.id || uuid()
+    this.db.prepare(`insert into signatures (id, name, html, created_at, updated_at) values (?,?,?,?,?)
+      on conflict(id) do update set name = excluded.name, html = excluded.html, updated_at = excluded.updated_at`).run(id, s.name, s.html, now(), now())
+    this.emit({ type: 'accounts' })
+    return { id, name: s.name, html: s.html }
+  }
+
+  deleteSignature(id: string) {
+    this.db.prepare('delete from signatures where id = ?').run(id)
+    this.emit({ type: 'accounts' })
+  }
+
+  settings(): Settings {
+    const m = new Map((this.db.prepare('select key, value from settings').all() as Row[]).map((r) => [r.key, r.value]))
+    return {
+      undoSendSeconds: Math.max(0, Math.min(30, Number(m.get('undoSendSeconds') ?? 5))),
+      swipeLeft: (m.get('swipeLeft') || 'trash') as Settings['swipeLeft'],
+      swipeRight: (m.get('swipeRight') || 'archive') as Settings['swipeRight'],
+    }
+  }
+
+  setSetting(key: keyof Settings, value: unknown) {
+    this.db.prepare(`insert into settings (key, value) values (?, ?) on conflict(key) do update set value = excluded.value`).run(key, String(value))
   }
 }

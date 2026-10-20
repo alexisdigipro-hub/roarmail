@@ -16,4 +16,3 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npx tsc -p tsconfig.json
-        continue-on-error: true

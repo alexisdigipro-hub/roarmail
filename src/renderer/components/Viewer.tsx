@@ -1,87 +1,147 @@
-// Reading a message. HTML mail is cleaned (no scripts, forms or frames) and shown in a sandboxed frame;
+// Reading a conversation: every message of it, oldest first; the newest and the unread ones open, the rest
+// folded to one line. HTML mail is cleaned (no scripts, forms or frames) and shown in a sandboxed frame;
 // images from the web stay hidden until asked for, so senders cannot track opening.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Address, MessageFull } from '../../shared/api'
-import { fullDate, size, t } from '../i18n'
+import type { Account, Address, MessageFull, MessageRow } from '../../shared/api'
+import { fullDate, size, t, when } from '../i18n'
 import { Icon } from './Icon'
 
 export type ComposeKind = 'reply' | 'replyAll' | 'forward'
+type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move'
 
-export function Viewer({ id, accounts, onCompose, onAct }: {
-  id: string | null
+export function Viewer({ row, accounts, onCompose, onAct }: {
+  row: MessageRow | null
   accounts: Account[]
   onCompose: (kind: ComposeKind, m: MessageFull) => void
-  onAct: (action: 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen') => void
+  onAct: (action: RowAction) => void
+}) {
+  const [items, setItems] = useState<MessageRow[] | null>(null)
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const [error, setError] = useState('')
+  const last = useRef<MessageFull | null>(null)
+  const shownKey = useRef<string | null>(null)
+  const key = row ? row.threadId || row.id : null
+
+  useEffect(() => {
+    setError('')
+    if (shownKey.current !== key) last.current = null
+    if (!key) { setItems(null); return }
+    let live = true
+    window.roarmail.thread(key).then((list) => {
+      if (!live) return
+      const shown = list.length ? list : row ? [row] : []
+      setItems(shown)
+      const same = shownKey.current === key
+      shownKey.current = key
+      setOpen((prev) => {
+        // a new message in the conversation keeps what was open; another conversation starts fresh
+        const next = new Set(same ? prev : [])
+        shown.forEach((m, i) => { if (i === shown.length - 1 || !m.seen) next.add(m.id) })
+        return next
+      })
+    }).catch((e) => { if (live) setError(clean(e)) })
+    return () => { live = false }
+  }, [key, row?.count])
+
+  if (!row) return <section className="viewer empty"><div className="empty-mark"><b>ROAR</b><i>MAIL</i></div><p className="muted">{t.pickMessage}</p></section>
+  if (error) return <section className="viewer empty"><p className="error">{error}</p></section>
+  if (!items) return <section className="viewer empty"><div className="spinner" /></section>
+
+  const reply = (kind: ComposeKind) => { if (last.current) onCompose(kind, last.current) }
+
+  return (
+    <section className="viewer">
+      <div className="toolbar">
+        <button className="tool" title={`${t.reply} (R)`} onClick={() => reply('reply')}><Icon name="reply" /></button>
+        <button className="tool" title={`${t.replyAll} (A)`} onClick={() => reply('replyAll')}><Icon name="replyAll" /></button>
+        <button className="tool" title={`${t.forward} (F)`} onClick={() => reply('forward')}><Icon name="forward" /></button>
+        <span className="sep" />
+        <button className="tool" title={`${t.archiveIt} (E)`} onClick={() => onAct('archive')}><Icon name="archive" /></button>
+        <button className="tool" title={`${t.trashIt} (#)`} onClick={() => onAct('trash')}><Icon name="trash" /></button>
+        <button className="tool" title={`${t.moveTo} (M)`} onClick={() => onAct('move')}><Icon name="folder" /></button>
+        <button className={`tool ${row.flagged ? 'on' : ''}`} title={`${row.flagged ? t.unflag : t.flag} (S)`}
+          onClick={() => onAct(row.flagged ? 'unflag' : 'flag')}><Icon name="star" filled={row.flagged} /></button>
+        <button className="tool" title={`${t.markUnread} (U)`} onClick={() => onAct('unseen')}><Icon name="unread" /></button>
+      </div>
+
+      <div className="read">
+        <h2 className="subject">{row.subject || t.noSubject}{items.length > 1 && <span className="muted count-pill">{items.length}</span>}</h2>
+        {items.map((m, i) => open.has(m.id)
+          ? <MessageCard key={m.id} id={m.id} accounts={accounts} isLast={i === items.length - 1}
+              onLoaded={(full) => { if (i === items.length - 1) last.current = full }}
+              onFold={items.length > 1 ? () => setOpen((s) => { const n = new Set(s); n.delete(m.id); return n }) : undefined}
+              onCompose={onCompose} />
+          : (
+            <button key={m.id} className="folded" onClick={() => setOpen((s) => new Set(s).add(m.id))}>
+              <div className="avatar small-av" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
+              <b className={m.seen ? '' : 'unread'}>{m.fromName || m.fromEmail}</b>
+              <span className="grow ellipsis muted">{m.snippet}</span>
+              <span className="muted small">{when(m.date)}</span>
+            </button>
+          ))}
+      </div>
+    </section>
+  )
+}
+
+function MessageCard({ id, accounts, isLast, onLoaded, onFold, onCompose }: {
+  id: string; accounts: Account[]; isLast: boolean
+  onLoaded: (m: MessageFull) => void; onFold?: () => void; onCompose: (kind: ComposeKind, m: MessageFull) => void
 }) {
   const [m, setM] = useState<MessageFull | null>(null)
   const [error, setError] = useState('')
   const [images, setImages] = useState(false)
 
   useEffect(() => {
-    setM(null); setError(''); setImages(false)
-    if (!id) return
     let live = true
-    window.roarmail.message(id).then((x) => { if (live) { setM(x); setImages(x.imagesAllowed) } })
-      .catch((e) => { if (live) setError(String(e?.message || e).replace(/^.*Error:\s*/, '')) })
+    window.roarmail.message(id).then((x) => { if (live) { setM(x); setImages(x.imagesAllowed); onLoaded(x) } }).catch((e) => { if (live) setError(clean(e)) })
     return () => { live = false }
   }, [id])
 
-  if (!id) return <section className="viewer empty"><div className="empty-mark"><b>ROAR</b><i>MAIL</i></div><p className="muted">{t.pickMessage}</p></section>
-  if (error) return <section className="viewer empty"><p className="error">{error}</p></section>
-  if (!m) return <section className="viewer empty"><div className="spinner" /></section>
+  if (error) return <article className="card"><p className="error">{error}</p></article>
+  if (!m) return <article className="card"><div className="spinner" /></article>
 
   const acc = accounts.find((a) => a.id === m.accountId)
   const people = (list: Address[]) => list.map((a) => (acc && a.address.toLowerCase() === acc.email.toLowerCase() ? t.me : a.name || a.address)).join(', ')
 
   return (
-    <section className="viewer">
-      <div className="toolbar">
-        <button className="tool" title={`${t.reply} (R)`} onClick={() => onCompose('reply', m)}><Icon name="reply" /></button>
-        <button className="tool" title={`${t.replyAll} (A)`} onClick={() => onCompose('replyAll', m)}><Icon name="replyAll" /></button>
-        <button className="tool" title={`${t.forward} (F)`} onClick={() => onCompose('forward', m)}><Icon name="forward" /></button>
-        <span className="sep" />
-        <button className="tool" title={`${t.archiveIt} (E)`} onClick={() => onAct('archive')}><Icon name="archive" /></button>
-        <button className="tool" title={`${t.trashIt} (#)`} onClick={() => onAct('trash')}><Icon name="trash" /></button>
-        <button className={`tool ${m.flagged ? 'on' : ''}`} title={`${m.flagged ? t.unflag : t.flag} (S)`}
-          onClick={() => { onAct(m.flagged ? 'unflag' : 'flag'); setM({ ...m, flagged: !m.flagged }) }}><Icon name="star" filled={m.flagged} /></button>
-        <button className="tool" title={`${t.markUnread} (U)`} onClick={() => onAct('unseen')}><Icon name="unread" /></button>
-      </div>
+    <article className={`card ${isLast ? 'last' : ''}`}>
+      <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }}>
+        <div className="avatar" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
+        <div className="who">
+          <div><b>{m.fromName || m.fromEmail}</b> {m.fromName && <span className="muted">&lt;{m.fromEmail}&gt;</span>}</div>
+          <div className="muted small">{t.to}: {people(m.to)}{m.cc.length ? ` · ${t.cc}: ${people(m.cc)}` : ''}</div>
+        </div>
+        <div className="muted small date">{fullDate(m.date)}{acc && <i className="acc-dot" style={{ background: acc.color }} title={acc.email} />}</div>
+        <div className="card-tools" onClick={(e) => e.stopPropagation()}>
+          <button className="tool small" title={t.reply} onClick={() => onCompose('reply', m)}><Icon name="reply" size={16} /></button>
+          <button className="tool small" title={t.forward} onClick={() => onCompose('forward', m)}><Icon name="forward" size={16} /></button>
+        </div>
+      </header>
 
-      <div className="read">
-        <h2 className="subject">{m.subject || t.noSubject}</h2>
-        <header className="head">
-          <div className="avatar" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
-          <div className="who">
-            <div><b>{m.fromName || m.fromEmail}</b> {m.fromName && <span className="muted">&lt;{m.fromEmail}&gt;</span>}</div>
-            <div className="muted small">{t.to}: {people(m.to)}{m.cc.length ? ` · ${t.cc}: ${people(m.cc)}` : ''}</div>
-          </div>
-          <div className="muted small date">{fullDate(m.date)}{acc && <i className="acc-dot" style={{ background: acc.color }} title={acc.email} />}</div>
-        </header>
+      {m.listUnsubscribe && <Unsubscribe header={m.listUnsubscribe} />}
 
-        {m.listUnsubscribe && <Unsubscribe header={m.listUnsubscribe} />}
+      <Body m={m} images={images} renderBanner={(blocked) => blocked && !images ? (
+        <div className="banner"><Icon name="image" size={16} /> <span>{t.images}</span>
+          <button className="pill small" onClick={() => setImages(true)}>{t.showImages}</button>
+          <button className="pill small ghost" onClick={() => { window.roarmail.allowImages(m.fromEmail); setImages(true) }}>{t.alwaysImages}</button>
+        </div>
+      ) : null} />
 
-        <Body m={m} images={images} renderBanner={(blocked) => blocked && !images ? (
-          <div className="banner"><Icon name="image" size={16} /> <span>{t.images}</span>
-            <button className="pill small" onClick={() => setImages(true)}>{t.showImages}</button>
-            <button className="pill small ghost" onClick={() => { window.roarmail.allowImages(m.fromEmail); setImages(true) }}>{t.alwaysImages}</button>
-          </div>
-        ) : null} />
-
-        {m.attachments.length > 0 && (
-          <div className="atts">
-            {m.attachments.map((a) => (
-              <div className="att" key={a.id}>
-                <Icon name="clip" size={16} />
-                <button className="att-name" onClick={() => window.roarmail.openAttachment(a.id)} title={t.open}>{a.filename}</button>
-                <span className="muted small">{size(a.size)}</span>
-                <button className="tool small" title={t.save} onClick={() => window.roarmail.saveAttachment(a.id)}><Icon name="download" size={16} /></button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
+      {m.attachments.length > 0 && (
+        <div className="atts">
+          {m.attachments.map((a) => (
+            <div className="att" key={a.id}>
+              <Icon name="clip" size={16} />
+              <button className="att-name" onClick={() => window.roarmail.openAttachment(a.id)} title={t.open}>{a.filename}</button>
+              <span className="muted small">{size(a.size)}</span>
+              <button className="tool small" title={t.save} onClick={() => window.roarmail.saveAttachment(a.id)}><Icon name="download" size={16} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
   )
 }
 
@@ -94,7 +154,7 @@ function Unsubscribe({ header }: { header: string }) {
 // the message body in a sandboxed frame: no scripts, links open in the browser, remote images on request
 function Body({ m, images, renderBanner }: { m: MessageFull; images: boolean; renderBanner: (blocked: boolean) => ReactNode }) {
   const frame = useRef<HTMLIFrameElement>(null)
-  const [height, setHeight] = useState(200)
+  const [height, setHeight] = useState(120)
 
   const { html, blocked } = useMemo(() => {
     let blocked = false
@@ -126,7 +186,7 @@ function Body({ m, images, renderBanner }: { m: MessageFull; images: boolean; re
     const onLoad = () => {
       const doc = f.contentDocument
       if (!doc) return
-      const fit = () => setHeight(Math.max(120, doc.documentElement.scrollHeight))
+      const fit = () => setHeight(Math.max(60, doc.documentElement.scrollHeight))
       fit()
       new ResizeObserver(fit).observe(doc.body)
       doc.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit))
@@ -150,6 +210,7 @@ function Body({ m, images, renderBanner }: { m: MessageFull; images: boolean; re
   )
 }
 
+const clean = (e: any) => String(e?.message || e).replace(/^.*Error:\s*/, '')
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 
 export function initials(s: string) {

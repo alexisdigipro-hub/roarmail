@@ -1,5 +1,14 @@
 // Greek and English; the app follows the system language.
 const el = {
+  undo: 'Αναίρεση', archived: 'Αρχειοθετήθηκε', trashed: 'Στον κάδο', moved: 'Μετακινήθηκε', deleted: 'Διαγράφηκε',
+  sentIn: 'Αποστέλλεται', sendFailed: 'Δεν στάλθηκε', retry: 'Ξανά', edit: 'Επεξεργασία', outboxWaiting: 'σε αναμονή στα Εξερχόμενα',
+  moveTo: 'Μετακίνηση σε…', moveFilter: 'Γράψε όνομα φακέλου', selected: 'επιλεγμένα', selectAll: 'Επιλογή όλων',
+  messages: 'μηνύματα', saveDraft: 'Αποθήκευση πρόχειρου', draftSaved: 'Αποθηκεύτηκε στα Πρόχειρα', keepWriting: 'Συνέχεια γραφής',
+  settings: 'Ρυθμίσεις', accounts: 'Λογαριασμοί', signatures: 'Υπογραφές', general: 'Γενικά', newSignature: 'Νέα υπογραφή',
+  signatureName: 'Όνομα υπογραφής', noSignature: 'Χωρίς υπογραφή', signature: 'Υπογραφή', color: 'Χρώμα', delete: 'Διαγραφή',
+  undoSend: 'Χρόνος για αναίρεση αποστολής', seconds: 'δευτ.', off: 'Κλειστό', swipeLeft: 'Σάρωση αριστερά', swipeRight: 'Σάρωση δεξιά',
+  sw_archive: 'Αρχειοθέτηση', sw_trash: 'Κάδος', sw_flag: 'Αστέρι', sw_seen: 'Διαβασμένο / αδιάβαστο', sw_none: 'Τίποτα',
+  opFailed: 'Ο server δεν δέχτηκε την αλλαγή', earlier: 'προηγούμενα', done: 'Τέλος', saved: 'Αποθηκεύτηκε',
   allInboxes: 'Όλα τα εισερχόμενα', inbox: 'Εισερχόμενα', sent: 'Απεσταλμένα', drafts: 'Πρόχειρα', trash: 'Κάδος', spam: 'Ανεπιθύμητα',
   archive: 'Αρχείο', all: 'Όλα τα μηνύματα', flagged: 'Με αστέρι', folders: 'Φάκελοι',
   addAccount: 'Προσθήκη λογαριασμού', welcome: 'Καλώς ήρθες στο RoarMail', welcomeSub: 'Σύνδεσε το email σου. Ο κωδικός μένει μόνο σε αυτόν τον υπολογιστή, στο κλειδοθήκη του συστήματος.',
@@ -24,9 +33,18 @@ const el = {
   unsubscribe: 'Διαγραφή από τη λίστα', save: 'Αποθήκευση', open: 'Άνοιγμα', noSubject: '(χωρίς θέμα)', me: 'εμένα',
   offline: 'Χωρίς σύνδεση', connecting: 'Σύνδεση…', error: 'Σφάλμα', removeAccount: 'Αφαίρεση λογαριασμού', removeQ: 'Να αφαιρεθεί ο λογαριασμός από το RoarMail; Τα μηνύματα μένουν στον server.',
   updateReady: 'Νέα έκδοση έτοιμη', restart: 'Επανεκκίνηση', wrote: 'έγραψε', original: 'Αρχικό μήνυμα', today: 'Σήμερα', yesterday: 'Χθες',
-  shortcuts: 'Συντομεύσεις: C νέο · R απάντηση · A σε όλους · F προώθηση · E αρχείο · # κάδος · S αστέρι · U αδιάβαστο · / αναζήτηση',
+  shortcuts: 'Συντομεύσεις: C νέο · R απάντηση · A σε όλους · F προώθηση · E αρχείο · # κάδος · M μετακίνηση · S αστέρι · U αδιάβαστο · Z αναίρεση · / αναζήτηση',
 }
 const en: typeof el = {
+  undo: 'Undo', archived: 'Archived', trashed: 'Moved to Trash', moved: 'Moved', deleted: 'Deleted',
+  sentIn: 'Sending', sendFailed: 'Not sent', retry: 'Retry', edit: 'Edit', outboxWaiting: 'waiting in the Outbox',
+  moveTo: 'Move to…', moveFilter: 'Type a folder name', selected: 'selected', selectAll: 'Select all',
+  messages: 'messages', saveDraft: 'Save draft', draftSaved: 'Saved to Drafts', keepWriting: 'Keep writing',
+  settings: 'Settings', accounts: 'Accounts', signatures: 'Signatures', general: 'General', newSignature: 'New signature',
+  signatureName: 'Signature name', noSignature: 'No signature', signature: 'Signature', color: 'Color', delete: 'Delete',
+  undoSend: 'Time to undo sending', seconds: 'sec', off: 'Off', swipeLeft: 'Swipe left', swipeRight: 'Swipe right',
+  sw_archive: 'Archive', sw_trash: 'Trash', sw_flag: 'Star', sw_seen: 'Read / unread', sw_none: 'Nothing',
+  opFailed: 'The server did not accept the change', earlier: 'earlier', done: 'Done', saved: 'Saved',
   allInboxes: 'All Inboxes', inbox: 'Inbox', sent: 'Sent', drafts: 'Drafts', trash: 'Trash', spam: 'Junk',
   archive: 'Archive', all: 'All Mail', flagged: 'Starred', folders: 'Folders',
   addAccount: 'Add account', welcome: 'Welcome to RoarMail', welcomeSub: 'Connect your email. Your password stays on this computer only, in the system keychain.',
@@ -51,7 +69,7 @@ const en: typeof el = {
   unsubscribe: 'Unsubscribe', save: 'Save', open: 'Open', noSubject: '(no subject)', me: 'me',
   offline: 'Offline', connecting: 'Connecting…', error: 'Error', removeAccount: 'Remove account', removeQ: 'Remove this account from RoarMail? Your mail stays on the server.',
   updateReady: 'New version ready', restart: 'Restart', wrote: 'wrote', original: 'Original message', today: 'Today', yesterday: 'Yesterday',
-  shortcuts: 'Shortcuts: C new · R reply · A reply all · F forward · E archive · # trash · S star · U unread · / search',
+  shortcuts: 'Shortcuts: C new · R reply · A reply all · F forward · E archive · # trash · M move · S star · U unread · Z undo · / search',
 }
 
 export const lang = (navigator.language || 'en').toLowerCase().startsWith('el') ? 'el' : 'en'

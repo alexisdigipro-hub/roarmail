@@ -25,6 +25,20 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   saveAttachment: call('saveAttachment') as MailApi['saveAttachment'],
   openExternal: call('openExternal') as MailApi['openExternal'],
   refresh: call('refresh') as MailApi['refresh'],
+  thread: call('thread') as MailApi['thread'],
+  undo: call('undo') as MailApi['undo'],
+  cancelSend: call('cancelSend') as MailApi['cancelSend'],
+  retrySend: call('retrySend') as MailApi['retrySend'],
+  outbox: call('outbox') as MailApi['outbox'],
+  saveDraft: call('saveDraft') as MailApi['saveDraft'],
+  discardDraft: call('discardDraft') as MailApi['discardDraft'],
+  draftFromMessage: call('draftFromMessage') as MailApi['draftFromMessage'],
+  updateAccount: call('updateAccount') as MailApi['updateAccount'],
+  signatures: call('signatures') as MailApi['signatures'],
+  saveSignature: call('saveSignature') as MailApi['saveSignature'],
+  deleteSignature: call('deleteSignature') as MailApi['deleteSignature'],
+  settings: call('settings') as MailApi['settings'],
+  setSetting: call('setSetting') as MailApi['setSetting'],
   on(cb) {
     const h = (_e: unknown, ev: MailEvent) => cb(ev)
     ipcRenderer.on('mail:event', h)

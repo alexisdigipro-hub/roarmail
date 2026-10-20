@@ -1,27 +1,34 @@
-// Writing a message: new, reply, reply all, forward. Cmd/Ctrl+Enter sends, Esc closes.
+// Writing a message: new, reply, reply all, forward, or a draft picked up again. Saved as a draft while
+// writing; closing offers to keep it in Drafts. Cmd/Ctrl+Enter sends, Esc closes.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Address, MessageFull } from '../../shared/api'
+import type { Account, Address, Draft, MessageFull, Signature } from '../../shared/api'
 import { fullDate, t } from '../i18n'
 import { Icon } from './Icon'
 import type { ComposeKind } from './Viewer'
 
 export interface ComposeSeed {
-  kind: ComposeKind | 'new'
+  kind: ComposeKind | 'new' | 'draft'
   accountId?: string
   to?: string
   subject?: string
   body?: string
   source?: MessageFull
+  draft?: Draft
 }
 
 const fmt = (a: Address) => (a.name ? `${a.name.replace(/[",]/g, '')} <${a.address}>` : a.address)
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+const SIG = 'data-roarmail-signature'
 
 function prefill(seed: ComposeSeed, accounts: Account[]) {
+  if (seed.kind === 'draft' && seed.draft) {
+    const d = seed.draft
+    return { accountId: d.accountId, to: d.to, cc: d.cc || '', bcc: d.bcc || '', subject: d.subject, body: DOMPurify.sanitize(d.html), signed: true }
+  }
   const m = seed.source
   const accountId = m?.accountId || seed.accountId || accounts[0]?.id || ''
-  if (!m || seed.kind === 'new') return { accountId, to: seed.to || '', cc: '', subject: seed.subject || '', body: seed.body ? esc(seed.body).replace(/\n/g, '<br>') : '' }
+  if (!m || seed.kind === 'new') return { accountId, to: seed.to || '', cc: '', bcc: '', subject: seed.subject || '', body: seed.body ? esc(seed.body).replace(/\n/g, '<br>') : '', signed: false }
   const mine = accounts.find((a) => a.id === m.accountId)?.email.toLowerCase()
   const from = m.replyTo || m.fromEmail
   // the quoted mail is cleaned like in the reader, and its web images are left out
@@ -34,73 +41,126 @@ function prefill(seed: ComposeSeed, accounts: Account[]) {
   const prefix = (p: string) => (new RegExp(`^${p}:`, 'i').test(m.subject) ? m.subject : `${p}: ${m.subject}`)
   if (seed.kind === 'forward') {
     const head = `<p>---------- ${t.original} ----------<br>${t.from}: ${esc(m.fromName ? `${m.fromName} <${m.fromEmail}>` : m.fromEmail)}<br>${fullDate(m.date)}<br>${t.subject}: ${esc(m.subject)}<br>${t.to}: ${esc(m.to.map(fmt).join(', '))}</p>`
-    return { accountId, to: '', cc: '', subject: prefix('Fwd'), body: `<br><br>${head}${quoted}` }
+    return { accountId, to: '', cc: '', bcc: '', subject: prefix('Fwd'), body: `<br><br>${head}${quoted}`, signed: false }
   }
   const others = seed.kind === 'replyAll'
     ? [...m.to, ...m.cc].filter((a) => a.address.toLowerCase() !== mine && a.address.toLowerCase() !== from.toLowerCase()).map(fmt).join(', ')
     : ''
   const header = `${fullDate(m.date)}, ${esc(m.fromName || m.fromEmail)} ${t.wrote}:`
-  return { accountId, to: from, cc: others, subject: prefix('Re'), body: `<br><br><p>${header}</p><blockquote>${quoted}</blockquote>` }
+  return { accountId, to: from, cc: others, bcc: '', subject: prefix('Re'), body: `<br><br><p>${header}</p><blockquote>${quoted}</blockquote>`, signed: false }
 }
 
-export function Composer({ seed, accounts, onClose, onSent }: { seed: ComposeSeed; accounts: Account[]; onClose: () => void; onSent: () => void }) {
+export function Composer({ seed, accounts, onClose, onSent }: {
+  seed: ComposeSeed; accounts: Account[]
+  onClose: (saved: boolean) => void; onSent: (outboxId: string) => void
+}) {
   const init = useRef(prefill(seed, accounts)).current
   const [accountId, setAccountId] = useState(init.accountId)
   const [to, setTo] = useState(init.to)
   const [cc, setCc] = useState(init.cc)
-  const [bcc, setBcc] = useState('')
-  const [showCc, setShowCc] = useState(!!init.cc)
+  const [bcc, setBcc] = useState(init.bcc)
+  const [showCc, setShowCc] = useState(!!(init.cc || init.bcc))
   const [subject, setSubject] = useState(init.subject)
-  const [files, setFiles] = useState<string[]>([])
+  const [files, setFiles] = useState<string[]>(seed.draft?.attachments || [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [asking, setAsking] = useState(false)
+  const [sigs, setSigs] = useState<Signature[]>([])
   const body = useRef<HTMLDivElement>(null)
   const dirty = useRef(false)
+  const draftId = useRef<string | undefined>(seed.draft?.id)
+  const saving = useRef<Promise<unknown> | null>(null)
+
+  const thread = seed.kind === 'draft' ? seed.draft : seed.source && seed.kind !== 'forward' ? seed.source : undefined
+  const replyMeta = () => {
+    if (seed.kind === 'draft' && seed.draft) return { inReplyTo: seed.draft.inReplyTo, references: seed.draft.references, replyToMessageId: seed.draft.replyToMessageId }
+    const m = seed.source
+    if (!m || seed.kind === 'forward' || seed.kind === 'new') return {}
+    return { inReplyTo: m.messageId, references: [m.references, m.messageId].filter(Boolean).join(' ') || undefined, replyToMessageId: m.id }
+  }
+
+  const draft = (): Draft => ({
+    id: draftId.current, accountId, to, cc, bcc, subject,
+    html: body.current?.innerHTML || '', text: body.current?.innerText || '',
+    ...replyMeta(), replacesMessageId: seed.draft?.replacesMessageId, attachments: files,
+  })
+
+  // the signature of the chosen account, placed above the quoted text
+  const placeSignature = (list: Signature[], accId: string) => {
+    const el = body.current
+    if (!el) return
+    const sigId = accounts.find((a) => a.id === accId)?.signatureId
+    const html = sigId ? list.find((s) => s.id === sigId)?.html || '' : ''
+    let box = el.querySelector(`[${SIG}]`) as HTMLElement | null
+    if (!box && !html) return
+    if (!box) {
+      box = document.createElement('div')
+      box.setAttribute(SIG, '')
+      el.insertBefore(box, el.firstChild)
+      el.insertBefore(document.createElement('br'), box)
+      el.insertBefore(document.createElement('br'), box)
+    }
+    box.innerHTML = html ? `-- <br>${DOMPurify.sanitize(html)}` : ''
+  }
 
   useEffect(() => {
     if (body.current) body.current.innerHTML = init.body
-    const focus = seed.kind === 'new' && !init.to ? 'to' : 'body'
-    if (focus === 'body' && body.current) { body.current.focus(); const r = document.createRange(); r.setStart(body.current, 0); r.collapse(true); getSelection()?.removeAllRanges(); getSelection()?.addRange(r) }
+    window.roarmail.signatures().then((list) => { setSigs(list); if (!init.signed) placeSignature(list, init.accountId) })
+    if (!(seed.kind === 'new' && !init.to) && body.current) {
+      body.current.focus()
+      const r = document.createRange(); r.setStart(body.current, 0); r.collapse(true)
+      getSelection()?.removeAllRanges(); getSelection()?.addRange(r)
+    }
   }, [])
+
+  // keep a copy while writing, so nothing is lost if the app closes
+  useEffect(() => {
+    const h = setInterval(() => {
+      if (!dirty.current || busy) return
+      dirty.current = false
+      saving.current = window.roarmail.saveDraft(draft(), false).then((id) => { draftId.current = id })
+    }, 3000)
+    return () => clearInterval(h)
+  })
 
   async function send() {
     if (!to.trim() && !cc.trim() && !bcc.trim()) { setError(t.noRecipient); return }
     setBusy(true); setError('')
-    const m = seed.source
     try {
-      await window.roarmail.send({
-        accountId, to, cc, bcc, subject,
-        html: body.current?.innerHTML || '', text: body.current?.innerText || '',
-        inReplyTo: m && seed.kind !== 'forward' ? m.messageId : undefined,
-        references: m && seed.kind !== 'forward' ? m.messageId : undefined,
-        replyToMessageId: m && seed.kind !== 'forward' ? m.id : undefined,
-        attachments: files,
-      })
-      onSent()
+      await saving.current
+      const id = await window.roarmail.send(draft())
+      onSent(id)
     } catch (e: any) {
       setError(String(e?.message || e).replace(/^.*Error:\s*/, ''))
       setBusy(false)
     }
   }
 
-  function close() {
-    if (dirty.current && !confirm(t.discardQ)) return
-    onClose()
+  async function close(choice?: 'save' | 'discard') {
+    const changed = dirty.current || !!draftId.current
+    if (!choice && changed) { setAsking(true); return }
+    await saving.current
+    if (choice === 'save') { await window.roarmail.saveDraft(draft(), true); onClose(true); return }
+    if (draftId.current) await window.roarmail.discardDraft(draftId.current)
+    onClose(false)
   }
+
+  const title = seed.kind === 'new' ? t.compose : seed.kind === 'forward' ? t.forward : seed.kind === 'replyAll' ? t.replyAll
+    : seed.kind === 'draft' ? (thread && (thread as Draft).inReplyTo ? t.reply : t.compose) : t.reply
 
   return (
     <div className="sheet-wrap" onKeyDown={(e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send() }
-      if (e.key === 'Escape') { e.preventDefault(); close() }
+      if (e.key === 'Escape') { e.preventDefault(); asking ? setAsking(false) : close() }
     }}>
       <div className="sheet composer" onInput={() => { dirty.current = true }}>
         <div className="composer-head">
-          <b>{seed.kind === 'new' ? t.compose : seed.kind === 'forward' ? t.forward : seed.kind === 'replyAll' ? t.replyAll : t.reply}</b>
-          <button className="tool" onClick={close} title={t.discard}><Icon name="close" /></button>
+          <b>{title}</b>
+          <button className="tool" onClick={() => close()} title={t.discard}><Icon name="close" /></button>
         </div>
         {accounts.length > 1 && (
           <div className="field"><span>{t.from}</span>
-            <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <select value={accountId} onChange={(e) => { setAccountId(e.target.value); placeSignature(sigs, e.target.value); dirty.current = true }}>
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.displayName ? `${a.displayName} <${a.email}>` : a.email}</option>)}
             </select>
           </div>
@@ -115,7 +175,7 @@ export function Composer({ seed, accounts, onClose, onSent }: { seed: ComposeSee
           <div className="files">
             {files.map((f) => (
               <span className="chip" key={f}><Icon name="clip" size={14} /> {f.split(/[\\/]/).pop()}
-                <button onClick={() => setFiles(files.filter((x) => x !== f))}><Icon name="close" size={12} /></button></span>
+                <button onClick={() => { setFiles(files.filter((x) => x !== f)); dirty.current = true }}><Icon name="close" size={12} /></button></span>
             ))}
           </div>
         )}
@@ -126,6 +186,16 @@ export function Composer({ seed, accounts, onClose, onSent }: { seed: ComposeSee
           <span className="muted small">⌘/Ctrl + Enter</span>
           <button className="pill primary" disabled={busy} onClick={send}>{busy ? t.sending : t.send}</button>
         </div>
+        {asking && (
+          <div className="ask">
+            <p>{t.discardQ}</p>
+            <div className="row end">
+              <button className="pill small ghost" onClick={() => setAsking(false)}>{t.keepWriting}</button>
+              <button className="pill small ghost danger" onClick={() => close('discard')}>{t.discard}</button>
+              <button className="pill small primary" autoFocus onClick={() => close('save')}>{t.saveDraft}</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

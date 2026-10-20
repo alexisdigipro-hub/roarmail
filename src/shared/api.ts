@@ -25,6 +25,7 @@ export interface Account {
   imapHost: string; imapPort: number; imapTls: Tls
   smtpHost: string; smtpPort: number; smtpTls: Tls
   username: string
+  signatureId: string | null
   state: 'connecting' | 'online' | 'offline' | 'error'
   error?: string
 }
@@ -42,9 +43,11 @@ export interface Folder {
 
 export interface Address { name?: string; address: string }
 
+/** a row of the list: a whole conversation (its newest message), or a single message in search */
 export interface MessageRow {
   id: string
   accountId: string
+  threadId: string | null
   fromName: string
   fromEmail: string
   subject: string
@@ -54,6 +57,9 @@ export interface MessageRow {
   flagged: boolean
   answered: boolean
   hasAttachments: boolean
+  /** messages of the conversation in this view (what an action on the row applies to) */
+  ids: string[]
+  count: number
 }
 
 export interface Attachment { id: string; filename: string; mime: string; size: number; inline: boolean }
@@ -63,10 +69,10 @@ export interface MessageFull extends MessageRow {
   cc: Address[]
   replyTo?: string
   messageId?: string
+  references?: string
   html?: string
   text?: string
   attachments: Attachment[]
-  /** cid -> data: url, for inline images */
   inlineImages: Record<string, string>
   imagesAllowed: boolean
   listUnsubscribe?: string
@@ -76,6 +82,8 @@ export interface MessageFull extends MessageRow {
 export interface ListScope { accountId: string | 'all'; folderId?: string; role?: FolderRole }
 
 export interface Draft {
+  /** local draft id, set once saved */
+  id?: string
   accountId: string
   to: string
   cc?: string
@@ -86,10 +94,19 @@ export interface Draft {
   inReplyTo?: string
   references?: string
   replyToMessageId?: string
+  /** the server draft (a message in Drafts) this one replaces */
+  replacesMessageId?: string
   attachments?: string[] // local file paths
 }
 
-export type Action = 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash'
+export interface OutboxItem { id: string; to: string; subject: string; sendAt: number; status: 'queued' | 'sending' | 'failed'; error?: string }
+
+export interface Signature { id: string; name: string; html: string }
+
+export interface Settings { undoSendSeconds: number; swipeLeft: SwipeAction; swipeRight: SwipeAction }
+export type SwipeAction = 'archive' | 'trash' | 'flag' | 'seen' | 'none'
+
+export type Action = 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash' | 'move'
 
 export type MailEvent =
   | { type: 'accounts' }
@@ -99,22 +116,40 @@ export type MailEvent =
   | { type: 'sync'; accountId: string; busy: boolean }
   | { type: 'open'; messageId: string }
   | { type: 'compose'; to: string; subject?: string; body?: string }
+  | { type: 'outbox' }
+  | { type: 'opFailed'; error: string }
 
 export interface MailApi {
   platform: string
   autodetect(email: string): Promise<ServerConfig>
   testAccount(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }>
   addAccount(cfg: ServerConfig, password: string): Promise<Account>
+  updateAccount(id: string, patch: { displayName?: string; color?: string; signatureId?: string | null }): Promise<void>
   removeAccount(id: string): Promise<void>
   accounts(): Promise<Account[]>
   folders(accountId: string): Promise<Folder[]>
   messages(scope: ListScope, before?: number): Promise<MessageRow[]>
+  /** the messages of a conversation, oldest first; key is a thread id or a message id */
+  thread(key: string): Promise<MessageRow[]>
   message(id: string): Promise<MessageFull>
   search(query: string, accountId?: string): Promise<MessageRow[]>
   contacts(query: string): Promise<Address[]>
-  act(ids: string[], action: Action): Promise<void>
+  /** archive / trash / move wait a few seconds before reaching the server; the token undoes them */
+  act(ids: string[], action: Action, targetFolderId?: string): Promise<string | null>
+  undo(token: string): Promise<boolean>
   allowImages(sender: string): Promise<void>
-  send(draft: Draft): Promise<void>
+  send(draft: Draft): Promise<string>
+  cancelSend(outboxId: string): Promise<Draft | null>
+  retrySend(outboxId: string): Promise<void>
+  outbox(): Promise<OutboxItem[]>
+  saveDraft(draft: Draft, toServer: boolean): Promise<string>
+  discardDraft(id: string): Promise<void>
+  draftFromMessage(id: string): Promise<Draft>
+  signatures(): Promise<Signature[]>
+  saveSignature(sig: Signature): Promise<Signature>
+  deleteSignature(id: string): Promise<void>
+  settings(): Promise<Settings>
+  setSetting<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void>
   pickFiles(): Promise<string[]>
   openAttachment(id: string): Promise<void>
   saveAttachment(id: string): Promise<void>

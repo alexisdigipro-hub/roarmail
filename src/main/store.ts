@@ -4,10 +4,11 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
 import schema001 from './schema.sql'
+import schema002 from './schema002.sql'
 
 export type DB = Database.Database
 
-const MIGRATIONS: string[] = [schema001]
+const MIGRATIONS: string[] = [schema001, schema002]
 
 export function openStore(): DB {
   const db = new Database(path.join(app.getPath('userData'), 'roarmail.db'))
