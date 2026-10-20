@@ -360,3 +360,27 @@ iframe.body { border-radius: var(--r); }
   .acc.all { background: linear-gradient(135deg, #d8dce2, #b9bfc8); color: #1b1f25; }
   .sheet-wrap { background: rgba(40, 46, 56, .25); }
 }
+
+/* ---------- privacy: trackers, links, sender checks, lock ---------- */
+.shield { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; padding: 4px 10px; border-radius: 999px; font-size: 12px;
+  color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 30%, transparent); }
+.body-wrap { position: relative; }
+.hover-url { position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 16px); padding: 4px 10px; border-radius: 8px; font-size: 12px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #fff; background: rgba(20, 22, 26, .88); pointer-events: none; }
+.danger-banner { color: var(--text); background: color-mix(in srgb, var(--danger) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent); }
+.danger-banner .ic { color: var(--danger); }
+.unsub-row { margin: -4px 0 10px 54px; gap: 12px; }
+.tool.on-danger { color: var(--danger); }
+.link-sheet { width: min(520px, 100%); }
+.link-sheet h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.link-sheet .ic { color: var(--accent-2); }
+.link-host { margin: 4px 0 2px; font-size: 20px; font-weight: 700; word-break: break-all; }
+.link-url { margin: 0 0 12px; font-size: 12px; color: var(--muted); word-break: break-all; -webkit-user-select: text; user-select: text; }
+.warn-list { margin: 0 0 6px; padding-left: 18px; color: var(--danger); font-size: 13px; }
+.warn-list li { margin: 4px 0; }
+.sheet label.check, label.check { flex-direction: row; align-items: center; gap: 10px; margin: 4px 0; font-size: 14px; color: var(--text); }
+label.check input { width: 18px; height: 18px; accent-color: var(--accent); box-shadow: none; padding: 0; }
+.blocked-row { padding: 6px 0; border-bottom: 1px solid var(--edge); }
+.lock-screen { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.lock-screen > .ic { color: var(--accent-2); filter: drop-shadow(0 0 12px color-mix(in srgb, var(--accent) 60%, transparent)); }
+.brand.big { font-size: 34px; letter-spacing: .14em; }

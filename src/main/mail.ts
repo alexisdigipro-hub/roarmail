@@ -12,13 +12,13 @@ import { simpleParser, type ParsedMail } from 'mailparser'
 import tls from 'tls'
 import fs from 'fs'
 import path from 'path'
-import { app } from 'electron'
+import { app, net, shell } from 'electron'
 import type { DB } from './store'
 import { now, uuid } from './store'
 import { seal, open } from './vault'
 import type {
   Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
-  ServerConfig, Settings, Signature,
+  Security, ServerConfig, Settings, Signature,
 } from '../shared/api'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
@@ -109,6 +109,26 @@ function friendly(e: any): string {
   return m.slice(0, 300)
 }
 const transient = (code: string) => code === 'network' || code === 'host'
+
+/** sender checks from the receiving server's Authentication-Results, and two common tricks */
+function securityOf(mail: ParsedMail, fromEmail: string): Security {
+  const raw = mail.headers.get('authentication-results') as unknown
+  const first = String(Array.isArray(raw) ? raw[0] ?? '' : raw ?? '')
+  const res = (k: string) => (first.match(new RegExp(`\\b${k}=(\\w+)`, 'i')) || [])[1]?.toLowerCase()
+  const dmarc = res('dmarc'), spf = res('spf'), dkim = res('dkim')
+  const auth: Security['auth'] = !first ? 'none'
+    : dmarc === 'fail' || (spf === 'fail' && (dkim === 'fail' || !dkim)) ? 'fail' : 'pass'
+  const warnings: Security['warnings'] = []
+  if (auth === 'fail') warnings.push('auth')
+  // a display name that is itself an address, but not the real one: "paypal@paypal.com" <x@evil.example>
+  const name = mail.from?.value?.[0]?.name || ''
+  const inName = (name.match(/[\w.+-]+@[\w-]+\.[\w.-]+/) || [])[0]?.toLowerCase()
+  if (inName && inName !== fromEmail) warnings.push('nameSpoof')
+  const replyTo = mail.replyTo?.value?.[0]?.address?.toLowerCase()
+  const dom = (a?: string) => (a || '').split('@')[1]?.split('.').slice(-2).join('.')
+  if (replyTo && fromEmail && dom(replyTo) !== dom(fromEmail)) warnings.push('replyTo')
+  return { auth, warnings, replyTo }
+}
 
 export class MailService {
   private worker = new Map<string, ImapFlow>()
@@ -477,6 +497,15 @@ export class MailService {
     this.emit({ type: 'messages', accountId })
     this.emit({ type: 'folders', accountId })
     if (folder.role === 'inbox') this.badge()
+    if (folder.role === 'inbox') {
+      const blocked = this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id join contacts c on c.email = m.from_email
+        where mf.folder_id = ? and c.blocked = 1 and m.pending_op is null`).all(folderId) as Row[]
+      if (blocked.length) {
+        const gone = new Set(blocked.map((b) => b.id))
+        for (let i = fresh.length - 1; i >= 0; i--) if (gone.has(fresh[i].id)) fresh.splice(i, 1)
+        this.act([...gone], 'trash').catch(() => {})
+      }
+    }
     if (fresh.length) {
       const tid = this.db.prepare('select thread_id from messages where id = ?')
       this.notify(accountId, fresh.map((r) => ({ ...r, threadId: (tid.get(r.id) as Row)?.thread_id || null })))
@@ -628,7 +657,42 @@ export class MailService {
       inlineImages: {},
       imagesAllowed: !!contact?.images_allowed,
       listUnsubscribe: row.list_unsubscribe || undefined,
+      oneClickUnsubscribe: /one-click/i.test(String(mail.headers.get('list-unsubscribe-post') || '')),
+      security: securityOf(mail, row.from_email || ''),
+      senderBlocked: !!contact?.blocked,
     }
+  }
+
+  // ---------- unsubscribe and blocked senders ----------
+
+  async unsubscribe(id: string): Promise<'done' | 'sent' | 'opened' | 'none'> {
+    const { row, mail } = await this.parsed(id)
+    const header = String(row.list_unsubscribe || mail.headers.get('list-unsubscribe') || '')
+    const links = (header.match(/<([^>]+)>/g) || []).map((x) => x.slice(1, -1).trim())
+    const web = links.find((l) => /^https:/i.test(l))
+    const mailto = links.find((l) => /^mailto:/i.test(l))
+    const oneClick = /one-click/i.test(String(mail.headers.get('list-unsubscribe-post') || ''))
+    if (web && oneClick) {
+      const r = await net.fetch(web, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' })
+      if (r.ok) return 'done'
+    }
+    if (mailto) {
+      const u = new URL(mailto)
+      this.send({ accountId: row.account_id, to: decodeURIComponent(u.pathname), subject: u.searchParams.get('subject') || 'unsubscribe',
+        html: u.searchParams.get('body') || 'unsubscribe', text: u.searchParams.get('body') || 'unsubscribe' })
+      return 'sent'
+    }
+    if (web || links.find((l) => /^http:/i.test(l))) { shell.openExternal((web || links.find((l) => /^http:/i.test(l)))!); return 'opened' }
+    return 'none'
+  }
+
+  /** a blocked sender's new mail goes straight to Trash */
+  blockSender(email: string, blocked: boolean) {
+    this.db.prepare(`insert into contacts (email, blocked) values (?, ?) on conflict(email) do update set blocked = excluded.blocked`).run(email.toLowerCase(), blocked ? 1 : 0)
+  }
+
+  blockedSenders(): string[] {
+    return (this.db.prepare('select email from contacts where blocked = 1 order by email').all() as Row[]).map((r) => r.email)
   }
 
   async attachment(attId: string): Promise<{ filename: string; content: Buffer }> {
@@ -1023,6 +1087,10 @@ export class MailService {
       undoSendSeconds: Math.max(0, Math.min(30, Number(m.get('undoSendSeconds') ?? 5))),
       swipeLeft: (m.get('swipeLeft') || 'trash') as Settings['swipeLeft'],
       swipeRight: (m.get('swipeRight') || 'archive') as Settings['swipeRight'],
+      blockTrackers: m.get('blockTrackers') !== 'false',
+      stripTracking: m.get('stripTracking') !== 'false',
+      lock: m.get('lock') === 'true',
+      lockAfter: Math.max(0, Number(m.get('lockAfter') ?? 15)),
     }
   }
 

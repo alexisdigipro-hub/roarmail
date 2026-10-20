@@ -39,6 +39,12 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   deleteSignature: call('deleteSignature') as MailApi['deleteSignature'],
   settings: call('settings') as MailApi['settings'],
   setSetting: call('setSetting') as MailApi['setSetting'],
+  unsubscribe: call('unsubscribe') as MailApi['unsubscribe'],
+  blockSender: call('blockSender') as MailApi['blockSender'],
+  blockedSenders: call('blockedSenders') as MailApi['blockedSenders'],
+  lockState: call('lockState') as MailApi['lockState'],
+  unlock: call('unlock') as MailApi['unlock'],
+  lockNow: call('lockNow') as MailApi['lockNow'],
   on(cb) {
     const h = (_e: unknown, ev: MailEvent) => cb(ev)
     ipcRenderer.on('mail:event', h)

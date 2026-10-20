@@ -76,6 +76,17 @@ export interface MessageFull extends MessageRow {
   inlineImages: Record<string, string>
   imagesAllowed: boolean
   listUnsubscribe?: string
+  /** the list offers RFC 8058 one-click unsubscribe */
+  oneClickUnsubscribe?: boolean
+  security: Security
+  senderBlocked: boolean
+}
+
+/** what the reader warns about: failed sender checks, a display name posing as another address, replies going elsewhere */
+export interface Security {
+  auth: 'pass' | 'fail' | 'none'
+  warnings: ('auth' | 'nameSpoof' | 'replyTo')[]
+  replyTo?: string
 }
 
 /** what the list shows: one folder, or the unified inbox (accountId 'all') */
@@ -103,7 +114,18 @@ export interface OutboxItem { id: string; to: string; subject: string; sendAt: n
 
 export interface Signature { id: string; name: string; html: string }
 
-export interface Settings { undoSendSeconds: number; swipeLeft: SwipeAction; swipeRight: SwipeAction }
+export interface Settings {
+  undoSendSeconds: number; swipeLeft: SwipeAction; swipeRight: SwipeAction
+  /** remove tracking pixels even when images are shown */
+  blockTrackers: boolean
+  /** take utm_ and similar tracking tags off links before opening them */
+  stripTracking: boolean
+  /** ask for Touch ID on start, after sleep and after lockAfter minutes away */
+  lock: boolean
+  lockAfter: number
+}
+
+export interface LockState { available: boolean; enabled: boolean; locked: boolean; method: 'touchid' | 'none' }
 export type SwipeAction = 'archive' | 'trash' | 'flag' | 'seen' | 'none'
 
 export type Action = 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash' | 'move'
@@ -118,6 +140,7 @@ export type MailEvent =
   | { type: 'compose'; to: string; subject?: string; body?: string }
   | { type: 'outbox' }
   | { type: 'opFailed'; error: string }
+  | { type: 'lock'; locked: boolean }
 
 export interface MailApi {
   platform: string
@@ -138,6 +161,13 @@ export interface MailApi {
   act(ids: string[], action: Action, targetFolderId?: string): Promise<string | null>
   undo(token: string): Promise<boolean>
   allowImages(sender: string): Promise<void>
+  /** one-click (RFC 8058) when offered, else a mail to the list's address, else the web page */
+  unsubscribe(messageId: string): Promise<'done' | 'sent' | 'opened' | 'none'>
+  blockSender(email: string, blocked: boolean): Promise<void>
+  blockedSenders(): Promise<string[]>
+  lockState(): Promise<LockState>
+  unlock(): Promise<boolean>
+  lockNow(): Promise<void>
   send(draft: Draft): Promise<string>
   cancelSend(outboxId: string): Promise<Draft | null>
   retrySend(outboxId: string): Promise<void>

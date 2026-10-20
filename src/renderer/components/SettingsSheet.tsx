@@ -1,12 +1,12 @@
 // Settings: accounts (name, colour, signature, remove), signatures, and general (undo send, swipes).
 import { useEffect, useRef, useState } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Settings, Signature, SwipeAction } from '../../shared/api'
+import type { Account, LockState, Settings, Signature, SwipeAction } from '../../shared/api'
 import { t, type Key } from '../i18n'
 import { Icon } from './Icon'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
-type Tab = 'accounts' | 'signatures' | 'general'
+type Tab = 'accounts' | 'signatures' | 'privacy' | 'general'
 
 export function SettingsSheet({ accounts, onAddAccount, onClose }: { accounts: Account[]; onAddAccount: () => void; onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('accounts')
@@ -19,7 +19,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose }: { accounts: A
       <div className="sheet settings">
         <div className="settings-head">
           <div className="tabs">
-            {(['accounts', 'signatures', 'general'] as Tab[]).map((k) => (
+            {(['accounts', 'signatures', 'privacy', 'general'] as Tab[]).map((k) => (
               <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{t[k]}</button>
             ))}
           </div>
@@ -28,6 +28,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose }: { accounts: A
         <div className="settings-body">
           {tab === 'accounts' && <Accounts accounts={accounts} sigs={sigs} onAdd={onAddAccount} />}
           {tab === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
+          {tab === 'privacy' && <Privacy />}
           {tab === 'general' && <General />}
         </div>
       </div>
@@ -137,6 +138,52 @@ function General() {
         </select>
       </label>
       <p className="muted small">{t.shortcuts}</p>
+    </div>
+  )
+}
+
+function Privacy() {
+  const [s, setS] = useState<Settings | null>(null)
+  const [lock, setLock] = useState<LockState | null>(null)
+  const [blocked, setBlocked] = useState<string[]>([])
+  useEffect(() => {
+    window.roarmail.settings().then(setS)
+    window.roarmail.lockState().then(setLock)
+    window.roarmail.blockedSenders().then(setBlocked)
+  }, [])
+  if (!s || !lock) return null
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { setS({ ...s, [k]: v }); window.roarmail.setSetting(k, v) }
+  return (
+    <div className="stack">
+      <label className="check"><input type="checkbox" checked={s.blockTrackers} onChange={(e) => set('blockTrackers', e.target.checked)} />{t.blockTrackers}</label>
+      <label className="check"><input type="checkbox" checked={s.stripTracking} onChange={(e) => set('stripTracking', e.target.checked)} />{t.stripTracking}</label>
+
+      <div className="panel">
+        <label className="check"><input type="checkbox" disabled={!lock.available} checked={s.lock && lock.available} onChange={(e) => set('lock', e.target.checked)} />
+          <Icon name="lock" size={15} /> {t.appLock}</label>
+        {!lock.available && <p className="muted small">{t.lockUnavailable}</p>}
+        {lock.available && s.lock && (
+          <div className="row">
+            <label className="grow">{t.lockAfter}
+              <select value={s.lockAfter} onChange={(e) => set('lockAfter', Number(e.target.value))}>
+                {[0, 1, 5, 15, 60].map((n) => <option key={n} value={n}>{n ? `${n} ${t.minutes}` : t.onlySleep}</option>)}
+              </select>
+            </label>
+            <button className="pill small" onClick={() => window.roarmail.lockNow()}>{t.lockNow}</button>
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <b>{t.blockedSenders}</b>
+        {!blocked.length && <p className="muted small">{t.noneBlocked}</p>}
+        {blocked.map((e) => (
+          <div className="row blocked-row" key={e}>
+            <span className="grow ellipsis">{e}</span>
+            <button className="pill small ghost" onClick={async () => { await window.roarmail.blockSender(e, false); setBlocked(blocked.filter((x) => x !== e)) }}>{t.unblock}</button>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

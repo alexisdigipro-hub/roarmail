@@ -1,12 +1,12 @@
 // RoarMail's main process: the window, the mail engine and the IPC door the screens use.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, shell, systemPreferences } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { openStore } from './store'
 import { MailService } from './mail'
 import { autodetect } from './autodetect'
-import type { MailEvent, MessageRow } from '../shared/api'
+import type { LockState, MailEvent, MessageRow } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const updater = require('./updater.js')
 
@@ -15,6 +15,18 @@ if (!app.requestSingleInstanceLock()) app.quit()
 let win: BrowserWindow | null = null
 let quitting = false
 let pendingMailto: string | null = null
+let locked = false
+
+// App lock (Touch ID on a Mac). While locked the main process answers nothing but these, so a locked
+// window cannot read mail even through its developer tools.
+const OPEN_WHEN_LOCKED = new Set(['mail:platform', 'mail:lockState', 'mail:unlock'])
+const lockAvailable = () => process.platform === 'darwin' && systemPreferences.canPromptTouchID()
+function handle(channel: string, fn: (e: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown) {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (locked && !OPEN_WHEN_LOCKED.has(channel)) throw new Error('locked')
+    return fn(e, ...args)
+  })
+}
 
 const emit = (e: MailEvent) => { win?.webContents.send('mail:event', e) }
 
@@ -79,7 +91,9 @@ app.whenReady().then(() => {
     if (!Notification.isSupported() || win?.isFocused()) return
     const list = rows.slice(0, 3)
     for (const r of list) {
-      const n = new Notification({ title: r.fromName || r.fromEmail, body: r.subject || '(no subject)', silent: false })
+      const n = locked
+        ? new Notification({ title: 'RoarMail', body: '✉︎', silent: false })
+        : new Notification({ title: r.fromName || r.fromEmail, body: r.subject || '(no subject)', silent: false })
       n.on('click', () => { show(); emit({ type: 'open', messageId: r.threadId || r.id }) })
       n.show()
     }
@@ -88,51 +102,72 @@ app.whenReady().then(() => {
 
   const mail = new MailService(db, emit, notify)
 
-  ipcMain.handle('mail:platform', () => process.platform)
-  ipcMain.handle('mail:autodetect', (_e, email: string) => autodetect(email))
-  ipcMain.handle('mail:testAccount', (_e, cfg, pass) => mail.test(cfg, pass))
-  ipcMain.handle('mail:addAccount', (_e, cfg, pass) => mail.add(cfg, pass))
-  ipcMain.handle('mail:removeAccount', (_e, id) => mail.remove(id))
-  ipcMain.handle('mail:accounts', () => mail.accounts())
-  ipcMain.handle('mail:folders', (_e, id) => mail.folders(id))
-  ipcMain.handle('mail:messages', async (_e, scope, before) => {
+  handle('mail:platform', () => process.platform)
+  handle('mail:autodetect', (_e, email: string) => autodetect(email))
+  handle('mail:testAccount', (_e, cfg, pass) => mail.test(cfg, pass))
+  handle('mail:addAccount', (_e, cfg, pass) => mail.add(cfg, pass))
+  handle('mail:removeAccount', (_e, id) => mail.remove(id))
+  handle('mail:accounts', () => mail.accounts())
+  handle('mail:folders', (_e, id) => mail.folders(id))
+  handle('mail:messages', async (_e, scope, before) => {
     if (scope.folderId && before == null) mail.openFolder(scope.folderId).catch(() => {})
     return mail.list(scope, before)
   })
-  ipcMain.handle('mail:message', (_e, id) => mail.message(id))
-  ipcMain.handle('mail:search', (_e, q, a) => mail.search(q, a))
-  ipcMain.handle('mail:contacts', (_e, q) => mail.contacts(q))
-  ipcMain.handle('mail:thread', (_e, key) => mail.thread(key))
-  ipcMain.handle('mail:act', (_e, ids, action, target) => mail.act(ids, action, target))
-  ipcMain.handle('mail:undo', (_e, token) => mail.undo(token))
-  ipcMain.handle('mail:allowImages', (_e, s) => mail.allowImages(s))
-  ipcMain.handle('mail:send', (_e, d) => mail.send(d))
-  ipcMain.handle('mail:cancelSend', (_e, id) => mail.cancelSend(id))
-  ipcMain.handle('mail:retrySend', (_e, id) => mail.retrySend(id))
-  ipcMain.handle('mail:outbox', () => mail.outbox())
-  ipcMain.handle('mail:saveDraft', (_e, d, toServer) => mail.saveDraft(d, toServer))
-  ipcMain.handle('mail:discardDraft', (_e, id) => mail.discardDraft(id))
-  ipcMain.handle('mail:draftFromMessage', (_e, id) => mail.draftFromMessage(id))
-  ipcMain.handle('mail:updateAccount', (_e, id, patch) => mail.updateAccount(id, patch))
-  ipcMain.handle('mail:signatures', () => mail.signatures())
-  ipcMain.handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))
-  ipcMain.handle('mail:deleteSignature', (_e, id) => mail.deleteSignature(id))
-  ipcMain.handle('mail:settings', () => mail.settings())
-  ipcMain.handle('mail:setSetting', (_e, k, v) => mail.setSetting(k, v))
-  ipcMain.handle('mail:refresh', (_e, id) => mail.refresh(id))
-  ipcMain.handle('mail:openExternal', (_e, url) => openSafe(url))
-  ipcMain.handle('mail:pickFiles', async () => {
+  handle('mail:message', (_e, id) => mail.message(id))
+  handle('mail:search', (_e, q, a) => mail.search(q, a))
+  handle('mail:contacts', (_e, q) => mail.contacts(q))
+  handle('mail:thread', (_e, key) => mail.thread(key))
+  handle('mail:act', (_e, ids, action, target) => mail.act(ids, action, target))
+  handle('mail:undo', (_e, token) => mail.undo(token))
+  handle('mail:allowImages', (_e, s) => mail.allowImages(s))
+  handle('mail:send', (_e, d) => mail.send(d))
+  handle('mail:cancelSend', (_e, id) => mail.cancelSend(id))
+  handle('mail:retrySend', (_e, id) => mail.retrySend(id))
+  handle('mail:outbox', () => mail.outbox())
+  handle('mail:saveDraft', (_e, d, toServer) => mail.saveDraft(d, toServer))
+  handle('mail:discardDraft', (_e, id) => mail.discardDraft(id))
+  handle('mail:draftFromMessage', (_e, id) => mail.draftFromMessage(id))
+  handle('mail:updateAccount', (_e, id, patch) => mail.updateAccount(id, patch))
+  handle('mail:signatures', () => mail.signatures())
+  handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))
+  handle('mail:deleteSignature', (_e, id) => mail.deleteSignature(id))
+  handle('mail:settings', () => mail.settings())
+  handle('mail:setSetting', (_e, k, v) => mail.setSetting(k, v))
+  handle('mail:refresh', (_e, id) => mail.refresh(id))
+  handle('mail:openExternal', (_e, url) => openSafe(url))
+  handle('mail:unsubscribe', (_e, id) => mail.unsubscribe(id))
+  handle('mail:blockSender', (_e, email, blocked) => mail.blockSender(email, blocked))
+  handle('mail:blockedSenders', () => mail.blockedSenders())
+
+  const lockState = (): LockState => ({ available: lockAvailable(), enabled: mail.settings().lock && lockAvailable(), locked, method: lockAvailable() ? 'touchid' : 'none' })
+  const setLocked = (v: boolean) => { locked = v; emit({ type: 'lock', locked: v }) }
+  const lock = () => { if (mail.settings().lock && lockAvailable() && !locked) setLocked(true) }
+  handle('mail:lockState', () => lockState())
+  handle('mail:lockNow', () => lock())
+  handle('mail:unlock', async () => {
+    if (!locked) return true
+    try { await systemPreferences.promptTouchID('ξεκλειδώσει το RoarMail'); setLocked(false); return true } catch { return false }
+  })
+  // locked from the start, after sleep or the screen locking, and after some minutes away
+  locked = mail.settings().lock && lockAvailable()
+  powerMonitor.on('suspend', lock)
+  powerMonitor.on('lock-screen', lock)
+  setInterval(() => {
+    const s = mail.settings()
+    if (s.lock && s.lockAfter > 0 && powerMonitor.getSystemIdleTime() >= s.lockAfter * 60) lock()
+  }, 30e3)
+  handle('mail:pickFiles', async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : r.filePaths
   })
-  ipcMain.handle('mail:openAttachment', async (_e, id) => {
+  handle('mail:openAttachment', async (_e, id) => {
     const a = await mail.attachment(id)
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-'))
     const file = path.join(dir, a.filename)
     fs.writeFileSync(file, a.content)
     await shell.openPath(file)
   })
-  ipcMain.handle('mail:saveAttachment', async (_e, id) => {
+  handle('mail:saveAttachment', async (_e, id) => {
     const a = await mail.attachment(id)
     const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('downloads'), a.filename) })
     if (!r.canceled && r.filePath) fs.writeFileSync(r.filePath, a.content)

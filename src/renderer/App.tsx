@@ -30,7 +30,8 @@ export default function App() {
   const [moving, setMoving] = useState<{ accountId: string; ids: string[]; exclude?: string } | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [outbox, setOutbox] = useState<OutboxItem[]>([])
-  const [prefs, setPrefs] = useState<Settings>({ undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive' })
+  const [prefs, setPrefs] = useState<Settings>({ undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15 })
+  const [locked, setLocked] = useState(false)
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
   const [update, setUpdate] = useState<{ status: string; version: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -52,7 +53,7 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), tst.ms ?? 6000)
   }, [])
 
-  useEffect(() => { loadAccounts(); loadOutbox(); api.settings().then(setPrefs) }, [])
+  useEffect(() => { api.lockState().then((l) => { setLocked(l.locked); if (!l.locked) { loadAccounts(); loadOutbox(); api.settings().then(setPrefs) } }) }, [])
   useEffect(() => { loadFolders(); loadRows(); setSelected([]) }, [scope])
   useEffect(() => api.on((e) => {
     if (e.type === 'accounts') loadAccounts()
@@ -63,6 +64,7 @@ export default function App() {
     if (e.type === 'compose') setCompose({ kind: 'new', to: e.to, subject: e.subject, body: e.body })
     if (e.type === 'outbox') loadOutbox()
     if (e.type === 'opFailed') flash({ text: `${t.opFailed} (${e.error})` })
+    if (e.type === 'lock') { setLocked(e.locked); if (!e.locked) { loadAccounts(); loadOutbox(); loadFolders(); loadRows(); api.settings().then(setPrefs) } }
   }), [])
   useEffect(() => {
     api.update?.state().then(setUpdate).catch(() => {})
@@ -208,6 +210,7 @@ export default function App() {
     return t.inbox
   }, [scope, folders, results])
 
+  if (locked) return <LockScreen />
   if (!accounts) return <div className="boot"><div className="spinner" /></div>
   if (!accounts.length) return <AddAccount first onDone={loadAccounts} onCancel={() => {}} />
 
@@ -313,7 +316,7 @@ export default function App() {
           </div>
         </section>
       ) : (
-        <Viewer row={inDrafts ? null : current} accounts={accounts}
+        <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs}
           onCompose={(kind, m) => openCompose(kind, m)}
           onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else act([current], a) }} />
       )}
@@ -393,6 +396,22 @@ function Row({ r, on, acc, prefs, onClick, onAct, onSwipe }: {
           <button title={t.trashIt} onClick={() => onAct('trash')}><Icon name="trash" size={15} /></button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** the lock: nothing of the mail is on screen (or reachable) until Touch ID */
+function LockScreen() {
+  const [busy, setBusy] = useState(false)
+  const unlock = async () => { setBusy(true); await api.unlock(); setBusy(false) }
+  useEffect(() => { unlock() }, [])
+  return (
+    <div className="lock-screen">
+      <div className="drag" />
+      <div className="brand big"><b>ROAR</b><i>MAIL</i></div>
+      <Icon name="lock" size={28} />
+      <p className="muted">{t.locked}</p>
+      <button className="pill primary" disabled={busy} onClick={unlock}>{t.unlock}</button>
     </div>
   )
 }
