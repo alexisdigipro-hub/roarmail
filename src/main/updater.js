@@ -38,7 +38,9 @@ async function latest() {
   const r = await net.fetch(`https://github.com/${REPO}/releases/latest`, { headers: { 'User-Agent': 'RoarMail', Accept: 'text/html' } })
   if (!r.ok) throw new Error(`GitHub ${r.status}`)
   const html = await r.text()
-  const tag = decodeURIComponent((String(r.url).match(/\/releases\/tag\/([^/?#]+)/) || html.match(/\/releases\/tag\/([^"'/?#]+)/) || [])[1] || '')
+  // only a real release tag counts: the page also carries template links like /releases/tag/*name, and the first
+  // match used to be that one, so the download was looked for under a tag that does not exist (fixed in 0.12.1)
+  const tag = decodeURIComponent((String(r.url).match(/\/releases\/tag\/(desktop-v\d+\.\d+\.\d+)/) || html.match(/\/releases\/tag\/(desktop-v\d+\.\d+\.\d+)/) || [])[1] || '')
   const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || ''
   const version = (title.match(/RoarMail (\d+\.\d+\.\d+)/) || tag.match(/(\d+\.\d+\.\d+)/) || [])[1] || ''
   return { tag, version }
@@ -62,7 +64,8 @@ async function check() {
     if (!fs.existsSync(target)) {
       send({ status: 'downloading', version, progress: 0 })
       const res = await net.fetch(`https://github.com/${REPO}/releases/download/${encodeURIComponent(tag)}/${name}`, { headers: { 'User-Agent': 'RoarMail' } })
-      if (res.status === 404) { send({ status: 'idle', version: '' }); return state }
+      // the release is there but this computer's file is not (yet): said, not hidden
+      if (res.status === 404) { send({ status: 'error', version: '', error: `${name} not found`, checkedAt: Date.now() }); return state }
       if (!res.ok || !res.body) throw new Error(`download ${res.status}`)
       const total = Number(res.headers.get('content-length')) || 0
       const part = `${target}.part`
