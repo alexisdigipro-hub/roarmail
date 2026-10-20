@@ -46,25 +46,8 @@ jobs:
             out/*.exe
           if-no-files-found: error
 
-  # the web demo (themadlions.com/roarmail): the same screens over sample mail, as a zip on the release
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install --no-audit --no-fund --ignore-scripts
-      - run: npm run build:renderer
-      - run: cd dist/renderer && zip -qr ../../RoarMail-web.zip .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: roarmail-web
-          path: RoarMail-web.zip
-          if-no-files-found: error
-
   release:
-    needs: [build, web]
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
