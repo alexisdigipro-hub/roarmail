@@ -2,9 +2,10 @@
 // writing; closing offers to keep it in Drafts. Cmd/Ctrl+Enter sends, Esc closes.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Address, Draft, MessageFull, Signature } from '../../shared/api'
-import { fullDate, t } from '../i18n'
+import type { Account, Address, Draft, MessageFull, RoarTransferLink, Signature } from '../../shared/api'
+import { fullDate, size, t } from '../i18n'
 import { Icon } from './Icon'
+import { clean as roarError, useRoarMe } from './RoarMe'
 import type { ComposeKind } from './Viewer'
 import { TimePicker } from './TimePicker'
 
@@ -21,6 +22,19 @@ export interface ComposeSeed {
 const fmt = (a: Address) => (a.name ? `${a.name.replace(/[",]/g, '')} <${a.address}>` : a.address)
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 const SIG = 'data-roarmail-signature'
+// attachments over this go as a RoarTransfer link by default (most mail servers refuse 20-25 MB); any file can
+const LINK_AT = 20 * 1024 * 1024
+
+/** the card a RoarTransfer link becomes in the email: plain inline styles and a table, so every mail program shows it */
+function transferCard(l: RoarTransferLink) {
+  const until = new Date(l.expires).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  const font = 'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'
+  return `<table data-roarmail-transfer cellpadding="0" cellspacing="0" border="0" style="margin:12px 0;border:1px solid #d9dce1;border-radius:12px;border-collapse:separate"><tr><td style="padding:12px 16px;${font}">`
+    + `<div style="font-size:11px;letter-spacing:.08em;color:#8a8f98">ROARTRANSFER</div>`
+    + `<div style="margin:4px 0 2px"><a href="${esc(l.url)}" style="font-size:15px;font-weight:600;color:#d40000;text-decoration:none">⬇ ${esc(l.name)}</a></div>`
+    + `<div style="font-size:12.5px;color:#6b7079">${size(l.size)} · ${esc(t.rt_until)} ${esc(until)}</div>`
+    + `<div style="font-size:11.5px;color:#8a8f98;margin-top:4px">${esc(l.url)}</div></td></tr></table>`
+}
 
 function prefill(seed: ComposeSeed, accounts: Account[]) {
   if (seed.kind === 'draft' && seed.draft) {
@@ -69,6 +83,11 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const [sigs, setSigs] = useState<Signature[]>([])
   const [later, setLater] = useState(false)
   const [remindDays, setRemindDays] = useState(0)
+  const [roar] = useRoarMe()
+  const roarReady = !!roar?.signedIn && !roar.needsMfa
+  const [sizes, setSizes] = useState<Record<string, number>>({})
+  const [asLink, setAsLink] = useState<Record<string, boolean>>({})
+  const [up, setUp] = useState<Record<string, number>>({})
   const body = useRef<HTMLDivElement>(null)
   const dirty = useRef(false)
   const draftId = useRef<string | undefined>(seed.draft?.id)
@@ -116,6 +135,46 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     }
   }, [])
 
+  // the size of each attachment; a big one is marked to go as a RoarTransfer link
+  useEffect(() => {
+    const unknown = files.filter((f) => !(f in sizes))
+    if (!unknown.length) return
+    window.roarmail.fileSizes(unknown).then((n) => {
+      setSizes((s) => ({ ...s, ...Object.fromEntries(unknown.map((f, i) => [f, n[i]])) }))
+      setAsLink((a) => ({ ...Object.fromEntries(unknown.map((f, i) => [f, n[i] > LINK_AT])), ...a }))
+    }).catch(() => {})
+  }, [files])
+  useEffect(() => window.roarmail.on((e) => { if (e.type === 'transfer') setUp((u) => (e.file in u ? { ...u, [e.file]: e.progress } : u)) }), [])
+
+  /** the files marked as links go up to RoarMe first; each becomes a card in the email and leaves the attachments */
+  async function sendLinks(): Promise<string[]> {
+    let left = files
+    for (const f of files.filter((x) => roarReady && asLink[x])) {
+      setUp((u) => ({ ...u, [f]: 0 }))
+      try {
+        const link = await window.roarmail.roarmeTransfer(f)
+        placeCard(transferCard(link))
+        left = left.filter((x) => x !== f)
+        setFiles(left)
+        dirty.current = true
+      } finally { setUp((u) => { const rest = { ...u }; delete rest[f]; return rest }) }
+    }
+    return left
+  }
+  // above the signature, else above the quoted mail, else at the end
+  const placeCard = (html: string) => {
+    const el = body.current
+    if (!el) return
+    const box = document.createElement('div')
+    box.innerHTML = html
+    const quote = el.querySelector('blockquote')
+    const at = el.querySelector(`[${SIG}]`) || (quote ? quote.previousElementSibling || quote : null)
+      || [...el.querySelectorAll('p')].find((p) => p.textContent?.startsWith('----------'))
+    const node = box.firstElementChild!
+    if (at && at.parentNode) at.parentNode.insertBefore(node, at)
+    else el.appendChild(node)
+  }
+
   // keep a copy while writing, so nothing is lost if the app closes
   useEffect(() => {
     const h = setInterval(() => {
@@ -131,10 +190,11 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     setBusy(true); setError('')
     try {
       await saving.current
-      const id = await window.roarmail.send(draft(), { at, remindDays: remindDays || undefined })
+      const left = await sendLinks()
+      const id = await window.roarmail.send({ ...draft(), attachments: left }, { at, remindDays: remindDays || undefined })
       onSent(id, at)
     } catch (e: any) {
-      setError(String(e?.message || e).replace(/^.*Error:\s*/, ''))
+      setError(roarError(e))
       setBusy(false)
     }
   }
@@ -176,12 +236,27 @@ export function Composer({ seed, accounts, onClose, onSent }: {
         <div className="editor" ref={body} contentEditable suppressContentEditableWarning spellCheck />
         {files.length > 0 && (
           <div className="files">
-            {files.map((f) => (
-              <span className="chip" key={f}><Icon name="clip" size={14} /> {f.split(/[\\/]/).pop()}
-                <button onClick={() => { setFiles(files.filter((x) => x !== f)); dirty.current = true }}><Icon name="close" size={12} /></button></span>
-            ))}
+            {files.map((f) => {
+              const link = roarReady && asLink[f]
+              const p = up[f]
+              return (
+                <span className={`chip ${link ? 'as-link' : ''}`} key={f}>
+                  <Icon name={link ? 'roar' : 'clip'} size={14} /> {f.split(/[\\/]/).pop()}
+                  {sizes[f] > 0 && <span className="muted">{size(sizes[f])}</span>}
+                  {p != null && <span className="muted">{t.rt_up} {Math.round(p * 100)}%</span>}
+                  {roarReady && p == null && (
+                    <button className={`link-toggle ${link ? 'on' : ''}`} title={link ? t.rt_asLink : t.rt_attached}
+                      onClick={() => { setAsLink({ ...asLink, [f]: !link }) }}>{link ? t.rt_asLink : t.rt_attached}</button>
+                  )}
+                  <button onClick={() => {
+                    if (p != null) { window.roarmail.roarmeCancelTransfer(f); return }
+                    setFiles(files.filter((x) => x !== f)); dirty.current = true
+                  }}><Icon name="close" size={12} /></button></span>
+              )
+            })}
           </div>
         )}
+        {!roarReady && roar && files.some((f) => sizes[f] > LINK_AT) && <p className="muted small hint-big">{t.rt_big}</p>}
         {error && <p className="error">{error}</p>}
         <div className="composer-foot">
           <button className="tool" title={t.attach} onClick={async () => { const p = await window.roarmail.pickFiles(); if (p.length) { setFiles([...files, ...p]); dirty.current = true } }}><Icon name="clip" /></button>

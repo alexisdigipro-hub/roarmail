@@ -129,6 +129,7 @@ function deliver(item: OutboxItem & { draft: Draft }) {
 }
 
 const demoPeople = [{ id: 'u2', name: 'Μαρία Παπαδοπούλου', username: 'maria' }, { id: 'u3', name: 'Νίκος Κ.', username: 'nikos' }, { id: 'u4', name: 'Ελένη Δ.', username: 'eleni' }]
+const demoSizes: Record<string, number> = { 'Demo/Elysium_trailer_ProRes.mov': 1.84e9 }
 const demoRooms = [
   { id: 'r1', kind: 'direct', title: 'Μαρία Παπαδοπούλου', members: [demoPeople[0]], unread: 2 },
   { id: 'r2', kind: 'group', title: 'Dream of Elysium · crew', members: demoPeople, unread: 5 },
@@ -264,10 +265,21 @@ export function createDemo(): MailApi & { update: any } {
       hub: { linked: true, tasks: [{ id: 'h1', title: 'Color grading v2', due: new Date(Date.now() + 3 * 24 * H).toISOString().slice(0, 10), project: 'Dream of Elysium' }],
         events: [{ id: 'he1', title: 'Shoot day', date: new Date(Date.now() + 4 * 24 * H).toISOString().slice(0, 10), start: '08:00', project: 'Dream of Elysium', color: '#ff9f0a' }] } }),
     roarmeOpen: async () => { window.open('https://alexisdigipro-hub.github.io/roarme/', '_blank', 'noopener') },
-    pickFiles: async () => [],
+    // RoarTransfer in the demo: a sample big film file, "uploaded" in three seconds
+    roarmeTransfer: async (file) => {
+      for (let i = 1; i <= 10; i++) { await new Promise((ok) => setTimeout(ok, 300)); emit({ type: 'transfer', file, progress: i / 10 }) }
+      return { url: 'https://alexisdigipro-hub.github.io/roarme/', name: file.split('/').pop() || file, size: demoSizes[file] || 0, expires: new Date(Date.now() + 3 * 24 * H).toISOString() }
+    },
+    roarmeCancelTransfer: async () => {},
+    fileSizes: async (files) => files.map((f) => demoSizes[f] ?? 240e3),
+    pickFiles: async () => ['Demo/Elysium_trailer_ProRes.mov'],
     openAttachment: async () => { alert('Demo: τα συνημμένα ανοίγουν στην εφαρμογή. / Attachments open in the app.') },
     saveAttachment: async () => { alert('Demo: τα συνημμένα αποθηκεύονται στην εφαρμογή. / Attachments are saved in the app.') },
-    openExternal: async (url) => { window.open(url, '_blank', 'noopener') },
+    openExternal: async (url) => {
+      const m = url.match(/^roarmail:\/\/message\/([^?]+)/)
+      if (m) { const x = msgs.find((y) => y.id === decodeURIComponent(m[1])); if (x) emit({ type: 'open', messageId: x.threadId || x.id, subject: x.subject }); return }
+      window.open(url, '_blank', 'noopener')
+    },
     refresh: async () => {},
     on: (cb) => { listeners.add(cb); return () => { listeners.delete(cb) } },
     update: { state: async () => ({ status: 'idle', version: '', progress: 0 }), install: async () => false, on: () => () => {} },

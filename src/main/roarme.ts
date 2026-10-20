@@ -5,16 +5,27 @@
 // encrypted with the system key store; the screens only get names and lists.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { app, shell } from 'electron'
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { safeStorage } from 'electron'
-import type { RoarMeStatus, RoarRoom, RoarPerson, RoarTask, RoarWork, RoarTaskInput } from '../shared/api'
+import type { RoarMeStatus, RoarRoom, RoarPerson, RoarTask, RoarTransferLink, RoarWork, RoarTaskInput } from '../shared/api'
 
 // RoarMe's project and its publishable key (public by design, as in RoarMe's own src/lib.js)
 const URL = 'https://bzmjhbnwhdwmncxkqkdl.supabase.co'
 const KEY = 'sb_publishable_7mQ3e0NH5lCmdoIKx2-FUA_EgCoXx9X'
 export const ROARME_WEB = 'https://alexisdigipro-hub.github.io/roarme/'
 const MAX_FILE = 50 * 1024 * 1024 // RoarMe's chat file limit; bigger goes by RoarTransfer (later)
+// RoarTransfer: up to 3 GB, kept 3 days, sent in 6 MB pieces that pick up where they stopped (as RoarMe's src/lib.js)
+const TRANSFER_MAX = 3 * 1024 * 1024 * 1024
+const TUS_URL = URL.replace('.supabase.co', '.storage.supabase.co') + '/storage/v1/upload/resumable'
+const PIECE = 6 * 1024 * 1024
+const MIME: Record<string, string> = {
+  pdf: 'application/pdf', zip: 'application/zip', mov: 'video/quicktime', mp4: 'video/mp4', m4v: 'video/mp4', mxf: 'application/mxf',
+  wav: 'audio/wav', mp3: 'audio/mpeg', aif: 'audio/aiff', aiff: 'audio/aiff', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  tif: 'image/tiff', tiff: 'image/tiff', psd: 'image/vnd.adobe.photoshop', mkv: 'video/x-matroska', webm: 'video/webm',
+}
+const token = (n = 24) => { const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; return [...crypto.randomBytes(n)].map((b) => a[b % a.length]).join('') }
 
 /** the session, encrypted on disk (Keychain / DPAPI) */
 function vaultStorage() {
@@ -182,8 +193,82 @@ export class RoarMe {
     }
   }
 
-  open(where: { roomId?: string; hub?: 'tasks' | 'calendar' }) {
+  /** a big attachment as a RoarTransfer link: the file goes up to RoarMe (the person's own folder u/<id>/), the email
+   * carries https://…/roarme/?t=<token>, good for 3 days. progress gets 0..1. */
+  async transfer(file: string, progress: (p: number) => void, stop: { stopped?: boolean } = {}): Promise<RoarTransferLink> {
+    const me = await this.userId()
+    const size = fs.statSync(file).size
+    if (size > TRANSFER_MAX) throw new Error('roarme-too-big')
+    const name = path.basename(file)
+    const type = MIME[path.extname(name).slice(1).toLowerCase()] || 'application/octet-stream'
+    const objectName = `u/${me}/${crypto.randomUUID()}-${name.replace(/[^\w.\-]+/g, '_').slice(-120)}`
+    const head = async () => {
+      const { data } = await this.sb.auth.getSession()
+      if (!data.session) throw new Error('roarme-signed-out')
+      return { Authorization: `Bearer ${data.session.access_token}`, apikey: KEY, 'Tus-Resumable': '1.0.0' }
+    }
+    const b64 = (v: string) => Buffer.from(v).toString('base64')
+    const failed = async (r: Response) => {
+      const text = await r.text().catch(() => '')
+      if (r.status === 403 || /row-level security|unauthorized/i.test(text)) return new Error('roarme-transfer-off')
+      if (r.status === 413) return new Error('roarme-too-big')
+      let m = `RoarTransfer (${r.status})`; try { m = JSON.parse(text).message || m } catch { /* plain text */ }
+      return new Error(m)
+    }
+    const made = await fetch(TUS_URL, {
+      method: 'POST',
+      headers: {
+        ...(await head()), 'Upload-Length': String(size), 'x-upsert': 'false',
+        'Upload-Metadata': [['bucketName', 'roar-transfers'], ['objectName', objectName], ['contentType', type], ['cacheControl', '3600']].map(([k, v]) => `${k} ${b64(v)}`).join(','),
+      },
+    })
+    if (made.status !== 201) throw await failed(made)
+    const loc = made.headers.get('location') || ''
+    const at = /^https?:/.test(loc) ? loc : new globalThis.URL(loc, TUS_URL).href
+    const fd = await fs.promises.open(file, 'r')
+    try {
+      let offset = 0
+      let tries = 0
+      while (offset < size) {
+        if (stop.stopped) throw new Error('cancelled')
+        const len = Math.min(PIECE, size - offset)
+        const buf = new Uint8Array(len)
+        await fd.read(buf, 0, len, offset)
+        try {
+          const r = await fetch(at, { method: 'PATCH', headers: { ...(await head()), 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream' }, body: buf })
+          if (r.status === 204) { offset = Number(r.headers.get('upload-offset')) || offset + len; tries = 0; progress(offset / size); continue }
+          if (r.status !== 409 && r.status < 500) throw Object.assign(await failed(r), { fatal: true })
+          throw new Error(`RoarTransfer (${r.status})`)
+        } catch (e: any) {
+          if (stop.stopped || e?.fatal) throw e
+          if (++tries > 6) throw e
+          // wait a little, then ask how far it really got and go on from there
+          await new Promise((ok) => setTimeout(ok, Math.min(30000, 1000 * 2 ** tries)))
+          try { const h = await fetch(at, { method: 'HEAD', headers: await head() }); if (h.status === 200) offset = Number(h.headers.get('upload-offset')) || offset } catch { /* still offline */ }
+        }
+      }
+    } finally { await fd.close() }
+    progress(1)
+    const t = token()
+    const expires = new Date(Date.now() + 3 * 864e5).toISOString()
+    const { error } = await this.sb.from('roar_transfer_links').insert({ token: t, path: objectName, name, size, type, expires_at: expires })
+    if (error) throw new Error(/row-level security/i.test(error.message) ? 'roarme-transfer-off' : error.message)
+    return { url: `${ROARME_WEB}?t=${t}`, name, size, expires }
+  }
+
+  /** RoarMe's desktop app when it is installed (roarme://, from RoarMe 1.5), else the RoarMe site */
+  private openRoarMe(hash: string) {
+    const handler = (() => { try { return app.getApplicationNameForProtocol('roarme://') } catch { return '' } })()
+    if (handler) {
+      const link = hash.startsWith('#c=') ? `roarme://c/${hash.slice(3)}` : hash.startsWith('#m=') ? `roarme://m/${hash.slice(3)}` : 'roarme://'
+      shell.openExternal(link).catch(() => shell.openExternal(`${ROARME_WEB}${hash}`))
+    } else shell.openExternal(`${ROARME_WEB}${hash}`)
+  }
+
+  open(where: { roomId?: string; messageId?: string; hub?: 'tasks' | 'calendar' }) {
+    const id = /^[0-9a-f-]{36}$/
     if (where.hub) shell.openExternal(`https://hub.themadlions.com/#/${where.hub}`)
-    else shell.openExternal(where.roomId ? `${ROARME_WEB}#c=${where.roomId}` : ROARME_WEB)
+    else if (where.roomId && id.test(where.roomId)) this.openRoarMe(where.messageId && id.test(where.messageId) ? `#m=${where.roomId}/${where.messageId}` : `#c=${where.roomId}`)
+    else this.openRoarMe('')
   }
 }

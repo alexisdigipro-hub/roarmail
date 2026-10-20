@@ -1,7 +1,7 @@
 {
   "name": "roarmail",
   "productName": "RoarMail",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "RoarMail: a desktop mail client for Mac and Windows. TheMadlions Lab, Experiment 03.",
   "author": "THEMADLIONS",
   "license": "UNLICENSED",
@@ -66,6 +66,12 @@
         "name": "Email",
         "schemes": [
           "mailto"
+        ]
+      },
+      {
+        "name": "RoarMail",
+        "schemes": [
+          "roarmail"
         ]
       }
     ],

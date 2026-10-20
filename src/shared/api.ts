@@ -155,6 +155,8 @@ export interface RoarPerson { id: string; name: string; username: string; avatar
 export interface RoarMeStatus { signedIn: boolean; needsMfa: boolean; email?: string; me?: RoarPerson }
 export interface RoarRoom { id: string; kind: string; title: string; avatar?: string; members: RoarPerson[]; unread: number }
 export interface RoarTask { id: string; title: string; notes: string; due: string | null; priority: 'low' | 'normal' | 'high'; status: 'pending' | 'open' | 'doing' | 'done' | 'declined'; mine: boolean; from?: string; to?: string }
+/** a big attachment sent as a RoarTransfer link instead of inside the email */
+export interface RoarTransferLink { url: string; name: string; size: number; expires: string }
 export interface RoarTaskInput { title: string; notes: string; due?: string; priority?: 'low' | 'normal' | 'high'; assignee?: string }
 export interface RoarWork {
   tasks: RoarTask[]
@@ -170,12 +172,13 @@ export type MailEvent =
   | { type: 'messages'; accountId: string }
   | { type: 'newMail'; accountId: string; messageId: string }
   | { type: 'sync'; accountId: string; busy: boolean }
-  | { type: 'open'; messageId: string }
+  | { type: 'open'; messageId: string; subject?: string }
   | { type: 'compose'; to: string; subject?: string; body?: string }
   | { type: 'outbox' }
   | { type: 'opFailed'; error: string }
   | { type: 'lock'; locked: boolean }
   | { type: 'roarme' }
+  | { type: 'transfer'; file: string; progress: number }
 
 export interface MailApi {
   platform: string
@@ -231,7 +234,13 @@ export interface MailApi {
   roarmeTask(task: RoarTaskInput): Promise<void>
   roarmeTaskStatus(id: string, status: RoarTask['status']): Promise<void>
   roarmeWork(): Promise<RoarWork>
-  roarmeOpen(where: { roomId?: string; hub?: 'tasks' | 'calendar' }): Promise<void>
+  /** RoarMe's app (roarme://) when installed, else the RoarMe site; a chat, a message in it, or the hub */
+  roarmeOpen(where: { roomId?: string; messageId?: string; hub?: 'tasks' | 'calendar' }): Promise<void>
+  /** sends a local file up to RoarTransfer (progress comes as 'transfer' events) and returns its 3-day link */
+  roarmeTransfer(file: string): Promise<RoarTransferLink>
+  roarmeCancelTransfer(file: string): Promise<void>
+  /** the size in bytes of local files (attachments in the composer); -1 when missing */
+  fileSizes(files: string[]): Promise<number[]>
   pickFiles(): Promise<string[]>
   openAttachment(id: string): Promise<void>
   saveAttachment(id: string): Promise<void>

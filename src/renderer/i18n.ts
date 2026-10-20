@@ -15,6 +15,8 @@ const el = {
   rm_askHint: 'Θα του/της ζητηθεί να το δεχτεί, όπως στο RoarMe.', rm_taskMade: 'Το task είναι στο RoarMe', rm_taskSent: 'Το task στάλθηκε',
   pr_low: 'Χαμηλή', pr_normal: 'Κανονική', pr_high: 'Υψηλή',
   rm_work: 'Tasks και ημερολόγιο', rm_tasks: 'Tasks', rm_noTasks: 'Κανένα ανοιχτό task.', rm_done: 'Έγινε', rm_from: 'από', rm_to: 'για', rm_asked: 'σου ζητήθηκε', rm_waiting: 'περιμένει απάντηση',
+  rm_openMail: 'Άνοιγμα του email', rm_transfer_off: 'Το RoarTransfer για τα email δεν έχει ανοίξει ακόμη στο RoarMe.', rm_too_big: 'Πάνω από 3 GB: πολύ μεγάλο για το RoarTransfer.', rm_no_file: 'Το αρχείο δεν βρέθηκε.',
+  rt_asLink: 'Ως σύνδεσμος RoarMe (3 μέρες)', rt_attached: 'Ως συνημμένο', rt_up: 'Ανεβαίνει στο RoarMe', rt_until: 'Διαθέσιμο μέχρι', rt_big: 'Μεγάλα αρχεία: συνδέσου στο RoarMe (Ρυθμίσεις) για να φύγουν ως σύνδεσμος, πολλοί servers δεν δέχονται πάνω από 20-25 MB.',
   rm_accept: 'Αποδοχή', rm_decline: 'Όχι', rm_calls: 'Κλήσεις στο RoarMe', rm_openRoarMe: 'Άνοιγμα RoarMe', roarme: 'RoarMe',
   appearance: 'Εμφάνιση', keys: 'Συντομεύσεις', appLockShort: 'Touch ID', ap_auto: 'Αυτόματα',
   theme: 'Θέμα', dayNight: 'Μέρα και νύχτα', accent: 'Χρώμα έμφασης', themeColor: 'Το χρώμα του θέματος', font: 'Γραμματοσειρά',
@@ -90,6 +92,8 @@ const en: typeof el = {
   rm_askHint: 'They will be asked to accept it, as in RoarMe.', rm_taskMade: 'The task is in RoarMe', rm_taskSent: 'Task sent',
   pr_low: 'Low', pr_normal: 'Normal', pr_high: 'High',
   rm_work: 'Tasks and calendar', rm_tasks: 'Tasks', rm_noTasks: 'No open tasks.', rm_done: 'Done', rm_from: 'from', rm_to: 'for', rm_asked: 'asked of you', rm_waiting: 'waiting for an answer',
+  rm_openMail: 'Open the email', rm_transfer_off: "RoarTransfer for mail isn't switched on in RoarMe yet.", rm_too_big: 'Over 3 GB: too big for RoarTransfer.', rm_no_file: 'The file was not found.',
+  rt_asLink: 'As a RoarMe link (3 days)', rt_attached: 'As an attachment', rt_up: 'Uploading to RoarMe', rt_until: 'Available until', rt_big: 'Big files: sign in to RoarMe (Settings) to send them as a link; many servers refuse more than 20-25 MB.',
   rm_accept: 'Accept', rm_decline: 'No', rm_calls: 'Calls in RoarMe', rm_openRoarMe: 'Open RoarMe', roarme: 'RoarMe',
   appearance: 'Appearance', keys: 'Shortcuts', appLockShort: 'Touch ID', ap_auto: 'Auto',
   theme: 'Theme', dayNight: 'Day and night', accent: 'Accent colour', themeColor: "The theme's colour", font: 'Font',
@@ -169,5 +173,5 @@ export function fullDate(ms: number): string {
 }
 
 export function size(n: number): string {
-  return n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`
+  return n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`
 }

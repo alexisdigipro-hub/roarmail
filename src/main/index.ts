@@ -16,6 +16,8 @@ if (!app.requestSingleInstanceLock()) app.quit()
 let win: BrowserWindow | null = null
 let quitting = false
 let pendingMailto: string | null = null
+let pendingLink: string | null = null
+let openLink: (url: string) => void = (url) => { pendingLink = url }
 let shownOnce = false
 let locked = false
 let tray: Tray | null = null
@@ -70,7 +72,8 @@ function createWindow() {
 }
 
 function openSafe(url: string) {
-  if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url)
+  if (/^roarmail:/i.test(url)) openLink(url)
+  else if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url)
 }
 
 function mailtoEvent(url: string): MailEvent {
@@ -83,8 +86,18 @@ function handleMailto(url: string) {
   if (win && !win.webContents.isLoading()) { emit(mailtoEvent(url)); show() } else pendingMailto = url
 }
 
-app.on('open-url', (e, url) => { e.preventDefault(); handleMailto(url) })
-app.on('second-instance', (_e, argv) => { const m = argv.find((a) => a.startsWith('mailto:')); if (m) handleMailto(m); show() })
+// roarmail://message/<id>?mid=<Message-ID> (Oct 2026): a RoarMe task made from an email links back to it
+const isLink = (a: string) => /^roarmail:/i.test(a)
+app.on('open-url', (e, url) => { e.preventDefault(); if (isLink(url)) openLink(url); else handleMailto(url) })
+app.on('second-instance', (_e, argv) => {
+  const m = argv.find((a) => a.startsWith('mailto:'))
+  if (m) handleMailto(m)
+  const l = argv.find(isLink)
+  if (l) openLink(l)
+  show()
+})
+if (process.defaultApp) { if (process.argv.length >= 2) app.setAsDefaultProtocolClient('roarmail', process.execPath, [path.resolve(process.argv[1])]) }
+else app.setAsDefaultProtocolClient('roarmail')
 app.on('activate', () => show())
 app.on('before-quit', () => { quitting = true })
 
@@ -92,7 +105,26 @@ app.whenReady().then(() => {
   app.setName('RoarMail')
   const startMailto = process.argv.find((a) => a.toLowerCase().startsWith('mailto:'))
   if (startMailto) pendingMailto = startMailto
+  const startLink = process.argv.find(isLink)
+  if (startLink) pendingLink = startLink
   const db = openStore()
+
+  // the email a roarmail:// link names: by RoarMail's own id on this computer, else by its Message-ID (another computer)
+  openLink = (url: string) => {
+    let u: URL
+    try { u = new URL(url) } catch { return }
+    if (u.protocol !== 'roarmail:' || u.hostname !== 'message') return
+    const id = decodeURIComponent(u.pathname.replace(/^\//, ''))
+    const mid = u.searchParams.get('mid') || ''
+    const row = (db.prepare('select id, thread_id, subject from messages where id = ?').get(id)
+      || (mid ? db.prepare('select id, thread_id, subject from messages where message_id = ? order by date desc limit 1').get(mid) : undefined)) as { id: string; thread_id: string | null; subject: string } | undefined
+    show()
+    if (!row) return
+    // it may be in any folder: the screen finds it by its subject
+    const ev: MailEvent = { type: 'open', messageId: row.thread_id || row.id, subject: row.subject || '' }
+    if (win && !win.webContents.isLoading()) emit(ev)
+    else win?.webContents.once('did-finish-load', () => setTimeout(() => emit(ev), 300))
+  }
 
   const notify = (accountId: string, rows: MessageRow[]) => {
     if (!Notification.isSupported() || win?.isFocused()) return
@@ -209,6 +241,19 @@ app.whenReady().then(() => {
   handle('mail:roarmeTaskStatus', (_e, id, status) => roarme.setTaskStatus(id, status))
   handle('mail:roarmeWork', () => roarme.work())
   handle('mail:roarmeOpen', (_e, where) => roarme.open(where || {}))
+  // big attachments as RoarTransfer links: only files the person picked in the composer (a draft's attachments)
+  const transfers = new Map<string, { stopped?: boolean }>()
+  handle('mail:roarmeTransfer', async (_e, file: string) => {
+    if (typeof file !== 'string' || !path.isAbsolute(file) || !fs.statSync(file).isFile()) throw new Error('roarme-no-file')
+    const stop = {}
+    transfers.set(file, stop)
+    let last = 0
+    try {
+      return await roarme.transfer(file, (p) => { const now = Date.now(); if (p === 1 || now - last > 250) { last = now; emit({ type: 'transfer', file, progress: p }) } }, stop)
+    } finally { transfers.delete(file) }
+  })
+  handle('mail:roarmeCancelTransfer', (_e, file: string) => { const s = transfers.get(file); if (s) s.stopped = true })
+  handle('mail:fileSizes', (_e, files: string[]) => (Array.isArray(files) ? files : []).map((f) => { try { return fs.statSync(String(f)).size } catch { return -1 } }))
   handle('mail:roarmeShare', async (_e, roomId: string, messageId: string, note: string, withFiles: boolean) => {
     const m = await mail.message(messageId)
     const files = withFiles ? await Promise.all(m.attachments.map(async (a) => { const x = await mail.attachment(a.id); return { name: x.filename, type: a.mime, content: x.content } })) : []
@@ -252,6 +297,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  if (pendingLink) { const l = pendingLink; pendingLink = null; openLink(l) }
   mail.startAll()
   mail.badge()
   powerMonitor.on('resume', () => setTimeout(() => mail.reconnectAll(), 3e3))

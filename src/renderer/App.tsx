@@ -72,7 +72,8 @@ export default function App() {
     if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) loadFolders()
     if (e.type === 'messages') { if (scopeRef.current.accountId === 'all' || scopeRef.current.accountId === e.accountId) loadRows() }
     if (e.type === 'sync') setSyncing((s) => ({ ...s, [e.accountId]: e.busy }))
-    if (e.type === 'open') { setScope({ accountId: 'all', role: 'inbox' }); setTimeout(() => setSelected([e.messageId]), 80) }
+    if (e.type === 'open' && e.subject != null) { setScope({ accountId: 'all', role: 'inbox' }); setQuery(e.subject); setTimeout(() => setSelected([e.messageId]), 600) }
+    else if (e.type === 'open') { setScope({ accountId: 'all', role: 'inbox' }); setTimeout(() => setSelected([e.messageId]), 80) }
     if (e.type === 'compose') setCompose({ kind: 'new', to: e.to, subject: e.subject, body: e.body })
     if (e.type === 'outbox') loadOutbox()
     if (e.type === 'opFailed') flash({ text: `${t.opFailed} (${e.error})` })

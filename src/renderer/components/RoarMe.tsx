@@ -7,7 +7,7 @@ import { Icon } from './Icon'
 import { initials, tint } from './Viewer'
 
 const api = () => window.roarmail
-const clean = (e: any) => {
+export const clean = (e: any) => {
   const m = String(e?.message || e).replace(/^.*Error:\s*/, '')
   if (!m.startsWith('roarme-')) return m
   const k = m.slice(7).replace(/-/g, '_')
@@ -122,6 +122,10 @@ export function ShareSheet({ message, onClose, onDone }: { message: MessageFull;
   )
 }
 
+/** a link back to the email from a task (roarmail://, opens it in RoarMail; the Message-ID finds it on another computer) */
+const mailLink = (m: MessageFull) => `roarmail://message/${encodeURIComponent(m.id)}${m.messageId ? `?mid=${encodeURIComponent(m.messageId)}` : ''}`
+const LINK = /roarmail:\/\/message\/[A-Za-z0-9%._~?=&-]+/
+
 /** Make it a task: for oneself or someone one shares a chat with, with a due day and priority */
 export function TaskSheet({ message, onClose, onDone }: { message: MessageFull; onClose: () => void; onDone: (text: string) => void }) {
   const [status] = useRoarMe()
@@ -133,7 +137,7 @@ export function TaskSheet({ message, onClose, onDone }: { message: MessageFull; 
   const [notes, setNotes] = useState(() => [
     `${t.from}: ${message.fromName ? `${message.fromName} <${message.fromEmail}>` : message.fromEmail}`,
     new Date(message.date).toLocaleString(lang === 'el' ? 'el-GR' : undefined),
-    '', (message.snippet || '').slice(0, 600), '', message.messageId ? `RoarMail · ${message.messageId}` : '',
+    '', (message.snippet || '').slice(0, 600), '', `RoarMail · ${mailLink(message)}`,
   ].join('\n').trim())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -207,7 +211,8 @@ export function WorkPanel({ onClose }: { onClose: () => void }) {
                 ? <button className="tick" title={t.rm_done} onClick={() => setStatus(x, 'done')}><Icon name="dot" size={12} /></button>
                 : <span className="tick ghost"><Icon name="tasks" size={12} /></span>}
               <div className="grow">
-                <div className="ellipsis"><b>{x.title}</b></div>
+                <div className="row"><b className="ellipsis grow">{x.title}</b>
+                  {LINK.test(x.notes || '') && <button className="tool small" title={t.rm_openMail} onClick={() => api().openExternal(x.notes.match(LINK)![0])}><Icon name="unread" size={13} /></button>}</div>
                 <div className="muted small">{[x.due && fmtDay(x.due), x.from && `${t.rm_from} ${x.from}`, x.to && `${t.rm_to} ${x.to}`, x.status === 'pending' && (x.mine ? t.rm_asked : t.rm_waiting)].filter(Boolean).join(' · ')}</div>
                 {x.mine && x.status === 'pending' && (
                   <div className="row"><button className="pill small primary" onClick={() => setStatus(x, 'open')}>{t.rm_accept}</button><button className="pill small ghost" onClick={() => setStatus(x, 'declined')}>{t.rm_decline}</button></div>
