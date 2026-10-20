@@ -35,7 +35,7 @@ export default function App() {
   const [update, setUpdate] = useState<{ status: string; version: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const scopeRef = useRef(scope); scopeRef.current = scope
-  const toastTimer = useRef<ReturnType<typeof setTimeout>>()
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const loadAccounts = useCallback(() => api.accounts().then(setAccounts), [])
   const loadFolders = useCallback(() => {
@@ -345,7 +345,7 @@ function Row({ r, on, acc, prefs, onClick, onAct, onSwipe }: {
 }) {
   const [dx, setDx] = useState(0)
   const sum = useRef(0)
-  const timer = useRef<ReturnType<typeof setTimeout>>()
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const LIMIT = 90
 
   const onWheel = (e: WheelEvent) => {
