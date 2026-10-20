@@ -2,7 +2,7 @@
 // sample mail. Nothing connects anywhere and nothing is kept; it shows the app and how it feels.
 import type {
   Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailApi, MailEvent, MessageFull, MessageRow, OutboxItem,
-  Settings, Signature,
+  Settings, Signature, SnoozedItem,
 } from '../shared/api'
 
 interface DemoMsg {
@@ -23,7 +23,7 @@ const accounts: Account[] = [
   { id: 'a2', email: 'roar.demo@gmail.com', displayName: 'Alex K.', color: '#2f9bff', provider: 'gmail', imapHost: 'imap.gmail.com', imapPort: 993, imapTls: 'tls', smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpTls: 'tls', username: 'roar.demo@gmail.com', signatureId: null, state: 'online' },
 ]
 
-const roles: [FolderRole, string][] = [['inbox', 'INBOX'], ['drafts', 'Drafts'], ['sent', 'Sent'], ['archive', 'Archive'], ['trash', 'Trash']]
+const roles: [FolderRole, string][] = [['inbox', 'INBOX'], ['snoozed', 'Snoozed'], ['drafts', 'Drafts'], ['sent', 'Sent'], ['archive', 'Archive'], ['trash', 'Trash']]
 const folders: Folder[] = accounts.flatMap((a) => [
   ...roles.map(([role, path]) => ({ id: `${a.id}-${role}`, accountId: a.id, path, name: path, role, unread: 0, total: 0, depth: 0 })),
   { id: `${a.id}-projects`, accountId: a.id, path: 'Projects', name: 'Projects', role: null, unread: 0, total: 0, depth: 0 },
@@ -70,8 +70,9 @@ const msgs: DemoMsg[] = [
 ]
 
 const sigs: Signature[] = [{ id: 's1', name: 'THEMADLIONS', html: '<b>Alex Konstantinidis</b><br>THEMADLIONS · themadlions.com' }]
-let settings: Settings = { undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system' }
+let settings: Settings = { undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false }
 const outbox: (OutboxItem & { draft: Draft })[] = []
+const snoozes: (SnoozedItem & { msgId: string; origin: string; timer?: ReturnType<typeof setTimeout> })[] = []
 const pending = new Map<string, { ids: string[]; from: Map<string, string>; timer: ReturnType<typeof setTimeout> }>()
 const listeners = new Set<(e: MailEvent) => void>()
 const emit = (e: MailEvent) => listeners.forEach((l) => l(e))
@@ -126,6 +127,16 @@ function deliver(item: OutboxItem & { draft: Draft }) {
   emit({ type: 'outbox' }); changed(acc.id)
 }
 
+function wake(s: (typeof snoozes)[number]) {
+  const i = snoozes.indexOf(s)
+  if (i < 0) return
+  snoozes.splice(i, 1)
+  if (s.timer) clearTimeout(s.timer)
+  const m = msgs.find((x) => x.id === s.msgId)
+  if (m) { m.folderId = s.origin; m.seen = false }
+  recount(); changed(s.accountId)
+}
+
 export function createDemo(): MailApi & { update: any } {
   recount()
   const api: MailApi & { update: any } = {
@@ -173,6 +184,20 @@ export function createDemo(): MailApi & { update: any } {
       recount(); changed(sel[0]?.accountId)
       return null
     },
+    snooze: async (ids, until) => {
+      const sel = msgs.filter((m) => ids.includes(m.id))
+      for (const m of sel) {
+        const s = { id: uid(), accountId: m.accountId, subject: m.subject, fromName: m.fromName, until, msgId: m.id, origin: m.folderId }
+        m.folderId = `${m.accountId}-snoozed`
+        // in the demo a snooze comes back after a minute at most, to show it
+        if (until) s.timer = setTimeout(() => wake(s), Math.min(until - Date.now(), 60e3))
+        snoozes.push(s)
+      }
+      recount(); changed(sel[0]?.accountId)
+      return null
+    },
+    snoozed: async () => snoozes.map(({ msgId, origin, timer, ...s }) => s),
+    unsnooze: async (id) => { const s = snoozes.find((x) => x.id === id); if (s) wake(s) },
     undo: async (token) => { const p = pending.get(token); if (!p) return false; clearTimeout(p.timer); pending.delete(token); recount(); changed(); return true },
     allowImages: async () => {},
     unsubscribe: async () => 'done',
@@ -181,16 +206,18 @@ export function createDemo(): MailApi & { update: any } {
     lockState: async () => ({ available: false, enabled: false, locked: false, method: 'none' }),
     unlock: async () => true,
     lockNow: async () => {},
-    send: async (draft) => {
+    send: async (draft, opts) => {
       const id = uid()
-      const item = { id, to: draft.to, subject: draft.subject, sendAt: Date.now() + settings.undoSendSeconds * 1000, status: 'queued' as const, draft }
+      const scheduled = !!opts?.at && opts.at > Date.now() + 30e3
+      const at = scheduled ? opts!.at! : Date.now() + settings.undoSendSeconds * 1000
+      const item = { id, to: draft.to, subject: draft.subject, sendAt: at, status: 'queued' as const, scheduled, draft }
       outbox.push(item)
-      setTimeout(() => deliver(item), settings.undoSendSeconds * 1000)
+      setTimeout(() => deliver(item), Math.min(at - Date.now(), 2 ** 31 - 1))
       emit({ type: 'outbox' })
       return id
     },
     cancelSend: async (id) => { const i = outbox.findIndex((o) => o.id === id); if (i < 0) return null; const [o] = outbox.splice(i, 1); emit({ type: 'outbox' }); return o.draft },
-    retrySend: async () => {},
+    retrySend: async (id) => { const o = outbox.find((x) => x.id === id); if (o) deliver(o) },
     outbox: async () => outbox.map(({ draft, ...o }) => o),
     saveDraft: async (d, toServer) => {
       const id = d.id || uid()

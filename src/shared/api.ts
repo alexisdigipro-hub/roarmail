@@ -3,7 +3,7 @@
 // so the screens never change.
 
 export type Tls = 'tls' | 'starttls' | 'none'
-export type FolderRole = 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' | 'all' | 'flagged'
+export type FolderRole = 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' | 'all' | 'flagged' | 'snoozed'
 
 export interface ServerConfig {
   email: string
@@ -110,7 +110,9 @@ export interface Draft {
   attachments?: string[] // local file paths
 }
 
-export interface OutboxItem { id: string; to: string; subject: string; sendAt: number; status: 'queued' | 'sending' | 'failed'; error?: string }
+export interface OutboxItem { id: string; to: string; subject: string; sendAt: number; status: 'queued' | 'sending' | 'failed'; error?: string; scheduled: boolean }
+
+export interface SnoozedItem { id: string; accountId: string; subject: string; fromName: string; until: number | null }
 
 export interface Signature { id: string; name: string; html: string }
 
@@ -123,12 +125,14 @@ export interface Settings {
   /** ask for Touch ID on start, after sleep and after lockAfter minutes away */
   lock: boolean
   lockAfter: number
+  /** start with the computer (in the menu bar), so snoozes, scheduled sends and reminders happen on time */
+  runAtLogin: boolean
   /** follow the system, or always dark / always light */
   appearance: 'system' | 'dark' | 'light'
 }
 
 export interface LockState { available: boolean; enabled: boolean; locked: boolean; method: 'touchid' | 'none' }
-export type SwipeAction = 'archive' | 'trash' | 'flag' | 'seen' | 'none'
+export type SwipeAction = 'archive' | 'trash' | 'flag' | 'seen' | 'snooze' | 'none'
 
 export type Action = 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash' | 'move'
 
@@ -162,6 +166,10 @@ export interface MailApi {
   /** archive / trash / move wait a few seconds before reaching the server; the token undoes them */
   act(ids: string[], action: Action, targetFolderId?: string): Promise<string | null>
   undo(token: string): Promise<boolean>
+  /** until null = set aside (no wake-up) */
+  snooze(ids: string[], until: number | null): Promise<string | null>
+  snoozed(): Promise<SnoozedItem[]>
+  unsnooze(id: string): Promise<void>
   allowImages(sender: string): Promise<void>
   /** one-click (RFC 8058) when offered, else a mail to the list's address, else the web page */
   unsubscribe(messageId: string): Promise<'done' | 'sent' | 'opened' | 'none'>
@@ -170,7 +178,8 @@ export interface MailApi {
   lockState(): Promise<LockState>
   unlock(): Promise<boolean>
   lockNow(): Promise<void>
-  send(draft: Draft): Promise<string>
+  /** at: send later (ms); remindDays: remind me if nobody answers within that many days */
+  send(draft: Draft, opts?: { at?: number; remindDays?: number }): Promise<string>
   cancelSend(outboxId: string): Promise<Draft | null>
   retrySend(outboxId: string): Promise<void>
   outbox(): Promise<OutboxItem[]>

@@ -18,7 +18,7 @@ import { now, uuid } from './store'
 import { seal, open } from './vault'
 import type {
   Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
-  Security, ServerConfig, Settings, Signature,
+  Security, ServerConfig, Settings, Signature, SnoozedItem,
 } from '../shared/api'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
@@ -143,6 +143,10 @@ export class MailService {
   private busyAccounts = new Set<string>()
   private sending = new Set<string>()
   private lastDraftPush = 0
+  private snoozeTokens = new Map<string, string[]>()
+  private wakeTried = new Set<string>()
+  /** a system notification for things RoarMail itself brings back (snoozes, reminders) */
+  alert: (title: string, body: string, key?: string) => void = () => {}
 
   constructor(private db: DB, private emit: (e: MailEvent) => void, private notify: (accountId: string, rows: MessageRow[]) => void) {
     fs.mkdirSync(mailDir(), { recursive: true })
@@ -281,6 +285,8 @@ export class MailService {
         const f = this.folderByRole(id, role)
         if (f) await this.syncFolder(id, f.id, false).catch(() => {})
       }
+      const sz = this.snoozedFolder(id)
+      if (sz) await this.syncFolder(id, sz.id, false).catch(() => {})
     } catch (e) {
       const code = friendly(e)
       this.setState(id, transient(code) ? 'offline' : 'error', code)
@@ -358,10 +364,10 @@ export class MailService {
 
   folders(accountId: string): Folder[] {
     const rows = this.db.prepare('select * from folders where account_id = ? and hidden = 0').all(accountId) as Row[]
-    const order: Record<string, number> = { inbox: 0, flagged: 1, drafts: 2, sent: 3, archive: 4, all: 5, spam: 6, trash: 7 }
+    const order: Record<string, number> = { inbox: 0, snoozed: 1, flagged: 2, drafts: 3, sent: 4, archive: 5, all: 6, spam: 7, trash: 8 }
     return rows
       .map((r) => ({
-        id: r.id, accountId, path: r.path, name: r.role === 'inbox' ? 'Inbox' : r.name, role: r.role, unread: r.unread, total: r.total,
+        id: r.id, accountId, path: r.path, name: r.role === 'inbox' ? 'Inbox' : r.name, role: (r.role || r.special || null) as FolderRole | null, unread: r.unread, total: r.total,
         depth: r.delimiter ? r.path.split(r.delimiter).length - 1 : 0,
       }))
       .sort((a, b) => (a.role ? order[a.role] ?? 9 : 10) - (b.role ? order[b.role] ?? 9 : 10) || a.path.localeCompare(b.path))
@@ -726,7 +732,7 @@ export class MailService {
 
   // ---------- actions: local at once, then the queue ----------
 
-  async act(ids: string[], action: Action, targetFolderId?: string): Promise<string | null> {
+  async act(ids: string[], action: Action, targetFolderId?: string, immediate = false): Promise<string | null> {
     if (!ids.length) return null
     const marks = ids.map(() => '?').join(',')
     const rows = this.db.prepare(`select m.id, m.account_id, f.id as folder_id, f.path, f.role, mf.uid from messages m
@@ -767,7 +773,7 @@ export class MailService {
           accounts.add(g.accountId)
           tokens.push(opId)
           for (const id of g.ids) hide.run(opId, id)
-          addOp.run(opId, g.accountId, kind, JSON.stringify({ folderId: g.folderId, path: g.path, uids: g.uids, ids: g.ids, targetId: target?.id || null }), now(), now() + UNDO_MS)
+          addOp.run(opId, g.accountId, kind, JSON.stringify({ folderId: g.folderId, path: g.path, uids: g.uids, ids: g.ids, targetId: target?.id || null }), now(), now() + (immediate ? 0 : UNDO_MS))
           this.recount(g.folderId)
         }
       })()
@@ -781,6 +787,8 @@ export class MailService {
   /** bring back what an archive / trash / move hid, if it has not reached the server yet */
   undo(token: string): boolean {
     let ok = false
+    const snoozes = this.snoozeTokens.get(token)
+    if (snoozes) { for (const id of snoozes) this.db.prepare('delete from snoozed where id = ?').run(id); this.snoozeTokens.delete(token) }
     const accounts = new Set<string>()
     for (const opId of token.split(',')) {
       const op = this.db.prepare(`select * from operations where id = ? and status = 'queued'`).get(opId) as Row
@@ -809,6 +817,8 @@ export class MailService {
     }
     const due = this.db.prepare(`select * from outbox where status = 'queued' and send_at <= ?`).all(now()) as Row[]
     for (const o of due) if (!this.sending.has(o.id)) this.deliver(o)
+    this.wakeSnoozed()
+    this.checkReminders()
     if (now() - this.lastDraftPush > 30e3) {
       const drafts = this.db.prepare(`select * from drafts where push = 1 and id not in (select draft_id from outbox)`).all() as Row[]
       if (drafts.length) { this.lastDraftPush = now(); for (const d of drafts) this.pushDraft(d).catch(() => {}) }
@@ -971,14 +981,16 @@ export class MailService {
     })
   }
 
-  send(d: Draft): string {
+  send(d: Draft, opts: { at?: number; remindDays?: number } = {}): string {
     const id = d.id || uuid()
     this.draftRow(d, id, 0)
     const outId = uuid()
-    const delay = this.settings().undoSendSeconds * 1000
-    this.db.prepare(`insert into outbox (id, draft_id, send_at, status) values (?,?,?, 'queued')`).run(outId, id, now() + delay)
+    const scheduled = !!opts.at && opts.at > now() + 30e3
+    const at = scheduled ? opts.at! : now() + this.settings().undoSendSeconds * 1000
+    this.db.prepare(`insert into outbox (id, draft_id, send_at, status, scheduled, remind_days) values (?,?,?, 'queued', ?, ?)`)
+      .run(outId, id, at, scheduled ? 1 : 0, opts.remindDays || null)
     this.emit({ type: 'outbox' })
-    setTimeout(() => this.tick(), delay + 50)
+    if (!scheduled) setTimeout(() => this.tick(), at - now() + 50)
     return outId
   }
 
@@ -992,14 +1004,14 @@ export class MailService {
   }
 
   retrySend(outboxId: string) {
-    this.db.prepare(`update outbox set status = 'queued', send_at = ?, last_error = null where id = ?`).run(now(), outboxId)
+    this.db.prepare(`update outbox set status = 'queued', send_at = ?, last_error = null, scheduled = 0 where id = ?`).run(now(), outboxId)
     this.emit({ type: 'outbox' })
     setTimeout(() => this.tick(), 0)
   }
 
   outbox(): OutboxItem[] {
     return (this.db.prepare(`select o.*, d.to_json, d.subject from outbox o join drafts d on d.id = o.draft_id order by o.send_at`).all() as Row[])
-      .map((r) => ({ id: r.id, to: JSON.parse(r.to_json || '{}').to || '', subject: r.subject, sendAt: r.send_at, status: r.status, error: r.last_error || undefined }))
+      .map((r) => ({ id: r.id, to: JSON.parse(r.to_json || '{}').to || '', subject: r.subject, sendAt: r.send_at, status: r.status, error: r.last_error || undefined, scheduled: !!r.scheduled }))
   }
 
   private async deliver(o: Row) {
@@ -1021,6 +1033,10 @@ export class MailService {
 
       // sent: the draft goes, the people written to are remembered for autocomplete
       this.db.prepare('delete from drafts where id = ?').run(dr.id)
+      if (o.remind_days) {
+        this.db.prepare(`insert into reminders (id, account_id, header_id, subject, recipients, remind_at, created_at) values (?,?,?,?,?,?,?)`)
+          .run(uuid(), d.accountId, messageId, d.subject, [d.to, d.cc].filter(Boolean).join(', '), now() + o.remind_days * 864e5, now())
+      }
       const up = this.db.prepare(`insert into contacts (email, name, last_used, use_count) values (?,?,?,1)
         on conflict(email) do update set last_used = excluded.last_used, use_count = contacts.use_count + 1`)
       for (const a of [d.to, d.cc, d.bcc].filter(Boolean).join(',').split(/[,;]/).map((x) => x.trim()).filter(Boolean)) {
@@ -1064,6 +1080,98 @@ export class MailService {
     }
   }
 
+  // ---------- snooze and reminders ----------
+
+  private snoozedFolder(accountId: string): Row | undefined {
+    return this.db.prepare(`select * from folders where account_id = ? and special = 'snoozed'`).get(accountId) as Row
+  }
+
+  /** the server folder snoozed mail waits in; made once, like Airmail's */
+  private async ensureSnoozed(accountId: string): Promise<Row> {
+    const have = this.snoozedFolder(accountId)
+    if (have) return have
+    const named = this.db.prepare(`select * from folders where account_id = ? and lower(name) = 'snoozed'`).get(accountId) as Row
+    if (named) { this.db.prepare(`update folders set special = 'snoozed' where id = ?`).run(named.id); return { ...named, special: 'snoozed' } }
+    const created = await this.run(accountId, (c) => c.mailboxCreate(`${(c as any).namespace?.prefix || ''}Snoozed`)) as any
+    const p = created?.path || 'Snoozed'
+    this.db.prepare(`insert into folders (id, account_id, path, name, special) values (?,?,?,?, 'snoozed')
+      on conflict(account_id, path) do update set special = 'snoozed'`).run(uuid(), accountId, p, 'Snoozed')
+    this.emit({ type: 'folders', accountId })
+    return this.snoozedFolder(accountId)!
+  }
+
+  async snooze(ids: string[], until: number | null): Promise<string | null> {
+    const rows = this.db.prepare(`select m.*, f.path as folder_path from messages m join message_folders mf on mf.message_id = m.id
+      join folders f on f.id = mf.folder_id where m.id in (${ids.map(() => '?').join(',')})`).all(...ids) as Row[]
+    const tokens: string[] = []
+    for (const accountId of new Set(rows.map((r) => r.account_id as string))) {
+      const mine = rows.filter((r) => r.account_id === accountId)
+      const folder = await this.ensureSnoozed(accountId)
+      const made: string[] = []
+      for (const r of mine) {
+        if (!r.message_id) continue
+        const id = uuid()
+        this.db.prepare(`insert into snoozed (id, account_id, header_id, subject, from_name, until_at, origin_path, created_at) values (?,?,?,?,?,?,?,?)`)
+          .run(id, accountId, r.message_id, r.subject || '', r.from_name || r.from_email || '', until, r.folder_path || 'INBOX', now())
+        made.push(id)
+      }
+      const token = await this.act(mine.map((r) => r.id), 'move', folder.id)
+      if (token) { this.snoozeTokens.set(token, made); tokens.push(token) }
+    }
+    this.emit({ type: 'outbox' })
+    return tokens.length ? tokens.join(',') : null
+  }
+
+  snoozed(): SnoozedItem[] {
+    return (this.db.prepare(`select * from snoozed where status = 'waiting' order by coalesce(until_at, 9e15)`).all() as Row[])
+      .map((r) => ({ id: r.id, accountId: r.account_id, subject: r.subject, fromName: r.from_name, until: r.until_at ?? null }))
+  }
+
+  unsnooze(id: string) {
+    this.db.prepare(`update snoozed set until_at = ? where id = ?`).run(now(), id)
+    setTimeout(() => this.tick(), 0)
+  }
+
+  /** snoozed mail whose time has come goes back where it was, unread, with a notification */
+  private wakeSnoozed() {
+    const due = this.db.prepare(`select * from snoozed where status = 'waiting' and until_at is not null and until_at <= ?`).all(now()) as Row[]
+    for (const s of due) {
+      if (this.busyAccounts.has(s.account_id)) continue
+      const folder = this.snoozedFolder(s.account_id)
+      const msg = folder && this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id
+        where mf.folder_id = ? and m.message_id = ? and m.pending_op is null limit 1`).get(folder.id, s.header_id) as Row
+      if (!msg) {
+        // not seen in Snoozed yet: read the folder once; if it is still not there, it was moved by hand
+        if (folder && !this.wakeTried.has(s.id)) { this.wakeTried.add(s.id); this.syncFolder(s.account_id, folder.id, false).catch(() => {}); continue }
+        this.db.prepare(`update snoozed set status = 'woken' where id = ?`).run(s.id)
+        continue
+      }
+      const origin = this.db.prepare(`select * from folders where account_id = ? and path = ?`).get(s.account_id, s.origin_path) as Row
+        || this.folderByRole(s.account_id, 'inbox')
+      this.db.prepare(`update snoozed set status = 'woken' where id = ?`).run(s.id)
+      if (!origin) continue
+      this.act([msg.id], 'unseen').catch(() => {})
+      this.act([msg.id], 'move', origin.id, true).catch(() => {})
+      this.alert(s.from_name || 'RoarMail', `⏰ ${s.subject || ''}`)
+      this.emit({ type: 'outbox' })
+    }
+  }
+
+  /** a sent message nobody answered by the chosen day: a notification and a star on it */
+  private checkReminders() {
+    const due = this.db.prepare(`select * from reminders where status = 'waiting' and remind_at <= ?`).all(now()) as Row[]
+    for (const r of due) {
+      const acc = this.db.prepare('select email from accounts where id = ?').get(r.account_id) as Row
+      const answered = this.db.prepare(`select 1 from messages where account_id = ? and from_email != ? and (in_reply_to = ? or instr(refs, ?) > 0) limit 1`)
+        .get(r.account_id, (acc?.email || '').toLowerCase(), r.header_id, r.header_id)
+      if (answered) { this.db.prepare(`update reminders set status = 'answered' where id = ?`).run(r.id); continue }
+      this.db.prepare(`update reminders set status = 'done' where id = ?`).run(r.id)
+      const sent = this.db.prepare('select id from messages where account_id = ? and message_id = ? limit 1').get(r.account_id, r.header_id) as Row
+      if (sent) this.act([sent.id], 'flag').catch(() => {})
+      this.alert(r.recipients || 'RoarMail', `🔔 ${r.subject || ''}`)
+    }
+  }
+
   // ---------- signatures and settings ----------
 
   signatures(): Signature[] {
@@ -1094,6 +1202,7 @@ export class MailService {
       lock: m.get('lock') === 'true',
       lockAfter: Math.max(0, Number(m.get('lockAfter') ?? 15)),
       appearance: (['dark', 'light'].includes(m.get('appearance')) ? m.get('appearance') : 'system') as Settings['appearance'],
+      runAtLogin: m.get('runAtLogin') === 'true',
     }
   }
 

@@ -8,6 +8,8 @@ import { Viewer, initials, tint, type ComposeKind } from './components/Viewer'
 import { Composer, type ComposeSeed } from './components/Composer'
 import { MovePicker } from './components/MovePicker'
 import { SettingsSheet } from './components/SettingsSheet'
+import { TimePicker } from './components/TimePicker'
+import { short } from './when'
 
 const api = window.roarmail
 const keyOf = (r: MessageRow) => r.threadId || r.id
@@ -28,9 +30,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [compose, setCompose] = useState<ComposeSeed | null>(null)
   const [moving, setMoving] = useState<{ accountId: string; ids: string[]; exclude?: string } | null>(null)
+  const [snoozing, setSnoozing] = useState<string[] | null>(null)
+  const [showScheduled, setShowScheduled] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
   const [outbox, setOutbox] = useState<OutboxItem[]>([])
-  const [prefs, setPrefs] = useState<Settings>({ undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system' })
+  const [prefs, setPrefs] = useState<Settings>({ undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false })
   const [locked, setLocked] = useState(false)
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
   const [update, setUpdate] = useState<{ status: string; version: string } | null>(null)
@@ -112,11 +116,14 @@ export default function App() {
     } catch (e) { flash({ text: clean(e) }); loadRows() }
   }, [list, folderRole])
 
+  const openSnooze = useCallback((targets: MessageRow[]) => { if (targets.length) setSnoozing(targets.map(keyOf)) }, [])
+
   const swipe = useCallback((r: MessageRow, a: SwipeAction) => {
     if (a === 'archive' || a === 'trash') act([r], a)
     else if (a === 'flag') act([r], r.flagged ? 'unflag' : 'flag')
     else if (a === 'seen') act([r], r.seen ? 'unseen' : 'seen')
-  }, [act])
+    else if (a === 'snooze') openSnooze([r])
+  }, [act, openSnooze])
 
   /** reply / forward from the keyboard: the newest message of the conversation */
   const openCompose = useCallback(async (kind: ComposeKind, m?: MessageFull) => {
@@ -154,10 +161,24 @@ export default function App() {
     setMoving({ accountId, ids: targets.filter((r) => r.accountId === accountId).map(keyOf), exclude: scope.folderId })
   }, [scope.folderId])
 
-  const sent = (outboxId: string) => {
+  const doSnooze = async (keys: string[], until: number | null) => {
+    const targets = list.filter((r) => keys.includes(keyOf(r)))
+    const ids = targets.flatMap((r) => r.ids)
+    const first = list.findIndex((r) => keys.includes(keyOf(r)))
+    const rest = list.filter((r) => !keys.includes(keyOf(r)))
+    setRows((rs) => rs.filter((r) => !keys.includes(keyOf(r))))
+    setSelected(rest[Math.min(first, rest.length - 1)] ? [keyOf(rest[Math.min(first, rest.length - 1)])] : [])
+    try {
+      const token = await api.snooze(ids, until)
+      flash({ text: until ? `${t.snoozedToast} ${short(until)}` : t.setAside, undo: token ? () => { api.undo(token).then(() => loadRows()) } : undefined })
+    } catch (e) { flash({ text: clean(e) }); loadRows() }
+  }
+
+  const sent = (outboxId: string, at?: number) => {
     setCompose(null)
     loadOutbox()
-    if (prefs.undoSendSeconds > 0) {
+    if (at) flash({ text: `${t.scheduledFor} ${short(at)}`, ms: 4000 })
+    else if (prefs.undoSendSeconds > 0) {
       flash({
         text: t.sentIn, ms: prefs.undoSendSeconds * 1000,
         undo: async () => { const d = await api.cancelSend(outboxId); if (d) setCompose({ kind: 'draft', draft: d }) },
@@ -169,7 +190,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (compose || adding || moving || settingsOpen || el.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(el.tagName)) {
+      if (compose || adding || moving || snoozing || settingsOpen || el.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(el.tagName)) {
         if (e.key === 'Escape' && el === searchRef.current) { setQuery(''); searchRef.current?.blur() }
         return
       }
@@ -191,6 +212,7 @@ export default function App() {
       else if (k === 'e') act(chosen, 'archive')
       else if (k === '#' || k === 'Delete' || k === 'Backspace') act(chosen, 'trash')
       else if (k === 'm') { e.preventDefault(); openMove(chosen) }
+      else if (k === 'b' || k === 'h') { e.preventDefault(); openSnooze(chosen) }
       else if (k === 's') act(chosen, chosen.every((r) => r.flagged) ? 'unflag' : 'flag')
       else if (k === 'u') act(chosen, chosen.every((r) => r.seen) ? 'unseen' : 'seen')
       else if (!current) return
@@ -201,7 +223,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [list, index, current, chosen, compose, adding, moving, settingsOpen, scope, act, openCompose, openMove, toast, inDrafts, openRow])
+  }, [list, index, current, chosen, compose, adding, moving, snoozing, settingsOpen, scope, act, openCompose, openMove, openSnooze, toast, inDrafts, openRow])
 
   const title = useMemo(() => {
     if (results) return t.searchResults
@@ -217,7 +239,8 @@ export default function App() {
   const busy = Object.values(syncing).some(Boolean)
   const accountOf = (id: string) => accounts.find((a) => a.id === id)
   const failed = outbox.filter((o) => o.status === 'failed')
-  const waiting = outbox.filter((o) => o.status !== 'failed' && o.sendAt < Date.now() - 1000)
+  const waiting = outbox.filter((o) => o.status !== 'failed' && !o.scheduled && o.sendAt < Date.now() - 1000)
+  const later = outbox.filter((o) => o.status !== 'failed' && o.scheduled)
 
   return (
     <div className="app">
@@ -280,11 +303,23 @@ export default function App() {
             </div>
           ))}
           {waiting.length > 0 && <div className="outbox-bar"><Icon name="sent" size={14} /> <span>{waiting.length} {t.outboxWaiting}</span></div>}
+          {later.length > 0 && (
+            <button className="outbox-bar as-button" onClick={() => setShowScheduled((v) => !v)}>
+              <Icon name="clock" size={14} /> <span className="grow">{later.length} {t.scheduled}</span><Icon name="chevron" size={13} />
+            </button>
+          )}
+          {showScheduled && later.map((o) => (
+            <div key={o.id} className="outbox-bar">
+              <span className="grow ellipsis"><b className="plain">{short(o.sendAt)}</b> · {o.subject || t.noSubject}</span>
+              <button className="pill small" onClick={() => api.retrySend(o.id)}>{t.sendNow}</button>
+              <button className="pill small ghost" onClick={async () => { const d = await api.cancelSend(o.id); if (d) setCompose({ kind: 'draft', draft: d }) }}>{t.edit}</button>
+            </div>
+          ))}
         </div>
         <div className="rows">
           {list.map((r) => (
             <Row key={keyOf(r)} r={r} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' ? accountOf(r.accountId) : undefined}
-              prefs={prefs} onClick={(e) => click(r, e)} onAct={(a) => act([r], a)} onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
+              prefs={prefs} onClick={(e) => click(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
           ))}
           {!list.length && (
             <div className="list-empty">
@@ -308,6 +343,7 @@ export default function App() {
             <button className="pill" onClick={() => act(chosen, 'archive')}><Icon name="archive" size={15} /> {t.archiveIt}</button>
             <button className="pill" onClick={() => act(chosen, 'trash')}><Icon name="trash" size={15} /> {t.trashIt}</button>
             <button className="pill" onClick={() => openMove(chosen)}><Icon name="folder" size={15} /> {t.moveTo}</button>
+            <button className="pill" onClick={() => openSnooze(chosen)}><Icon name="clock" size={15} /> {t.snoozeIt}</button>
           </div>
           <div className="row">
             <button className="pill ghost" onClick={() => act(chosen, 'seen')}>{t.markRead}</button>
@@ -318,7 +354,7 @@ export default function App() {
       ) : (
         <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs}
           onCompose={(kind, m) => openCompose(kind, m)}
-          onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else act([current], a) }} />
+          onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else if (a === 'snooze') openSnooze([current]); else act([current], a) }} />
       )}
 
       {update?.status === 'ready' && (
@@ -330,6 +366,7 @@ export default function App() {
         <MovePicker accountId={moving.accountId} exclude={moving.exclude} onClose={() => setMoving(null)}
           onPick={(fid) => { const targets = list.filter((r) => moving.ids.includes(keyOf(r))); setMoving(null); act(targets, 'move', fid) }} />
       )}
+      {snoozing && <TimePicker title={t.snoozeUntil} aside onClose={() => setSnoozing(null)} onPick={(at) => { const keys = snoozing; setSnoozing(null); doSnooze(keys, at) }} />}
       {compose && <Composer seed={compose} accounts={accounts} onClose={(saved) => { setCompose(null); if (saved) flash({ text: t.draftSaved, ms: 2600 }) }} onSent={sent} />}
       {toast && (
         <div className="toast">
@@ -342,9 +379,9 @@ export default function App() {
 }
 
 /** one conversation in the list: hover buttons, and a two-finger swipe on the trackpad */
-function Row({ r, on, acc, prefs, onClick, onAct, onSwipe }: {
+function Row({ r, on, acc, prefs, onClick, onAct, onSnooze, onSwipe }: {
   r: MessageRow; on: boolean; acc?: Account; prefs: Settings
-  onClick: (e: MouseEvent) => void; onAct: (a: Action) => void; onSwipe: (side: 'left' | 'right') => void
+  onClick: (e: MouseEvent) => void; onAct: (a: Action) => void; onSnooze: () => void; onSwipe: (side: 'left' | 'right') => void
 }) {
   const [dx, setDx] = useState(0)
   const sum = useRef(0)
@@ -392,6 +429,7 @@ function Row({ r, on, acc, prefs, onClick, onAct, onSwipe }: {
         <div className="quick" onClick={(e) => e.stopPropagation()}>
           <button title={r.seen ? t.markUnread : t.markRead} onClick={() => onAct(r.seen ? 'unseen' : 'seen')}><Icon name="dot" size={15} filled={!r.seen} /></button>
           <button title={r.flagged ? t.unflag : t.flag} onClick={() => onAct(r.flagged ? 'unflag' : 'flag')}><Icon name="star" size={15} filled={r.flagged} /></button>
+          <button title={t.snoozeIt} onClick={() => onSnooze()}><Icon name="clock" size={15} /></button>
           <button title={t.archiveIt} onClick={() => onAct('archive')}><Icon name="archive" size={15} /></button>
           <button title={t.trashIt} onClick={() => onAct('trash')}><Icon name="trash" size={15} /></button>
         </div>

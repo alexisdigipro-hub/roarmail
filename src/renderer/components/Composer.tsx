@@ -6,6 +6,7 @@ import type { Account, Address, Draft, MessageFull, Signature } from '../../shar
 import { fullDate, t } from '../i18n'
 import { Icon } from './Icon'
 import type { ComposeKind } from './Viewer'
+import { TimePicker } from './TimePicker'
 
 export interface ComposeSeed {
   kind: ComposeKind | 'new' | 'draft'
@@ -52,7 +53,7 @@ function prefill(seed: ComposeSeed, accounts: Account[]) {
 
 export function Composer({ seed, accounts, onClose, onSent }: {
   seed: ComposeSeed; accounts: Account[]
-  onClose: (saved: boolean) => void; onSent: (outboxId: string) => void
+  onClose: (saved: boolean) => void; onSent: (outboxId: string, at?: number) => void
 }) {
   const init = useRef(prefill(seed, accounts)).current
   const [accountId, setAccountId] = useState(init.accountId)
@@ -66,6 +67,8 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const [error, setError] = useState('')
   const [asking, setAsking] = useState(false)
   const [sigs, setSigs] = useState<Signature[]>([])
+  const [later, setLater] = useState(false)
+  const [remindDays, setRemindDays] = useState(0)
   const body = useRef<HTMLDivElement>(null)
   const dirty = useRef(false)
   const draftId = useRef<string | undefined>(seed.draft?.id)
@@ -123,13 +126,13 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     return () => clearInterval(h)
   })
 
-  async function send() {
+  async function send(at?: number) {
     if (!to.trim() && !cc.trim() && !bcc.trim()) { setError(t.noRecipient); return }
     setBusy(true); setError('')
     try {
       await saving.current
-      const id = await window.roarmail.send(draft())
-      onSent(id)
+      const id = await window.roarmail.send(draft(), { at, remindDays: remindDays || undefined })
+      onSent(id, at)
     } catch (e: any) {
       setError(String(e?.message || e).replace(/^.*Error:\s*/, ''))
       setBusy(false)
@@ -182,10 +185,21 @@ export function Composer({ seed, accounts, onClose, onSent }: {
         {error && <p className="error">{error}</p>}
         <div className="composer-foot">
           <button className="tool" title={t.attach} onClick={async () => { const p = await window.roarmail.pickFiles(); if (p.length) { setFiles([...files, ...p]); dirty.current = true } }}><Icon name="clip" /></button>
+          <label className={`remind ${remindDays ? 'on' : ''}`} title={t.remind}>
+            <Icon name="bell" size={16} />
+            <select value={remindDays} onChange={(e) => setRemindDays(Number(e.target.value))}>
+              <option value={0}>{t.remindOff}</option>
+              {[1, 2, 3, 7].map((d) => <option key={d} value={d}>{t.remind}: {d} {d === 1 ? t.day : t.days}</option>)}
+            </select>
+          </label>
           <span className="grow" />
           <span className="muted small">⌘/Ctrl + Enter</span>
-          <button className="pill primary" disabled={busy} onClick={send}>{busy ? t.sending : t.send}</button>
+          <div className="send-group">
+            <button className="pill primary" disabled={busy} onClick={() => send()}>{busy ? t.sending : t.send}</button>
+            <button className="pill primary later" disabled={busy} title={t.sendLater} onClick={() => setLater(true)}><Icon name="clock" size={15} /></button>
+          </div>
         </div>
+        {later && <TimePicker title={t.sendLater} onClose={() => setLater(false)} onPick={(at) => { setLater(false); if (at) send(at) }} />}
         {asking && (
           <div className="ask">
             <p>{t.discardQ}</p>

@@ -1,5 +1,11 @@
 // Greek and English; the app follows the system language.
 const el = {
+  snoozed: 'Αναβολή', snoozeIt: 'Αναβολή', snoozeUntil: 'Αναβολή μέχρι…', snoozedToast: 'Σε αναβολή μέχρι', setAside: 'Στην άκρη',
+  w_later: 'Αργότερα σήμερα', w_evening: 'Απόψε', w_tomorrow: 'Αύριο το πρωί', w_weekend: 'Το Σαββατοκύριακο', w_nextweek: 'Την επόμενη εβδομάδα',
+  w_aside: 'Στην άκρη', w_asideHint: 'χωρίς ώρα', w_pick: 'Ορισμός',
+  sendLater: 'Αποστολή αργότερα', sendAt: 'Αποστολή στις', scheduled: 'προγραμματισμένα', scheduledFor: 'Θα σταλεί', sendNow: 'Αποστολή τώρα', cancelSend: 'Ακύρωση',
+  remind: 'Υπενθύμιση αν δεν απαντήσουν', remindOff: 'Χωρίς υπενθύμιση', days: 'μέρες', day: 'μέρα',
+  runAtLogin: 'Άνοιγμα με τον υπολογιστή, στη γραμμή μενού (για αναβολές, προγραμματισμένα και υπενθυμίσεις στην ώρα τους)',
   appearance: 'Εμφάνιση', ap_system: 'Αυτόματα, όπως το σύστημα', ap_dark: 'Σκούρο', ap_light: 'Ανοιχτό',
   privacy: 'Απόρρητο', blockTrackers: 'Μπλοκάρισμα tracking pixels (και όταν φαίνονται οι εικόνες)', stripTracking: 'Καθάρισμα συνδέσμων από utm και παρόμοια',
   appLock: 'Κλείδωμα με Touch ID', lockAfter: 'Κλείδωμα μετά από', minutes: 'λεπτά', onlySleep: 'Μόνο στο άνοιγμα και στον ύπνο', lockNow: 'Κλείδωμα τώρα',
@@ -22,7 +28,7 @@ const el = {
   settings: 'Ρυθμίσεις', accounts: 'Λογαριασμοί', signatures: 'Υπογραφές', general: 'Γενικά', newSignature: 'Νέα υπογραφή',
   signatureName: 'Όνομα υπογραφής', noSignature: 'Χωρίς υπογραφή', signature: 'Υπογραφή', color: 'Χρώμα', delete: 'Διαγραφή',
   undoSend: 'Χρόνος για αναίρεση αποστολής', seconds: 'δευτ.', off: 'Κλειστό', swipeLeft: 'Σάρωση αριστερά', swipeRight: 'Σάρωση δεξιά',
-  sw_archive: 'Αρχειοθέτηση', sw_trash: 'Κάδος', sw_flag: 'Αστέρι', sw_seen: 'Διαβασμένο / αδιάβαστο', sw_none: 'Τίποτα',
+  sw_snooze: 'Αναβολή', sw_archive: 'Αρχειοθέτηση', sw_trash: 'Κάδος', sw_flag: 'Αστέρι', sw_seen: 'Διαβασμένο / αδιάβαστο', sw_none: 'Τίποτα',
   opFailed: 'Ο server δεν δέχτηκε την αλλαγή', earlier: 'προηγούμενα', done: 'Τέλος', saved: 'Αποθηκεύτηκε',
   allInboxes: 'Όλα τα εισερχόμενα', inbox: 'Εισερχόμενα', sent: 'Απεσταλμένα', drafts: 'Πρόχειρα', trash: 'Κάδος', spam: 'Ανεπιθύμητα',
   archive: 'Αρχείο', all: 'Όλα τα μηνύματα', flagged: 'Με αστέρι', folders: 'Φάκελοι',
@@ -51,6 +57,12 @@ const el = {
   shortcuts: 'Συντομεύσεις: C νέο · R απάντηση · A σε όλους · F προώθηση · E αρχείο · # κάδος · M μετακίνηση · S αστέρι · U αδιάβαστο · Z αναίρεση · / αναζήτηση',
 }
 const en: typeof el = {
+  snoozed: 'Snoozed', snoozeIt: 'Snooze', snoozeUntil: 'Snooze until…', snoozedToast: 'Snoozed until', setAside: 'Set aside',
+  w_later: 'Later today', w_evening: 'This evening', w_tomorrow: 'Tomorrow morning', w_weekend: 'This weekend', w_nextweek: 'Next week',
+  w_aside: 'Set aside', w_asideHint: 'no time', w_pick: 'Set',
+  sendLater: 'Send later', sendAt: 'Send at', scheduled: 'scheduled', scheduledFor: 'Sends', sendNow: 'Send now', cancelSend: 'Cancel',
+  remind: "Remind me if they don't answer", remindOff: 'No reminder', days: 'days', day: 'day',
+  runAtLogin: 'Open with the computer, in the menu bar (so snoozes, scheduled sends and reminders happen on time)',
   appearance: 'Appearance', ap_system: 'Automatic, like the system', ap_dark: 'Dark', ap_light: 'Light',
   privacy: 'Privacy', blockTrackers: 'Block tracking pixels (even when images are shown)', stripTracking: 'Clean utm and similar tags off links',
   appLock: 'Lock with Touch ID', lockAfter: 'Lock after', minutes: 'minutes', onlySleep: 'Only at start and after sleep', lockNow: 'Lock now',
@@ -73,7 +85,7 @@ const en: typeof el = {
   settings: 'Settings', accounts: 'Accounts', signatures: 'Signatures', general: 'General', newSignature: 'New signature',
   signatureName: 'Signature name', noSignature: 'No signature', signature: 'Signature', color: 'Color', delete: 'Delete',
   undoSend: 'Time to undo sending', seconds: 'sec', off: 'Off', swipeLeft: 'Swipe left', swipeRight: 'Swipe right',
-  sw_archive: 'Archive', sw_trash: 'Trash', sw_flag: 'Star', sw_seen: 'Read / unread', sw_none: 'Nothing',
+  sw_snooze: 'Snooze', sw_archive: 'Archive', sw_trash: 'Trash', sw_flag: 'Star', sw_seen: 'Read / unread', sw_none: 'Nothing',
   opFailed: 'The server did not accept the change', earlier: 'earlier', done: 'Done', saved: 'Saved',
   allInboxes: 'All Inboxes', inbox: 'Inbox', sent: 'Sent', drafts: 'Drafts', trash: 'Trash', spam: 'Junk',
   archive: 'Archive', all: 'All Mail', flagged: 'Starred', folders: 'Folders',

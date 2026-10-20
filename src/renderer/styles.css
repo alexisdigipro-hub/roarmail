@@ -393,3 +393,19 @@ label.check input { width: 18px; height: 18px; accent-color: var(--accent); box-
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
 .demo-pill b { color: var(--accent-2); }
 [data-platform='web'] .app { padding-top: 38px; }
+
+/* ---------- snooze, send later, reminders ---------- */
+.time-picker { width: min(420px, 100%); }
+.time-picker h3 { margin: 0; font-size: 17px; font-weight: 600; }
+.time-picker .row:first-child { margin-bottom: 10px; color: var(--accent-2); }
+.time-picker .row:first-child h3 { color: var(--text); }
+.custom-time { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--edge); }
+.custom-time input { flex: 1; height: 36px; padding: 0 12px; border: 0; border-radius: var(--r); background: var(--field); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge); color-scheme: inherit; }
+.send-group { display: inline-flex; gap: 2px; }
+.send-group .pill.primary:first-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+.send-group .pill.later { padding: 0 11px; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+.remind { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px; border-radius: var(--r); color: var(--muted); }
+.remind select { max-width: 220px; border: 0; outline: 0; background: none; color: inherit; font-size: 12.5px; cursor: pointer; }
+.remind.on { color: var(--accent-2); background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+.outbox-bar.as-button { width: 100%; text-align: left; color: var(--text); cursor: pointer; }
+.outbox-bar b.plain { color: var(--text); font-weight: 600; }

@@ -29,6 +29,8 @@ const P: Record<string, string> = {
   info: 'M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 11v5M12 8v.5',
   block: 'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0M6.4 6.4l11.2 11.2',
   lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+  clock: 'M12 12m-8.5 0a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0M12 7.5V12l3 2',
+  bell: 'M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0',
   gear: 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8',
 }
 
@@ -43,4 +45,4 @@ export function Icon({ name, size = 18, filled = false }: { name: keyof typeof P
 
 export const folderIcon = (role: string | null) =>
   role === 'inbox' ? 'inbox' : role === 'sent' ? 'sent' : role === 'drafts' ? 'drafts' : role === 'trash' ? 'trash'
-    : role === 'spam' ? 'spam' : role === 'archive' ? 'archive' : role === 'flagged' ? 'star' : role === 'all' ? 'all' : 'folder'
+    : role === 'spam' ? 'spam' : role === 'archive' ? 'archive' : role === 'flagged' ? 'star' : role === 'all' ? 'all' : role === 'snoozed' ? 'clock' : 'folder'

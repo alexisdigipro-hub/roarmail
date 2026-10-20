@@ -1,7 +1,7 @@
 {
   "name": "roarmail",
   "productName": "RoarMail",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "RoarMail: a desktop mail client for Mac and Windows. TheMadlions Lab, Experiment 03.",
   "author": "THEMADLIONS",
   "license": "UNLICENSED",
@@ -43,7 +43,7 @@
     "appId": "com.themadlions.roarmail",
     "productName": "RoarMail",
     "directories": { "output": "out", "buildResources": "build" },
-    "files": ["dist/**/*", "package.json"],
+    "files": ["dist/**/*", "assets/**/*", "package.json"],
     "asarUnpack": ["**/node_modules/better-sqlite3/**"],
     "afterPack": "./build/adhoc-sign.js",
     "protocols": [{ "name": "Email", "schemes": ["mailto"] }],

@@ -1,5 +1,5 @@
 // RoarMail's main process: the window, the mail engine and the IPC door the screens use.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, systemPreferences, Tray } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -15,7 +15,10 @@ if (!app.requestSingleInstanceLock()) app.quit()
 let win: BrowserWindow | null = null
 let quitting = false
 let pendingMailto: string | null = null
+let shownOnce = false
 let locked = false
+let tray: Tray | null = null
+let background = false // keep running in the menu bar / tray when the window closes
 
 // App lock (Touch ID on a Mac). While locked the main process answers nothing but these, so a locked
 // window cannot read mail even through its developer tools.
@@ -51,11 +54,13 @@ function createWindow() {
     },
   })
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
-  win.once('ready-to-show', () => win?.show())
+  // opened at login: stay in the menu bar until asked
+  const hidden = process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAsHidden)
+  win.once('ready-to-show', () => { if (!hidden || shownOnce) win?.show(); shownOnce = true })
   // nothing ever navigates the app window; links go to the system browser
   win.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); openSafe(url) } })
-  win.on('close', (e) => { if (process.platform === 'darwin' && !quitting) { e.preventDefault(); win?.hide() } })
+  win.on('close', (e) => { if ((process.platform === 'darwin' || background) && !quitting) { e.preventDefault(); win?.hide() } })
   win.on('closed', () => { win = null })
   win.webContents.on('did-finish-load', () => {
     if (pendingMailto) { emit(mailtoEvent(pendingMailto)); pendingMailto = null }
@@ -112,6 +117,46 @@ app.whenReady().then(() => {
   }
   applyAppearance(mail.settings().appearance)
 
+  // snoozes coming back and reminders: a notification that opens the app
+  mail.alert = (title, body) => {
+    if (!Notification.isSupported()) return
+    const n = locked ? new Notification({ title: 'RoarMail', body: '⏰' }) : new Notification({ title, body })
+    n.on('click', () => show())
+    n.show()
+  }
+
+  // start with the computer, waiting in the menu bar (tray on Windows), so scheduled things happen on time
+  const applyLogin = (on: boolean) => {
+    background = on
+    try { app.setLoginItemSettings({ openAtLogin: on, openAsHidden: true, args: on ? ['--hidden'] : [] }) } catch { /* not allowed here */ }
+    if (on) makeTray(); else if (process.platform !== 'darwin') { tray?.destroy(); tray = null }
+  }
+  const makeTray = () => {
+    if (tray) return
+    const img = process.platform === 'darwin'
+      ? nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'trayTemplate.png'))
+      : nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png')).resize({ width: 16, height: 16 })
+    if (process.platform === 'darwin') img.setTemplateImage(true)
+    tray = new Tray(img)
+    tray.setToolTip('RoarMail')
+    const menu = () => Menu.buildFromTemplate([
+      { label: 'RoarMail', click: () => show() },
+      { label: 'New Message', click: () => { show(); emit({ type: 'compose', to: '' }) } },
+      { label: 'Check Mail', click: () => mail.refresh().catch(() => {}) },
+      { type: 'separator' },
+      { label: 'Quit RoarMail', click: () => { quitting = true; app.quit() } },
+    ])
+    tray.setContextMenu(menu())
+    if (process.platform === 'win32') tray.on('click', () => show())
+  }
+  // the unread count next to the envelope in the menu bar
+  setInterval(() => {
+    if (!tray || process.platform !== 'darwin') return
+    const n = app.getBadgeCount()
+    tray.setTitle(n ? ` ${n}` : '')
+  }, 5e3)
+  applyLogin(mail.settings().runAtLogin)
+
   handle('mail:platform', () => process.platform)
   handle('mail:autodetect', (_e, email: string) => autodetect(email))
   handle('mail:testAccount', (_e, cfg, pass) => mail.test(cfg, pass))
@@ -130,7 +175,7 @@ app.whenReady().then(() => {
   handle('mail:act', (_e, ids, action, target) => mail.act(ids, action, target))
   handle('mail:undo', (_e, token) => mail.undo(token))
   handle('mail:allowImages', (_e, s) => mail.allowImages(s))
-  handle('mail:send', (_e, d) => mail.send(d))
+  handle('mail:send', (_e, d, opts) => mail.send(d, opts))
   handle('mail:cancelSend', (_e, id) => mail.cancelSend(id))
   handle('mail:retrySend', (_e, id) => mail.retrySend(id))
   handle('mail:outbox', () => mail.outbox())
@@ -142,7 +187,10 @@ app.whenReady().then(() => {
   handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))
   handle('mail:deleteSignature', (_e, id) => mail.deleteSignature(id))
   handle('mail:settings', () => mail.settings())
-  handle('mail:setSetting', (_e, k, v) => { mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v) })
+  handle('mail:setSetting', (_e, k, v) => { mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v) })
+  handle('mail:snooze', (_e, ids, until) => mail.snooze(ids, until))
+  handle('mail:snoozed', () => mail.snoozed())
+  handle('mail:unsnooze', (_e, id) => mail.unsnooze(id))
   handle('mail:refresh', (_e, id) => mail.refresh(id))
   handle('mail:openExternal', (_e, url) => openSafe(url))
   handle('mail:unsubscribe', (_e, id) => mail.unsubscribe(id))
@@ -207,4 +255,4 @@ app.whenReady().then(() => {
   ]))
 })
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !background) app.quit() })

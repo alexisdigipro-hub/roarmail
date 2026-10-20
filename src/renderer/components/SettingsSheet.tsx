@@ -119,7 +119,7 @@ function General() {
   useEffect(() => { window.roarmail.settings().then(setS) }, [])
   if (!s) return null
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { setS({ ...s, [k]: v }); window.roarmail.setSetting(k, v) }
-  const swipes: SwipeAction[] = ['archive', 'trash', 'flag', 'seen', 'none']
+  const swipes: SwipeAction[] = ['archive', 'trash', 'snooze', 'flag', 'seen', 'none']
   return (
     <div className="stack">
       <label>{t.appearance}
@@ -127,6 +127,7 @@ function General() {
           <option value="system">{t.ap_system}</option><option value="dark">{t.ap_dark}</option><option value="light">{t.ap_light}</option>
         </select>
       </label>
+      <label className="check"><input type="checkbox" checked={s.runAtLogin} onChange={(e) => set('runAtLogin', e.target.checked)} />{t.runAtLogin}</label>
       <label>{t.undoSend}
         <select value={s.undoSendSeconds} onChange={(e) => set('undoSendSeconds', Number(e.target.value))}>
           {[0, 5, 10, 20, 30].map((n) => <option key={n} value={n}>{n ? `${n} ${t.seconds}` : t.off}</option>)}

@@ -9,7 +9,7 @@ import { fullDate, size, t, when, type Key } from '../i18n'
 import { Icon } from './Icon'
 
 export type ComposeKind = 'reply' | 'replyAll' | 'forward'
-type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move'
+type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
 
 export function Viewer({ row, accounts, prefs, onCompose, onAct }: {
   row: MessageRow | null
@@ -62,6 +62,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct }: {
         <button className="tool" title={`${t.archiveIt} (E)`} onClick={() => onAct('archive')}><Icon name="archive" /></button>
         <button className="tool" title={`${t.trashIt} (#)`} onClick={() => onAct('trash')}><Icon name="trash" /></button>
         <button className="tool" title={`${t.moveTo} (M)`} onClick={() => onAct('move')}><Icon name="folder" /></button>
+        <button className="tool" title={`${t.snoozeIt} (B)`} onClick={() => onAct('snooze')}><Icon name="clock" /></button>
         <button className={`tool ${row.flagged ? 'on' : ''}`} title={`${row.flagged ? t.unflag : t.flag} (S)`}
           onClick={() => onAct(row.flagged ? 'unflag' : 'flag')}><Icon name="star" filled={row.flagged} /></button>
         <button className="tool" title={`${t.markUnread} (U)`} onClick={() => onAct('unseen')}><Icon name="unread" /></button>
