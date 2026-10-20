@@ -77,8 +77,11 @@ function createWindow() {
 
 function openSafe(url: string) {
   if (/^roarmail:/i.test(url)) openLink(url)
-  else if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url)
+  else if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url, { activate: !linksInBackground() })
+  else if (/^tel:[\d+]+$/i.test(url)) shell.openExternal(url)
 }
+// Settings > General > Open links in the background (Mac): set once the settings are read
+let linksInBackground = () => false
 
 function mailtoEvent(url: string): MailEvent {
   const u = new URL(url)
@@ -132,6 +135,18 @@ app.whenReady().then(() => {
 
   // Settings > General: who notifies, and which sound plays (RoarMail's own sounds play in the window, even when it is in front)
   const known = db.prepare('select 1 from contacts where email = ? and use_count > 0')
+  // Settings > General > Reply in notifications (Mac): the answer goes out like any reply, through the outbox
+  const quickReply = async (id: string, text: string) => {
+    try {
+      const m = await mail.message(id)
+      const esc = text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
+      mail.send({
+        accountId: m.accountId, to: m.replyTo || (m.fromName ? `${m.fromName.replace(/[",]/g, '')} <${m.fromEmail}>` : m.fromEmail),
+        subject: /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`, html: esc.replace(/\n/g, '<br>'), text,
+        inReplyTo: m.messageId, references: [m.references, m.messageId].filter(Boolean).join(' ') || undefined, replyToMessageId: m.id,
+      })
+    } catch { /* the message is gone: nothing to answer */ }
+  }
   const notify = (accountId: string, all: MessageRow[]) => {
     const s = mail.settings()
     const rows = s.notifyFor === 'none' ? [] : s.notifyFor === 'known' ? all.filter((r) => known.get(r.fromEmail.toLowerCase())) : all
@@ -144,7 +159,8 @@ app.whenReady().then(() => {
     for (const r of list) {
       const n = locked
         ? new Notification({ title: 'RoarMail', body: '✉︎', silent })
-        : new Notification({ title: r.fromName || r.fromEmail, body: r.subject || '(no subject)', silent })
+        : new Notification({ title: r.fromName || r.fromEmail, body: r.subject || '(no subject)', silent, hasReply: s.notifyReply && process.platform === 'darwin' })
+      n.on('reply', (_e, text) => { if (text.trim()) quickReply(r.id, text) })
       n.on('click', () => { show(); emit({ type: 'open', messageId: r.threadId || r.id }) })
       n.show()
     }
@@ -202,6 +218,14 @@ app.whenReady().then(() => {
     tray.setTitle(n ? ` ${n}` : '')
   }, 5e3)
   applyLogin(mail.settings().runAtLogin)
+  linksInBackground = () => process.platform === 'darwin' && mail.settings().linksInBackground
+
+  // Settings > General (Mac): in the Dock and the menu bar, only the Dock, or only the menu bar
+  const applyDock = (mode: string) => {
+    if (process.platform !== 'darwin') return
+    if (mode === 'menubar') { makeTray(); app.dock?.hide() } else { app.dock?.show(); if (mode === 'dock' && !background) { tray?.destroy(); tray = null } else makeTray() }
+  }
+  applyDock(mail.settings().dockMode)
 
   handle('mail:platform', () => process.platform)
   handle('mail:autodetect', (_e, email: string) => autodetect(email))
@@ -216,6 +240,9 @@ app.whenReady().then(() => {
   })
   handle('mail:message', (_e, id) => mail.message(id))
   handle('mail:search', (_e, q, a) => mail.search(q, a))
+  handle('mail:searchOnline', (_e, q, a) => mail.searchOnline(q, a))
+  handle('mail:resetSettings', () => { mail.resetSettings(); const s = mail.settings(); applyAppearance(s.appearance); applyLogin(s.runAtLogin); applyDock(s.dockMode) })
+  handle('mail:clearCache', () => mail.clearCache())
   handle('mail:contacts', (_e, q) => mail.contacts(q))
   handle('mail:thread', (_e, key) => mail.thread(key))
   handle('mail:act', (_e, ids, action, target) => mail.act(ids, action, target))
@@ -245,7 +272,7 @@ app.whenReady().then(() => {
   handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))
   handle('mail:deleteSignature', (_e, id) => mail.deleteSignature(id))
   handle('mail:settings', () => mail.settings())
-  handle('mail:setSetting', (_e, k, v) => { mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v) })
+  handle('mail:setSetting', (_e, k, v) => { mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v); if (k === 'dockMode') applyDock(v) })
   handle('mail:snooze', (_e, ids, until) => mail.snooze(ids, until))
   handle('mail:snoozed', () => mail.snoozed())
   handle('mail:unsnooze', (_e, id) => mail.unsnooze(id))

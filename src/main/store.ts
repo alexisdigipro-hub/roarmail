@@ -7,15 +7,18 @@ import schema001 from './schema.sql'
 import schema002 from './schema002.sql'
 import schema003 from './schema003.sql'
 import schema004 from './schema004.sql'
+import schema005 from './schema005.sql'
 
 export type DB = Database.Database
 
-const MIGRATIONS: string[] = [schema001, schema002, schema003, schema004]
+const MIGRATIONS: string[] = [schema001, schema002, schema003, schema004, schema005]
 
 export function openStore(): DB {
   const db = new Database(path.join(app.getPath('userData'), 'roarmail.db'))
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  // the search index holds text without accents (Greek tonos and dialytika too): see schema005.sql
+  db.function('fold', { deterministic: true }, (v: unknown) => (v == null ? null : fold(String(v))))
   const version = db.pragma('user_version', { simple: true }) as number
   for (let i = version; i < MIGRATIONS.length; i++) {
     db.transaction(() => {
@@ -27,4 +30,6 @@ export function openStore(): DB {
 }
 
 export const now = () => Date.now()
+/** lower case without accents, final sigma as sigma: how search compares words */
+export const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ς/g, 'σ')
 export const uuid = () => crypto.randomUUID()

@@ -19,7 +19,7 @@ const H = 3600e3
 const now = Date.now()
 const uid = () => Math.random().toString(36).slice(2, 10)
 
-const extra = { enabled: true, description: '', aliases: [], attachments: 'recent' as const, roles: {}, trashDays: 0, junkDays: 0 }
+const extra = { enabled: true, description: '', aliases: [], attachments: 'recent' as const, roles: {}, trashDays: 0, junkDays: 0, unread: 0 }
 const accounts: Account[] = [
   { id: 'a1', email: 'alex@themadlions.com', displayName: 'Alex', color: '#d40000', provider: 'imap', imapHost: 'linux207.papaki.gr', imapPort: 993, imapTls: 'tls', smtpHost: 'linux207.papaki.gr', smtpPort: 465, smtpTls: 'tls', username: 'alex@themadlions.com', signatureId: 's1', state: 'online', ...extra },
   { id: 'a2', email: 'roar.demo@gmail.com', displayName: 'Alex K.', color: '#2f9bff', provider: 'gmail', imapHost: 'imap.gmail.com', imapPort: 993, imapTls: 'tls', smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpTls: 'tls', username: 'roar.demo@gmail.com', signatureId: null, state: 'online', ...extra },
@@ -101,7 +101,11 @@ function list(scope: ListScope): MessageRow[] {
     : role(m.folderId) === (scope.role || 'inbox') && (scope.accountId === 'all' || m.accountId === scope.accountId)))
   const groups = new Map<string, DemoMsg[]>()
   for (const m of inScope) groups.set(m.threadId, [...(groups.get(m.threadId) || []), m])
-  return [...groups.values()].map((g) => { g.sort((a, b) => b.date - a.date); return row(g[0], g) }).sort((a, b) => b.date - a.date)
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const keep = (r: MessageRow) => scope.filter === 'unread' ? !r.seen : scope.filter === 'flagged' ? r.flagged
+    : scope.filter === 'attachments' ? r.hasAttachments : scope.filter === 'today' ? r.date >= today.getTime() : true
+  return [...groups.values()].map((g) => { g.sort((a, b) => b.date - a.date); return row(g[0], g) }).filter(keep)
+    .sort((a, b) => (scope.oldest ? a.date - b.date : b.date - a.date))
 }
 
 function full(m: DemoMsg): MessageFull {
@@ -159,16 +163,19 @@ export function createDemo(): MailApi & { update: any } {
     testAccount: async () => ({ ok: false, error: 'Στο demo δεν συνδέονται λογαριασμοί. Κατέβασε την εφαρμογή για Mac ή Windows. / The demo cannot connect accounts; download the app.' }),
     addAccount: async () => { throw new Error('demo') },
     updateAccount: async (id, patch) => { const a = accounts.find((x) => x.id === id); if (a) Object.assign(a, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); emit({ type: 'accounts' }) },
-    allAccounts: async () => accounts.map((a) => ({ ...a })),
+    allAccounts: async () => { recount(); return accounts.map((a) => ({ ...a, unread: folders.find((f) => f.accountId === a.id && f.role === 'inbox')?.unread || 0 })) },
     updateServer: async () => ({ ok: false, error: 'Στο demo δεν αλλάζουν οι servers. / The demo cannot change servers.' }),
     addAlias: async (id, email, name) => { const a = accounts.find((x) => x.id === id); if (a) a.aliases = [...a.aliases, { id: uid(), email, name }]; emit({ type: 'accounts' }) },
     removeAlias: async (aid) => { for (const a of accounts) a.aliases = a.aliases.filter((x) => x.id !== aid); emit({ type: 'accounts' }) },
     serverFolders: async (id) => folders.filter((f) => f.accountId === id && f.role !== 'inbox' && f.role !== 'snoozed').map((f) => ({ path: f.path, name: f.name })),
+    searchOnline: async (q, a) => api.search(q, a),
+    resetSettings: async () => { settings = { ...LOOK_DEFAULTS, ...GENERAL_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false } },
+    clearCache: async () => 0,
     isDefaultMail: async () => false,
     makeDefaultMail: async () => false,
     pickFolder: async () => null,
     removeAccount: async () => {},
-    accounts: async () => accounts.filter((a) => a.enabled).map((a) => ({ ...a })),
+    accounts: async () => (await api.allAccounts()).filter((a) => a.enabled),
     folders: async (accountId) => { recount(); return folders.filter((f) => f.accountId === accountId).map((f) => ({ ...f })) },
     messages: async (scope) => list(scope),
     thread: async (key) => msgs.filter((m) => (m.threadId === key || m.id === key) && !pendingHas(m.id)).sort((a, b) => a.date - b.date).map((m) => row(m)),

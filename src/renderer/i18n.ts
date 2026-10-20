@@ -103,6 +103,28 @@ const el = {
   f_plainMono: 'Σταθερό πλάτος στα μηνύματα απλού κειμένου', f_quoteColors: 'Χρώμα στο κείμενο σε παράθεση',
   f_level1: 'Πρώτο επίπεδο', f_level2: 'Δεύτερο επίπεδο', f_level3: 'Τρίτο επίπεδο',
   qc_purple: 'Μωβ', qc_teal: 'Τιρκουάζ', qc_green: 'Πράσινο', qc_blue: 'Μπλε', qc_red: 'Κόκκινο', qc_orange: 'Πορτοκαλί', qc_pink: 'Ροζ', qc_grey: 'Γκρι',
+  // Airmail's settings (Oct 2026)
+  expert: 'Για προχωρημένους', privacyModeOn: 'Λειτουργία απορρήτου: οι εικόνες από το web δεν φορτώνουν ποτέ.',
+  searchingServers: 'Ψάχνω και στους servers…', oldestFirst: 'Τα παλαιότερα πρώτα', newestFirst: 'Τα νεότερα πρώτα',
+  fl_unread: 'Μόνο αδιάβαστα', fl_flagged: 'Μόνο με αστέρι', fl_attachments: 'Μόνο με συνημμένα', fl_today: 'Μόνο σημερινά',
+  g_language: 'Γλώσσα', g_langAuto: 'Του συστήματος', g_unified: 'Ενιαία εισερχόμενα', g_unifiedHint: 'Ένα κουμπί που δείχνει τα εισερχόμενα όλων των λογαριασμών μαζί.',
+  g_dock: 'Εμφάνιση', g_dockBoth: 'Στο Dock και στη γραμμή μενού', g_dockOnly: 'Μόνο στο Dock', g_menubarOnly: 'Μόνο στη γραμμή μενού',
+  g_markRead: 'Σημείωση ως διαβασμένο', g_readOpen: 'Μόλις ανοίγει', g_readDelay: 'Μετά από λίγα δευτερόλεπτα', g_readNever: 'Μόνο όταν το σημειώνω',
+  g_linksBg: 'Οι σύνδεσμοι ανοίγουν στο παρασκήνιο', g_linksBgHint: 'Ο browser ανοίγει τον σύνδεσμο χωρίς να έρθει μπροστά.',
+  g_notifyReply: 'Απάντηση μέσα από την ειδοποίηση', g_notifyReplyHint: 'Γράφεις την απάντηση στην ειδοποίηση και φεύγει από τα εξερχόμενα.',
+  ap_lists: 'Λογαριασμοί και μετρητές', ap_accColours: 'Χρώματα λογαριασμών', ap_accColoursHint: 'Μια γραμμή με το χρώμα του λογαριασμού σε κάθε μήνυμα στα ενιαία εισερχόμενα.',
+  ap_accBadges: 'Αριθμός σε κάθε λογαριασμό', ap_accBadgesHint: 'Τα αδιάβαστα των εισερχομένων πάνω στο εικονίδιο του λογαριασμού.',
+  ap_inboxCounter: 'Μετρητής εισερχομένων', ap_folderCounter: 'Μετρητής φακέλων', ap_cUnread: 'Αδιάβαστα', ap_cTotal: 'Όλα τα μηνύματα', ap_cNone: 'Κανένας', ap_feel: 'Αίσθηση',
+  ad_privacy: 'Λειτουργία απορρήτου', ad_privacyHint: 'Όλα στο πιο ιδιωτικό: εικόνες από το web ποτέ, trackers μπλοκαρισμένοι, καθαροί σύνδεσμοι.',
+  ad_detect: 'Εντοπισμός στα μηνύματα', ad_detectHint: 'Σύνδεσμοι, διευθύνσεις email και τηλέφωνα στο απλό κείμενο γίνονται κλικαρίσιμα.',
+  ad_search: 'Αναζήτηση', ad_searchSpam: 'Και στα ανεπιθύμητα', ad_searchTrash: 'Και στον κάδο',
+  ad_conversations: 'Συζητήσεις στα αποτελέσματα', ad_conversationsHint: 'Μία γραμμή για κάθε συζήτηση, αντί για κάθε μήνυμα.',
+  ad_exact: 'Ακριβής αντιστοίχιση', ad_exactHint: 'Μόνο ολόκληρες λέξεις. Χωρίς αυτό, το «γυρ» βρίσκει και το «γύρισμα».',
+  ad_online: 'Αναζήτηση και στους servers', ad_onlineHint: 'Για παλιά μηνύματα που δεν έχουν κατέβει σε αυτόν τον υπολογιστή. Ό,τι βρεθεί μένει εδώ.',
+  ad_accentsNote: 'Η αναζήτηση αγνοεί πάντα τόνους και διαλυτικά: το «γυρισμα» βρίσκει το «γύρισμα».',
+  ad_reset: 'Καθαρισμός', ad_clearCache: 'Άδειασμα αποθηκευμένων μηνυμάτων', ad_clearCacheHint: 'Ελευθερώνει χώρο. Τα μηνύματα ξανακατεβαίνουν όταν τα ανοίγεις.',
+  ad_clear: 'Άδειασμα', ad_freed: 'Ελευθερώθηκαν', ad_resetSettings: 'Επαναφορά ρυθμίσεων', ad_resetHint: 'Όλες οι ρυθμίσεις όπως ήταν στην αρχή. Λογαριασμοί και μηνύματα μένουν.',
+  ad_resetQ: 'Να γυρίσουν όλες οι ρυθμίσεις στις αρχικές;', ad_resetDone: 'Οι ρυθμίσεις γύρισαν στις αρχικές.', ad_resetBtn: 'Επαναφορά',
 }
 const en: typeof el = {
   snoozed: 'Snoozed', snoozeIt: 'Snooze', snoozeUntil: 'Snooze until…', snoozedToast: 'Snoozed until', setAside: 'Set aside',
@@ -208,9 +230,45 @@ const en: typeof el = {
   f_plainMono: 'Fixed-width font for plain text messages', f_quoteColors: 'Colour quoted text',
   f_level1: 'Level one', f_level2: 'Level two', f_level3: 'Level three',
   qc_purple: 'Purple', qc_teal: 'Teal', qc_green: 'Green', qc_blue: 'Blue', qc_red: 'Red', qc_orange: 'Orange', qc_pink: 'Pink', qc_grey: 'Grey',
+  // Airmail's settings (Oct 2026)
+  expert: 'Advanced', privacyModeOn: 'Privacy mode: images from the web never load.',
+  searchingServers: 'Searching the servers too…', oldestFirst: 'Oldest first', newestFirst: 'Newest first',
+  fl_unread: 'Unread only', fl_flagged: 'Starred only', fl_attachments: 'With attachments only', fl_today: 'Today only',
+  g_language: 'Language', g_langAuto: 'The system\'s', g_unified: 'Unified inbox', g_unifiedHint: 'A button that shows every account\'s inbox together.',
+  g_dock: 'Show in', g_dockBoth: 'The Dock and the menu bar', g_dockOnly: 'The Dock only', g_menubarOnly: 'The menu bar only',
+  g_markRead: 'Mark as read', g_readOpen: 'When opened', g_readDelay: 'After a few seconds', g_readNever: 'Only when I mark it',
+  g_linksBg: 'Open links in the background', g_linksBgHint: 'The browser opens the link without coming to the front.',
+  g_notifyReply: 'Reply from the notification', g_notifyReplyHint: 'Type the reply in the notification; it goes out through the outbox.',
+  ap_lists: 'Accounts and counters', ap_accColours: 'Account colours', ap_accColoursHint: 'A line in the account\'s colour on each message in the unified inbox.',
+  ap_accBadges: 'A number on each account', ap_accBadgesHint: 'Unread in the inbox, on the account\'s icon.',
+  ap_inboxCounter: 'Inbox counter', ap_folderCounter: 'Folder counters', ap_cUnread: 'Unread', ap_cTotal: 'All messages', ap_cNone: 'None', ap_feel: 'Feel',
+  ad_privacy: 'Privacy mode', ad_privacyHint: 'Everything at its most private: no images from the web, trackers blocked, clean links.',
+  ad_detect: 'Detect in messages', ad_detectHint: 'Links, email addresses and phone numbers in plain text become clickable.',
+  ad_search: 'Search', ad_searchSpam: 'Include Junk', ad_searchTrash: 'Include Trash',
+  ad_conversations: 'Conversations in results', ad_conversationsHint: 'One row per conversation instead of per message.',
+  ad_exact: 'Exact match', ad_exactHint: 'Whole words only. Without it, "shoo" also finds "shooting".',
+  ad_online: 'Search the servers too', ad_onlineHint: 'For old mail that was never downloaded to this computer. What is found stays here.',
+  ad_accentsNote: 'Search always ignores accents: "cafe" finds "café".',
+  ad_reset: 'Clean up', ad_clearCache: 'Clear the message cache', ad_clearCacheHint: 'Frees space. Messages download again when opened.',
+  ad_clear: 'Clear', ad_freed: 'Freed', ad_resetSettings: 'Reset settings', ad_resetHint: 'Every setting as it was at the start. Accounts and mail stay.',
+  ad_resetQ: 'Put every setting back to how it started?', ad_resetDone: 'Settings are back to how they started.', ad_resetBtn: 'Reset',
 }
 
-export const lang = (navigator.language || 'en').toLowerCase().startsWith('el') ? 'el' : 'en'
+// Settings > General > Language: the choice is kept here too, so it applies before the settings arrive
+const LANG_KEY = 'roarmail.lang'
+const chosen = (() => { try { return localStorage.getItem(LANG_KEY) } catch { return null } })()
+export const lang = chosen === 'el' || chosen === 'en' ? chosen : (navigator.language || 'en').toLowerCase().startsWith('el') ? 'el' : 'en'
+/** stores the setting; true when the window must reload to show it */
+export function syncLanguage(v: 'auto' | 'el' | 'en' | undefined): boolean {
+  if (!v) return false
+  try {
+    if ((chosen || 'auto') === v) return false
+    if (v === 'auto') localStorage.removeItem(LANG_KEY); else localStorage.setItem(LANG_KEY, v)
+  } catch { return false }
+  const next = v === 'auto' ? ((navigator.language || 'en').toLowerCase().startsWith('el') ? 'el' : 'en') : v
+  // the stored value changed; reload only when the words on screen would change
+  return next !== lang
+}
 export const t = lang === 'el' ? el : en
 export type Key = keyof typeof el
 

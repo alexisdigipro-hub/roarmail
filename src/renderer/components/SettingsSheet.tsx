@@ -10,10 +10,11 @@ import { Icon } from './Icon'
 import { RoarMeAccount } from './RoarMe'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
-type Page = 'general' | 'accounts' | 'roarme' | 'appearance' | 'fonts' | 'signatures' | 'privacy' | 'keys'
+type Page = 'general' | 'accounts' | 'roarme' | 'appearance' | 'fonts' | 'signatures' | 'privacy' | 'expert' | 'keys'
 const PAGES: [Page, string][] = [
-  ['general', 'gear'], ['accounts', 'inbox'], ['roarme', 'roar'], ['appearance', 'palette'], ['fonts', 'type'], ['signatures', 'compose'], ['privacy', 'shield'], ['keys', 'keyboard'],
+  ['general', 'gear'], ['accounts', 'inbox'], ['roarme', 'roar'], ['appearance', 'palette'], ['fonts', 'type'], ['signatures', 'compose'], ['privacy', 'shield'], ['expert', 'sliders'], ['keys', 'keyboard'],
 ]
+const MAC = window.roarmail.platform === 'darwin'
 
 export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
   accounts: Account[]; onAddAccount: () => void; onClose: () => void; onLook: (s: Settings) => void
@@ -62,6 +63,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
             {page === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
             {page === 'privacy' && <Privacy />}
             {page === 'general' && <General />}
+            {page === 'expert' && prefs && <Advanced s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
             {page === 'fonts' && prefs && <Fonts s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
             {page === 'keys' && <Shortcuts />}
           </div>
@@ -130,6 +132,20 @@ function Appearance({ s, onChange }: { s: Settings; onChange: (s: Settings) => v
       <div className="set-row"><span>{t.textSize} <b className="muted">{TEXT_SIZES[s.textSize]}px</b></span>
         <input type="range" min={0} max={4} step={1} value={s.textSize} onChange={(e) => set('textSize', Number(e.target.value))} />
       </div>
+      <h4 className="set-sub">{t.ap_lists}</h4>
+      <Toggle label={t.ap_accColours} hint={t.ap_accColoursHint} on={s.accountColours} set={(v) => set('accountColours', v)} />
+      <Toggle label={t.ap_accBadges} hint={t.ap_accBadgesHint} on={s.accountBadges} set={(v) => set('accountBadges', v)} />
+      <div className="set-row"><span>{t.ap_inboxCounter}</span>
+        <select value={s.inboxCounter} onChange={(e) => set('inboxCounter', e.target.value as Settings['inboxCounter'])}>
+          <option value="unread">{t.ap_cUnread}</option><option value="total">{t.ap_cTotal}</option><option value="none">{t.ap_cNone}</option>
+        </select>
+      </div>
+      <div className="set-row"><span>{t.ap_folderCounter}</span>
+        <select value={s.folderCounter} onChange={(e) => set('folderCounter', e.target.value as Settings['folderCounter'])}>
+          <option value="unread">{t.ap_cUnread}</option><option value="total">{t.ap_cTotal}</option><option value="none">{t.ap_cNone}</option>
+        </select>
+      </div>
+      <h4 className="set-sub">{t.ap_feel}</h4>
       <Toggle label={t.motion} hint={t.motionHint} on={s.motion} set={(v) => set('motion', v)} />
       <Toggle label={t.glassLook} hint={t.glassHint} on={s.glass} set={(v) => set('glass', v)} />
       <Toggle label={t.focusRings} hint={t.focusHint} on={s.focusRings} set={(v) => set('focusRings', v)} />
@@ -402,6 +418,25 @@ function General() {
           ? <span className="muted small ok-text"><Icon name="shield" size={14} /> RoarMail</span>
           : <button className="pill small" disabled={isDefault == null} onClick={() => window.roarmail.makeDefaultMail().then(setIsDefault)}>{t.g_makeDefault}</button>}
       </div>
+      <div className="set-row"><span>{t.g_language}</span>
+        <select value={s.language} onChange={(e) => set('language', e.target.value as Settings['language'])}>
+          <option value="auto">{t.g_langAuto}</option><option value="el">Ελληνικά</option><option value="en">English</option>
+        </select>
+      </div>
+      <Toggle label={t.g_unified} hint={t.g_unifiedHint} on={s.unifiedInbox} set={(v) => set('unifiedInbox', v)} />
+      {MAC && (
+        <div className="set-row"><span>{t.g_dock}</span>
+          <select value={s.dockMode} onChange={(e) => set('dockMode', e.target.value as Settings['dockMode'])}>
+            <option value="both">{t.g_dockBoth}</option><option value="dock">{t.g_dockOnly}</option><option value="menubar">{t.g_menubarOnly}</option>
+          </select>
+        </div>
+      )}
+      <div className="set-row"><span>{t.g_markRead}</span>
+        <select value={s.markRead} onChange={(e) => set('markRead', e.target.value as Settings['markRead'])}>
+          <option value="open">{t.g_readOpen}</option><option value="delay">{t.g_readDelay}</option><option value="never">{t.g_readNever}</option>
+        </select>
+      </div>
+      {MAC && <Toggle label={t.g_linksBg} hint={t.g_linksBgHint} on={s.linksInBackground} set={(v) => set('linksInBackground', v)} />}
       <div className="set-row"><span>{t.g_checkEvery}</span>
         <select value={s.checkEvery} onChange={(e) => set('checkEvery', Number(e.target.value))}>
           {every.map(([n, label]) => <option key={n} value={n}>{label}</option>)}
@@ -428,6 +463,7 @@ function General() {
           <option value="inbox">{t.g_notifyInbox}</option><option value="known">{t.g_notifyKnown}</option><option value="none">{t.g_notifyNone}</option>
         </select>
       </div>
+      {MAC && s.notifyFor !== 'none' && <Toggle label={t.g_notifyReply} hint={t.g_notifyReplyHint} on={s.notifyReply} set={(v) => set('notifyReply', v)} />}
       <div className="set-row"><span>{t.g_downloads}</span>
         <div className="row">
           <span className="muted small ellipsis dl-name" title={s.downloadsFolder}>{s.downloadsFolder ? folderName : t.g_askEachTime}</span>
@@ -452,9 +488,41 @@ function General() {
           {swipes.map((w) => <option key={w} value={w}>{t[`sw_${w}` as Key]}</option>)}
         </select>
       </div>
-      <h4 className="set-sub">{t.g_searchIn}</h4>
-      <Toggle label={t.trash} on={s.searchTrash} set={(v) => set('searchTrash', v)} />
-      <Toggle label={t.spam} on={s.searchJunk} set={(v) => set('searchJunk', v)} />
+    </div>
+  )
+}
+
+/** Airmail's Advanced page: privacy mode, how search works, what is detected in messages, and the resets */
+function Advanced({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
+  const [note, setNote] = useState('')
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { window.roarmail.setSetting(k, v); onChange({ ...s, [k]: v }) }
+  const mb = (n: number) => (n > 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`)
+  return (
+    <div className="stack">
+      <Toggle label={t.ad_privacy} hint={t.ad_privacyHint} on={s.privacyMode} set={(v) => set('privacyMode', v)} />
+      <Toggle label={t.ad_detect} hint={t.ad_detectHint} on={s.detectLinks} set={(v) => set('detectLinks', v)} />
+
+      <h4 className="set-sub">{t.ad_search}</h4>
+      <Toggle label={t.ad_searchSpam} on={s.searchJunk} set={(v) => set('searchJunk', v)} />
+      <Toggle label={t.ad_searchTrash} on={s.searchTrash} set={(v) => set('searchTrash', v)} />
+      <Toggle label={t.ad_conversations} hint={t.ad_conversationsHint} on={s.searchConversations} set={(v) => set('searchConversations', v)} />
+      <Toggle label={t.ad_exact} hint={t.ad_exactHint} on={s.exactSearch} set={(v) => set('exactSearch', v)} />
+      <Toggle label={t.ad_online} hint={t.ad_onlineHint} on={s.onlineSearch} set={(v) => set('onlineSearch', v)} />
+      <p className="muted small">{t.ad_accentsNote}</p>
+
+      <h4 className="set-sub">{t.ad_reset}</h4>
+      <div className="set-row"><span>{t.ad_clearCache}<small className="muted block">{t.ad_clearCacheHint}</small></span>
+        <button className="pill small" onClick={async () => setNote(`${t.ad_freed} ${mb(await window.roarmail.clearCache())}`)}>{t.ad_clear}</button>
+      </div>
+      <div className="set-row"><span>{t.ad_resetSettings}<small className="muted block">{t.ad_resetHint}</small></span>
+        <button className="pill small ghost danger" onClick={async () => {
+          if (!confirm(t.ad_resetQ)) return
+          await window.roarmail.resetSettings()
+          const fresh = await window.roarmail.settings()
+          onChange(fresh); setNote(t.ad_resetDone)
+        }}>{t.ad_resetBtn}</button>
+      </div>
+      {note && <p className="small ok-text">{note}</p>}
     </div>
   )
 }

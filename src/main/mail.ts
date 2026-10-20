@@ -14,7 +14,7 @@ import fs from 'fs'
 import path from 'path'
 import { app, net, shell } from 'electron'
 import type { DB } from './store'
-import { now, uuid } from './store'
+import { fold, now, uuid } from './store'
 import { seal, open } from './vault'
 import type {
   Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
@@ -37,6 +37,9 @@ const SETTINGS: Settings = {
   downloadsFolder: '', retrySending: true, searchTrash: true, searchJunk: true,
   listFont: 'system', listSize: 14, messageFont: 'system', monoFont: 'mono', plainMono: false,
   quoteColors: true, quote1: '#6d5dfc', quote2: '#1fa3b8', quote3: '#3fae49',
+  language: 'auto', unifiedInbox: true, linksInBackground: false, dockMode: 'both', notifyReply: true, markRead: 'open',
+  accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
+  privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 /** only accounts that are switched on show anywhere */
@@ -74,7 +77,7 @@ const toAccount = (r: Row, state: Account['state'], error: string | undefined, a
   enabled: !!r.enabled, description: r.description || '', aliases,
   attachments: ['all', 'recent', 'none'].includes(r.attachments) ? r.attachments : 'recent',
   roles: (() => { try { return JSON.parse(r.roles_json || '{}') } catch { return {} } })(),
-  trashDays: r.trash_days || 0, junkDays: r.junk_days || 0,
+  trashDays: r.trash_days || 0, junkDays: r.junk_days || 0, unread: r.inbox_unread || 0,
 })
 
 // the text version of HTML mail carries [image: …] and [https://…] marks; a snippet reads better without them
@@ -193,7 +196,8 @@ export class MailService {
   /** the switched-off ones too, for Settings > Accounts */
   allAccounts(): Account[] {
     const aliases = this.db.prepare('select id, email, name from identities where account_id = ? and is_default = 0 order by email')
-    return (this.db.prepare(`select a.*, i.signature_id from accounts a left join identities i on i.account_id = a.id and i.is_default = 1
+    return (this.db.prepare(`select a.*, i.signature_id, (select sum(unread) from folders f where f.account_id = a.id and f.role = 'inbox') as inbox_unread
+      from accounts a left join identities i on i.account_id = a.id and i.is_default = 1
       order by a.sort, a.created_at`).all() as Row[])
       .map((r) => {
         const s = this.state.get(r.id)
@@ -566,42 +570,14 @@ export class MailService {
         }
 
         if (range) {
-          const ins = this.db.prepare(`insert into messages (id, account_id, message_id, in_reply_to, refs, gm_thrid, from_name, from_email, to_json, cc_json,
-            reply_to, subject, snippet, date, seen, flagged, answered, has_attachments, size, list_unsubscribe, created_at)
-            values (@id, @account_id, @message_id, @in_reply_to, @refs, @gm_thrid, @from_name, @from_email, @to_json, @cc_json,
-            @reply_to, @subject, '', @date, @seen, @flagged, @answered, @has_attachments, @size, @list_unsubscribe, @created_at)`)
-          const link = this.db.prepare('insert or ignore into message_folders (message_id, folder_id, uid) values (?,?,?)')
-          const contact = this.db.prepare(`insert into contacts (email, name, last_used, use_count) values (?,?,?,0)
-            on conflict(email) do update set name = coalesce(contacts.name, excluded.name)`)
-          const batch: Row[] = []
           const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
           if (gmail) query.threadId = true
+          const batch: Row[] = []
           for await (const m of c.fetch(range, query as any, { uid: true })) {
             if (max != null && m.uid <= max) continue
             batch.push(m as any)
           }
-          this.db.transaction(() => {
-            for (const m of batch) {
-              const env = m.envelope || {}
-              const from = env.from?.[0] || {}
-              const headers = String(m.headers || '')
-              const header = (name: string) => (headers.match(new RegExp(`^${name}:\\s*([\\s\\S]*?)(?=\\r?\\n\\S|$)`, 'im')) || [])[1]?.replace(/\r?\n\s+/g, ' ').trim()
-              const row = {
-                id: uuid(), account_id: accountId, message_id: env.messageId || null, in_reply_to: env.inReplyTo || null,
-                refs: header('references') || null, gm_thrid: m.threadId ? String(m.threadId) : null,
-                from_name: from.name || '', from_email: (from.address || '').toLowerCase(),
-                to_json: JSON.stringify(env.to || []), cc_json: JSON.stringify(env.cc || []), reply_to: env.replyTo?.[0]?.address || null,
-                subject: env.subject || '', date: new Date(env.date || m.internalDate || now()).getTime(),
-                seen: m.flags?.has('\\Seen') ? 1 : 0, flagged: m.flags?.has('\\Flagged') ? 1 : 0, answered: m.flags?.has('\\Answered') ? 1 : 0,
-                has_attachments: hasAttachment(m.bodyStructure) ? 1 : 0, size: m.size || null,
-                list_unsubscribe: header('list-unsubscribe') || null, created_at: now(),
-              }
-              ins.run(row)
-              link.run(row.id, folderId, m.uid)
-              if (row.from_email) contact.run(row.from_email, row.from_name || null, row.date)
-              if (announce && !row.seen) fresh.push(toRow(row))
-            }
-          })()
+          for (const r of this.storeFetched(accountId, folderId, batch)) if (announce && !r.seen) fresh.push(r)
         }
         this.db.prepare('update folders set uidvalidity = ?, uidnext = ?, total = ? where id = ?').run(uidValidity, mb.uidNext || null, mb.exists || 0, folderId)
         this.recount(folderId)
@@ -626,6 +602,41 @@ export class MailService {
       const tid = this.db.prepare('select thread_id from messages where id = ?')
       this.notify(accountId, fresh.map((r) => ({ ...r, threadId: (tid.get(r.id) as Row)?.thread_id || null })))
     }
+  }
+
+  /** headers fetched from a folder into the cache (new mail, or what a server search found) */
+  private storeFetched(accountId: string, folderId: string, batch: Row[]): MessageRow[] {
+    const out: MessageRow[] = []
+    const ins = this.db.prepare(`insert into messages (id, account_id, message_id, in_reply_to, refs, gm_thrid, from_name, from_email, to_json, cc_json,
+      reply_to, subject, snippet, date, seen, flagged, answered, has_attachments, size, list_unsubscribe, created_at)
+      values (@id, @account_id, @message_id, @in_reply_to, @refs, @gm_thrid, @from_name, @from_email, @to_json, @cc_json,
+      @reply_to, @subject, '', @date, @seen, @flagged, @answered, @has_attachments, @size, @list_unsubscribe, @created_at)`)
+    const link = this.db.prepare('insert or ignore into message_folders (message_id, folder_id, uid) values (?,?,?)')
+    const contact = this.db.prepare(`insert into contacts (email, name, last_used, use_count) values (?,?,?,0)
+      on conflict(email) do update set name = coalesce(contacts.name, excluded.name)`)
+    this.db.transaction(() => {
+      for (const m of batch) {
+        const env = m.envelope || {}
+        const from = env.from?.[0] || {}
+        const headers = String(m.headers || '')
+        const header = (name: string) => (headers.match(new RegExp(`^${name}:\\s*([\\s\\S]*?)(?=\\r?\\n\\S|$)`, 'im')) || [])[1]?.replace(/\r?\n\s+/g, ' ').trim()
+        const row = {
+          id: uuid(), account_id: accountId, message_id: env.messageId || null, in_reply_to: env.inReplyTo || null,
+          refs: header('references') || null, gm_thrid: m.threadId ? String(m.threadId) : null,
+          from_name: from.name || '', from_email: (from.address || '').toLowerCase(),
+          to_json: JSON.stringify(env.to || []), cc_json: JSON.stringify(env.cc || []), reply_to: env.replyTo?.[0]?.address || null,
+          subject: env.subject || '', date: new Date(env.date || m.internalDate || now()).getTime(),
+          seen: m.flags?.has('\\Seen') ? 1 : 0, flagged: m.flags?.has('\\Flagged') ? 1 : 0, answered: m.flags?.has('\\Answered') ? 1 : 0,
+          has_attachments: hasAttachment(m.bodyStructure) ? 1 : 0, size: m.size || null,
+          list_unsubscribe: header('list-unsubscribe') || null, created_at: now(),
+        }
+        ins.run(row)
+        link.run(row.id, folderId, m.uid)
+        if (row.from_email) contact.run(row.from_email, row.from_name || null, row.date)
+        out.push(toRow(row))
+      }
+    })()
+    return out
   }
 
   /** put new messages into conversations: Gmail's own thread id, else References / In-Reply-To */
@@ -685,7 +696,11 @@ export class MailService {
   /** the list: one row per conversation, its newest message on top */
   list(scope: ListScope, before?: number): MessageRow[] {
     const limit = 120
-    const cut = before ?? Number.MAX_SAFE_INTEGER
+    const cut = before ?? (scope.oldest ? 0 : Number.MAX_SAFE_INTEGER)
+    // the filter buttons: a conversation counts when any of its messages here does
+    const having = scope.filter === 'unread' ? 'and unread_n > 0' : scope.filter === 'flagged' ? 'and flag_n > 0'
+      : scope.filter === 'attachments' ? 'and att_n > 0' : scope.filter === 'today' ? 'and last_date >= @today' : ''
+    const today = new Date(); today.setHours(0, 0, 0, 0)
     const where = scope.folderId
       ? 'mf.folder_id = @folder'
       : `f.role = @role ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
@@ -694,9 +709,9 @@ export class MailService {
       from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
       where ${where} and ${ON} and m.pending_op is null
       group by coalesce(m.thread_id, m.id)
-      having last_date < @cut
-      order by last_date desc limit @limit`)
-      .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit }) as Row[]
+      having ${scope.oldest ? 'last_date > @cut' : 'last_date < @cut'} ${having}
+      order by last_date ${scope.oldest ? 'asc' : 'desc'} limit @limit`)
+      .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit, today: today.getTime() }) as Row[]
     return rows.map(toRow)
   }
 
@@ -762,13 +777,13 @@ export class MailService {
   async message(id: string): Promise<MessageFull> {
     const { row, mail } = await this.parsed(id)
     const fresh = this.db.prepare('select * from messages where id = ?').get(id) as Row
-    if (!fresh.seen) this.act([id], 'seen').catch(() => {})
+    if (!fresh.seen && this.settings().markRead === 'open') this.act([id], 'seen').catch(() => {})
     const contact = this.db.prepare('select images_allowed from contacts where email = ?').get(row.from_email) as Row
     const list = (a: any): Address[] => (a ? (Array.isArray(a) ? a : [a]).flatMap((x: any) => x.value || []) : [])
       .map((x: any) => ({ name: x.name || undefined, address: x.address || '' }))
     const refs = Array.isArray(mail.references) ? mail.references.join(' ') : mail.references
     return {
-      ...toRow({ ...fresh, seen: 1 }),
+      ...toRow({ ...fresh, seen: this.settings().markRead === 'open' ? 1 : fresh.seen }),
       to: list(mail.to), cc: list(mail.cc), replyTo: mail.replyTo?.value?.[0]?.address,
       messageId: mail.messageId || row.message_id || undefined,
       references: refs || undefined,
@@ -777,7 +792,7 @@ export class MailService {
         .map((a, i) => ({ id: `${id}:${i}`, filename: a.filename || 'attachment', mime: a.contentType, size: a.size, inline: !!(a.related || (a.contentDisposition === 'inline' && a.cid)) }))
         .filter((a) => !a.inline),
       inlineImages: {},
-      imagesAllowed: !!contact?.images_allowed,
+      imagesAllowed: !!contact?.images_allowed && !this.settings().privacyMode,
       listUnsubscribe: row.list_unsubscribe || undefined,
       oneClickUnsubscribe: /one-click/i.test(String(mail.headers.get('list-unsubscribe-post') || '')),
       security: securityOf(mail, row.from_email || ''),
@@ -826,17 +841,78 @@ export class MailService {
   }
 
   search(query: string, accountId?: string): MessageRow[] {
-    const terms = query.trim().split(/\s+/).filter(Boolean).map((t) => `"${t.replace(/"/g, '""')}"*`)
+    const s = this.settings()
+    // Settings > Advanced > Exact match: whole words, else the start of words
+    const terms = fold(query).trim().split(/\s+/).filter(Boolean).map((t) => `"${t.replace(/"/g, '""')}"${s.exactSearch ? '' : '*'}`)
     if (!terms.length) return []
     // Settings > General: Trash and Junk in the results or not
-    const s = this.settings()
     const skip = [s.searchTrash ? '' : `'trash'`, s.searchJunk ? '' : `'spam'`].filter(Boolean)
     const notIn = skip.length ? `and not exists (select 1 from message_folders mf join folders f on f.id = mf.folder_id where mf.message_id = m.id and f.role in (${skip.join(',')}))` : ''
     const rows = this.db.prepare(`select m.* from messages_fts s join messages m on m.rowid = s.rowid
       where messages_fts match @q ${accountId ? 'and m.account_id = @a' : ''} and m.account_id in (select id from accounts where enabled = 1)
       and m.pending_op is null ${notIn} order by m.date desc limit 200`)
       .all({ q: terms.join(' '), a: accountId }) as Row[]
-    return rows.map(toRow)
+    if (!s.searchConversations) return rows.map(toRow)
+    // Settings > Advanced > Conversations in search results: one row per conversation, with all its messages
+    const seen = new Set<string>()
+    const out: MessageRow[] = []
+    for (const r of rows) {
+      const key = r.thread_id || r.id
+      if (seen.has(key)) continue
+      seen.add(key)
+      const all = this.db.prepare(`select id, seen, flagged, has_attachments from messages where ${r.thread_id ? 'thread_id' : 'id'} = ? and pending_op is null`).all(key) as Row[]
+      out.push({ ...toRow(r), ids: all.map((x) => x.id), count: all.length, seen: all.every((x) => x.seen), flagged: all.some((x) => x.flagged), hasAttachments: all.some((x) => x.has_attachments) })
+    }
+    return out
+  }
+
+  /** Settings > Advanced > Online search: the servers search too (inbox, sent, archive, all mail) and what they find is kept here */
+  async searchOnline(query: string, accountId?: string): Promise<MessageRow[]> {
+    const q = query.trim()
+    if (q.length < 2) return this.search(query, accountId)
+    const ids = accountId ? [accountId] : this.accounts().map((a) => a.id)
+    await Promise.all(ids.map(async (id) => {
+      const gmail = this.accountRow(id).provider === 'gmail'
+      for (const role of ['inbox', 'sent', 'archive', 'all'] as FolderRole[]) {
+        const f = this.folderByRole(id, role)
+        if (!f) continue
+        try {
+          await this.run(id, async (c) => {
+            const lock = await c.getMailboxLock(f.path)
+            try {
+              const found = ((await c.search({ or: [{ subject: q }, { from: q }, { body: q }] } as any, { uid: true })) || []) as number[]
+              const have = new Set((this.db.prepare('select uid from message_folders where folder_id = ?').all(f.id) as Row[]).map((r) => r.uid))
+              const missing = found.filter((u) => !have.has(u)).slice(-50)
+              if (!missing.length) return
+              const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+              if (gmail) query.threadId = true
+              const batch: Row[] = []
+              for await (const m of c.fetch(missing, query as any, { uid: true })) batch.push(m as any)
+              this.storeFetched(id, f.id, batch)
+            } finally { lock.release() }
+          })
+        } catch { /* that server or folder did not answer: the local results stand */ }
+      }
+      this.assignThreads(id)
+    }))
+    return this.search(query, accountId)
+  }
+
+  /** Settings > Advanced > Reset: every setting back to how RoarMail starts */
+  resetSettings() {
+    this.db.prepare('delete from settings').run()
+    this.schedulePoll()
+    this.badge()
+  }
+
+  /** Settings > Advanced > Clear the message cache: the downloaded copies go; they come back when opened */
+  clearCache(): number {
+    let freed = 0
+    for (const f of fs.readdirSync(mailDir())) {
+      const p = path.join(mailDir(), f)
+      try { freed += fs.statSync(p).size; fs.rmSync(p, { force: true }) } catch { /* in use */ }
+    }
+    return freed
   }
 
   contacts(query: string): Address[] {
@@ -1346,6 +1422,12 @@ export class MailService {
     s.listSize = Math.max(11, Math.min(20, s.listSize))
     if (!['inbox', 'all', 'none'].includes(s.dockBadge)) s.dockBadge = 'inbox'
     if (!['inbox', 'known', 'none'].includes(s.notifyFor)) s.notifyFor = 'inbox'
+    if (!['auto', 'el', 'en'].includes(s.language)) s.language = 'auto'
+    if (!['both', 'dock', 'menubar'].includes(s.dockMode)) s.dockMode = 'both'
+    if (!['open', 'delay', 'never'].includes(s.markRead)) s.markRead = 'open'
+    // Privacy mode wins over the single switches
+    if (s.privacyMode) { s.blockTrackers = true; s.stripTracking = true }
+    for (const k of ['inboxCounter', 'folderCounter'] as const) if (!['unread', 'total', 'none'].includes(s[k])) s[k] = 'unread'
     if (!['system', 'dark', 'light'].includes(s.appearance)) s.appearance = 'system'
     if (!['simba', 'pumba'].includes(s.theme)) s.theme = 'simba'
     return s

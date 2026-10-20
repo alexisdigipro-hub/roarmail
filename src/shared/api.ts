@@ -41,6 +41,8 @@ export interface Account {
   /** erase what sat in Trash / Junk longer than this many days (0 = never) */
   trashDays: number
   junkDays: number
+  /** unread in this account's inbox (the number on its icon in the rail) */
+  unread: number
 }
 
 export interface Alias { id: string; email: string; name: string }
@@ -112,7 +114,14 @@ export interface Security {
 }
 
 /** what the list shows: one folder, or the unified inbox (accountId 'all') */
-export interface ListScope { accountId: string | 'all'; folderId?: string; role?: FolderRole }
+export interface ListScope {
+  accountId: string | 'all'; folderId?: string; role?: FolderRole
+  /** the filter buttons above the list (Airmail's): only unread, starred, with attachments, or from today */
+  filter?: ListFilter
+  /** newest first (default) or oldest first */
+  oldest?: boolean
+}
+export type ListFilter = 'unread' | 'flagged' | 'attachments' | 'today'
 
 export interface Draft {
   /** local draft id, set once saved */
@@ -201,6 +210,39 @@ export interface Settings {
   /** quoted text coloured by level, with these three colours */
   quoteColors: boolean
   quote1: string; quote2: string; quote3: string
+
+  // Airmail's settings (Oct 2026): General
+  /** the app's language: the system's, Greek or English (the window reloads) */
+  language: 'auto' | 'el' | 'en'
+  /** the "all inboxes" button in the rail */
+  unifiedInbox: boolean
+  /** links open in the browser without bringing it to the front (Mac) */
+  linksInBackground: boolean
+  /** Mac: in the Dock and the menu bar, only the Dock, or only the menu bar */
+  dockMode: 'both' | 'dock' | 'menubar'
+  /** a Reply field in new mail notifications (Mac) */
+  notifyReply: boolean
+  /** when a message counts as read: on opening, after a few seconds open, or only when marked */
+  markRead: 'open' | 'delay' | 'never'
+  // Appearance
+  /** the account's colour on the list rows */
+  accountColours: boolean
+  /** unread count on each account in the rail */
+  accountBadges: boolean
+  /** the numbers next to the inbox and the other folders */
+  inboxCounter: 'unread' | 'total' | 'none'
+  folderCounter: 'unread' | 'total' | 'none'
+  // Advanced
+  /** everything at its most private: no remote images ever, trackers blocked, clean links */
+  privacyMode: boolean
+  /** search shows whole conversations, not single messages */
+  searchConversations: boolean
+  /** whole words only (otherwise "γυρ" finds "γύρισμα") */
+  exactSearch: boolean
+  /** search also asks the mail servers, for mail older than what is on this computer */
+  onlineSearch: boolean
+  /** links, email addresses and phone numbers in plain text become clickable */
+  detectLinks: boolean
 }
 
 export type NewMailSound = 'roar' | 'chime' | 'drop' | 'pop' | 'breeze'
@@ -265,6 +307,12 @@ export interface MailApi {
   thread(key: string): Promise<MessageRow[]>
   message(id: string): Promise<MessageFull>
   search(query: string, accountId?: string): Promise<MessageRow[]>
+  /** asks the servers too and keeps what they find here; then the same as search */
+  searchOnline(query: string, accountId?: string): Promise<MessageRow[]>
+  /** Settings > Advanced */
+  resetSettings(): Promise<void>
+  /** removes the downloaded copies of messages (they come back from the server when opened); bytes freed */
+  clearCache(): Promise<number>
   contacts(query: string): Promise<Address[]>
   /** archive / trash / move wait a few seconds before reaching the server; the token undoes them */
   act(ids: string[], action: Action, targetFolderId?: string): Promise<string | null>

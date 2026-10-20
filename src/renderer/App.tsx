@@ -1,8 +1,8 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
-import type { Account, Action, Folder, ListScope, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
-import { t, when, type Key } from './i18n'
+import type { Account, Action, Folder, ListFilter, ListScope, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
+import { syncLanguage, t, when, type Key } from './i18n'
 import { Icon, folderIcon } from './components/Icon'
 import { AddAccount } from './components/AddAccount'
 import { Viewer, initials, tint, type ComposeKind } from './components/Viewer'
@@ -17,6 +17,8 @@ import { actionSound, playNewMail, setActionSounds } from './sounds'
 
 const api = window.roarmail
 const keyOf = (r: MessageRow) => r.threadId || r.id
+// the filter buttons above the list, like Airmail's
+const FILTERS: [ListFilter, string, Key][] = [['unread', 'unread', 'fl_unread'], ['flagged', 'star', 'fl_flagged'], ['attachments', 'clip', 'fl_attachments'], ['today', 'calendar', 'fl_today']]
 const clean = (e: any) => String(e?.message || e).replace(/^.*Error:\s*/, '')
 
 interface Toast { text: string; undo?: () => void; ms?: number }
@@ -30,6 +32,7 @@ export default function App() {
   const [anchor, setAnchor] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<MessageRow[] | null>(null)
+  const [searching, setSearching] = useState(false)
   const [adding, setAdding] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [compose, setCompose] = useState<ComposeSeed | null>(null)
@@ -73,6 +76,7 @@ export default function App() {
   useEffect(() => api.on((e) => {
     if (e.type === 'accounts') loadAccounts()
     if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) loadFolders()
+    if (e.type === 'folders') loadAccounts()
     if (e.type === 'messages') { if (scopeRef.current.accountId === 'all' || scopeRef.current.accountId === e.accountId) loadRows() }
     if (e.type === 'sync') setSyncing((s) => ({ ...s, [e.accountId]: e.busy }))
     if (e.type === 'open' && e.subject != null) { setScope({ accountId: 'all', role: 'inbox' }); setQuery(e.subject); setTimeout(() => setSelected([e.messageId]), 600) }
@@ -84,6 +88,12 @@ export default function App() {
     if (e.type === 'lock') { setLocked(e.locked); if (!e.locked) { loadAccounts(); loadOutbox(); loadFolders(); loadRows(); api.settings().then(setPrefs) } }
   }), [])
   useEffect(() => setActionSounds(!!prefs.actionSounds), [prefs.actionSounds])
+  // Settings > General > Language: kept where i18n reads it before anything is drawn; a change reloads the window
+  useEffect(() => { api.settings().then((x) => { if (syncLanguage(x.language)) location.reload() }).catch(() => {}) }, [prefs.language])
+  // without the unified inbox the first account opens instead
+  useEffect(() => {
+    if (!prefs.unifiedInbox && scope.accountId === 'all' && accounts?.length) setScope({ accountId: accounts[0].id, role: 'inbox' })
+  }, [prefs.unifiedInbox, accounts, scope.accountId])
   // a short note from anywhere in the window (an attachment saved to the downloads folder)
   useEffect(() => {
     const h = (e: Event) => flash({ text: String((e as CustomEvent).detail || ''), ms: 3500 })
@@ -98,9 +108,18 @@ export default function App() {
   // search as you type, across the open account (or all)
   useEffect(() => {
     if (!query.trim()) { setResults(null); return }
-    const h = setTimeout(() => api.search(query, scope.accountId === 'all' ? undefined : scope.accountId).then(setResults), 160)
-    return () => clearTimeout(h)
-  }, [query, scope.accountId])
+    let live = true
+    const acc = scope.accountId === 'all' ? undefined : scope.accountId
+    const h = setTimeout(() => {
+      api.search(query, acc).then((r) => { if (live) setResults(r) })
+      // Settings > Advanced > Online search: the servers too, a moment later (older mail than this computer has)
+      if (prefs.onlineSearch && query.trim().length > 2) {
+        setSearching(true)
+        api.searchOnline(query, acc).then((r) => { if (live) setResults(r) }).catch(() => {}).finally(() => { if (live) setSearching(false) })
+      }
+    }, prefs.onlineSearch ? 450 : 160)
+    return () => { live = false; clearTimeout(h); setSearching(false) }
+  }, [query, scope.accountId, prefs.onlineSearch])
 
   const list = results ?? rows
   const chosen = list.filter((r) => selected.includes(keyOf(r)))
@@ -259,6 +278,13 @@ export default function App() {
   if (!accounts.length) return <AddAccount first onDone={loadAccounts} onCancel={() => {}} />
 
   const busy = Object.values(syncing).some(Boolean)
+  // Settings > Appearance: unread, all messages or nothing next to the inbox and the other folders
+  const counter = (f: Folder) => {
+    const mode = f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter
+    if (mode === 'none') return 0
+    if (mode === 'total') return f.role === 'trash' || f.role === 'spam' ? 0 : f.total
+    return f.role === 'sent' || f.role === 'trash' || f.role === 'drafts' ? 0 : f.unread
+  }
   const accountOf = (id: string) => accounts.find((a) => a.id === id)
   const failed = outbox.filter((o) => o.status === 'failed')
   const waiting = outbox.filter((o) => o.status !== 'failed' && !o.scheduled && o.sendAt < Date.now() - 1000)
@@ -268,14 +294,17 @@ export default function App() {
     <div className={`app ${intro ? 'intro' : ''}`} style={{ ['--w-folders' as any]: `${widths.folders}px`, ['--w-list' as any]: `${widths.list}px` }}>
       <nav className="rail">
         <div className="drag" />
-        <button className={`acc all ${scope.accountId === 'all' ? 'on' : ''}`} title={t.allInboxes} onClick={() => setScope({ accountId: 'all', role: 'inbox' })}>
-          <Icon name="inbox" size={20} />
-        </button>
+        {prefs.unifiedInbox && (
+          <button className={`acc all ${scope.accountId === 'all' ? 'on' : ''}`} title={t.allInboxes} onClick={() => setScope({ accountId: 'all', role: 'inbox' })}>
+            <Icon name="inbox" size={20} />
+          </button>
+        )}
         {accounts.map((a) => (
           <button key={a.id} className={`acc ${scope.accountId === a.id ? 'on' : ''} ${a.state}`} style={{ ['--c' as any]: a.color }}
             title={`${a.email}${a.state !== 'online' ? ` · ${t[a.state as Key] || a.state}` : ''}`}
             onClick={() => setScope({ accountId: a.id, role: 'inbox' })}>
-            {initials(a.displayName || a.email)}
+            {initials(a.description || a.displayName || a.email)}
+            {prefs.accountBadges && a.unread > 0 && <span className="acc-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
           </button>
         ))}
         <button className="acc add" title={t.addAccount} onClick={() => setAdding(true)}><Icon name="plus" size={18} /></button>
@@ -300,7 +329,7 @@ export default function App() {
                 onClick={() => setScope(f.role === 'inbox' ? { accountId: f.accountId, role: 'inbox' } : { accountId: f.accountId, folderId: f.id })}>
                 <Icon name={folderIcon(f.role)} size={16} />
                 <span className="grow ellipsis">{f.role ? t[f.role as Key] : f.name}</span>
-                {f.unread > 0 && f.role !== 'sent' && f.role !== 'trash' && f.role !== 'drafts' && <span className="count">{f.unread}</span>}
+                {counter(f) > 0 && <span className={`count ${(f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter) === 'total' ? 'total' : ''}`}>{counter(f)}</span>}
               </button>
             )
           })}
@@ -321,6 +350,18 @@ export default function App() {
             <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`${t.search}  /`} />
             {query && <button onClick={() => setQuery('')}><Icon name="close" size={13} /></button>}
           </label>
+          {!results && (
+            <div className="filters">
+              {FILTERS.map(([f, icon, label]) => (
+                <button key={f} className={`tool small ${scope.filter === f ? 'on-filter' : ''}`} title={t[label]}
+                  onClick={() => setScope((s) => ({ ...s, filter: s.filter === f ? undefined : f }))}><Icon name={icon} size={15} filled={f === 'flagged' && scope.filter === f} /></button>
+              ))}
+              <span className="grow" />
+              {searching && <span className="muted small">{t.searchingServers}</span>}
+              <button className={`tool small ${scope.oldest ? 'on-filter' : ''}`} title={scope.oldest ? t.oldestFirst : t.newestFirst}
+                onClick={() => setScope((s) => ({ ...s, oldest: !s.oldest || undefined }))}><Icon name="sort" size={15} /></button>
+            </div>
+          )}
           {failed.map((o) => (
             <div key={o.id} className="outbox-bar failed">
               <span className="grow ellipsis"><b>{t.sendFailed}:</b> {o.subject || t.noSubject} ({o.error})</span>
@@ -344,7 +385,7 @@ export default function App() {
         </div>
         <div className="rows">
           {list.map((r) => (
-            <Row key={keyOf(r)} r={r} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' ? accountOf(r.accountId) : undefined}
+            <Row key={keyOf(r)} r={r} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
               prefs={prefs} onClick={(e) => click(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
           ))}
           {!list.length && (

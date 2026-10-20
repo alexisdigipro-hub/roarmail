@@ -24,6 +24,9 @@ export const LOOK_DEFAULTS = {
 export const GENERAL_DEFAULTS = {
   checkEvery: 5, newMailSound: 'system', actionSounds: false, dockBadge: 'inbox', notifyFor: 'inbox',
   downloadsFolder: '', retrySending: true, searchTrash: true, searchJunk: true,
+  language: 'auto', unifiedInbox: true, linksInBackground: false, dockMode: 'both', notifyReply: true, markRead: 'open',
+  accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
+  privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
 } as const satisfies Partial<Settings>
 
 /** a font setting as CSS: one of FONTS, or a font installed on this computer ('local:<family>') */

@@ -106,8 +106,14 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
 
   useEffect(() => {
     let live = true
-    window.roarmail.message(id).then((x) => { if (live) { setM(x); setImages(x.imagesAllowed); setBlocked(x.senderBlocked); onLoaded(x) } }).catch((e) => { if (live) setError(clean(e)) })
-    return () => { live = false }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    window.roarmail.message(id).then((x) => {
+      if (!live) return
+      setM(x); setImages(x.imagesAllowed); setBlocked(x.senderBlocked); onLoaded(x)
+      // Settings > General > Mark as read: after a few seconds open (on opening is done by the engine; never = by hand)
+      if (!x.seen && prefs.markRead === 'delay') timer = setTimeout(() => { if (live) window.roarmail.act([x.id], 'seen') }, 2500)
+    }).catch((e) => { if (live) setError(clean(e)) })
+    return () => { live = false; clearTimeout(timer) }
   }, [id])
 
   if (error) return <article className="card"><p className="error">{error}</p></article>
@@ -148,7 +154,9 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
         </div>
       )}
 
-      <Body m={m} images={images} prefs={prefs} renderBanner={(blocked) => blocked && !images ? (
+      <Body m={m} images={images && !prefs.privacyMode} prefs={prefs} renderBanner={(blocked) => blocked && prefs.privacyMode ? (
+        <div className="banner"><Icon name="shield" size={16} /> <span>{t.privacyModeOn}</span></div>
+      ) : blocked && !images ? (
         <div className="banner"><Icon name="image" size={16} /> <span>{t.images}</span>
           <button className="pill small" onClick={() => setImages(true)}>{t.showImages}</button>
           <button className="pill small ghost" onClick={() => { window.roarmail.allowImages(m.fromEmail); setImages(true) }}>{t.alwaysImages}</button>
@@ -202,7 +210,8 @@ function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: bool
     // plain text: lines quoted with > get their level, for the quote colours
     const plain = (m.text || '').split('\n').map((line) => {
       const lvl = Math.min(3, (line.match(/^(\s*>)+/)?.[0].match(/>/g) || []).length)
-      return lvl ? `<span class="q${lvl}">${escapeHtml(line)}</span>` : escapeHtml(line)
+      const html = prefs.detectLinks ? linkify(line) : escapeHtml(line)
+      return lvl ? `<span class="q${lvl}">${html}</span>` : html
     }).join('\n')
     const source = m.html || `<pre class="plain">${plain}</pre>`
     DOMPurify.removeAllHooks()
@@ -238,7 +247,7 @@ function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: bool
       body{padding:18px 22px}img{max-width:100%;height:auto}pre.plain{white-space:pre-wrap;font:inherit;margin:0}a{color:#c00000}
       ${prefs.plainMono ? `pre.plain{font-family:${mono};font-size:.92em}` : ''}${quotes}table{max-width:100%}</style>`
     return { html: css + clean, blocked, trackers }
-  }, [m, images, prefs.blockTrackers, prefs.textSize, prefs.messageFont, prefs.monoFont, prefs.plainMono, prefs.quoteColors, prefs.quote1, prefs.quote2, prefs.quote3])
+  }, [m, images, prefs.detectLinks, prefs.blockTrackers, prefs.textSize, prefs.messageFont, prefs.monoFont, prefs.plainMono, prefs.quoteColors, prefs.quote1, prefs.quote2, prefs.quote3])
 
   useEffect(() => {
     const f = frame.current
@@ -261,6 +270,7 @@ function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: bool
         if (!a) return
         e.preventDefault()
         let href = a.getAttribute('href') || ''
+        if (/^tel:/i.test(href)) { window.roarmail.openExternal(href); return }
         if (!/^(https?:|mailto:)/i.test(href)) return
         if (prefs.stripTracking) href = stripTracking(href)
         const check = checkLink(href, a.textContent || '')
@@ -301,6 +311,19 @@ function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: bool
 }
 
 const clean = (e: any) => String(e?.message || e).replace(/^.*Error:\s*/, '')
+// Settings > Advanced > Detect in messages: web links, email addresses and phone numbers in plain text
+const DETECT = /(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]]|www\.[^\s<>"]+[^\s<>".,;:!?)\]]|[\w.+-]+@[\w-]+\.[\w.-]*[a-z]{2,}|\+?\d[\d ()-]{7,}\d)/gi
+function linkify(line: string): string {
+  let out = '', last = 0
+  for (const m of line.matchAll(DETECT)) {
+    const v = m[0], i = m.index!
+    const href = /^https?:/i.test(v) ? v : /^www\./i.test(v) ? `https://${v}` : v.includes('@') ? `mailto:${v}` : `tel:${v.replace(/[^\d+]/g, '')}`
+    if (href.startsWith('tel:') && href.replace(/\D/g, '').length < 8) continue
+    out += escapeHtml(line.slice(last, i)) + `<a href="${escapeHtml(href)}">${escapeHtml(v)}</a>`
+    last = i + v.length
+  }
+  return out + escapeHtml(line.slice(last))
+}
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 
 export function initials(s: string) {
