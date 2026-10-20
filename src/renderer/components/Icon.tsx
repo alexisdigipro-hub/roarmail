@@ -1,0 +1,40 @@
+// RoarMail's own line icons (24px grid, 1.6 stroke).
+const P: Record<string, string> = {
+  compose: 'M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3zM14 7l3 3',
+  reply: 'M10 8 5 12.5l5 4.5M5 12.5h9a5 5 0 0 1 5 5V19',
+  replyAll: 'M11 8l-5 4.5 5 4.5M7 8l-5 4.5L7 17M6 12.5h8a5 5 0 0 1 5 5V19',
+  forward: 'M14 8l5 4.5-5 4.5M19 12.5h-9a5 5 0 0 0-5 5V19',
+  archive: 'M4 5h16v4H4zM5.5 9v10h13V9M10 13h4',
+  trash: 'M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10.5 11v5M13.5 11v5',
+  star: 'M12 4l2.4 5 5.4.6-4 3.7 1.1 5.3L12 16l-4.9 2.6 1.1-5.3-4-3.7 5.4-.6z',
+  dot: 'M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0',
+  search: 'M11 11m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0M20 20l-4.5-4.5',
+  refresh: 'M19 12a7 7 0 1 1-2.1-5M19 4v4h-4',
+  inbox: 'M4 13l2.5-7h11L20 13v6H4zM4 13h5l1 2h4l1-2h5',
+  sent: 'M4 12l16-8-6 16-2.5-6.5z',
+  drafts: 'M6 3h9l4 4v14H6zM14 3v5h5',
+  spam: 'M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7zM12 8v5M12 16v.5',
+  folder: 'M3.5 7V18h17V8.5h-9L9.5 6h-6z',
+  all: 'M5 6h14M5 12h14M5 18h14',
+  clip: 'M16.5 7.5 9 15a2 2 0 0 0 3 3l7.5-7.5a4 4 0 0 0-6-6L6 12a6 6 0 0 0 8.5 8.5L20 15',
+  plus: 'M12 5v14M5 12h14',
+  close: 'M6 6l12 12M18 6 6 18',
+  chevron: 'M9 6l6 6-6 6',
+  image: 'M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15.5 9.5m-1.5 0a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0',
+  download: 'M12 4v11M7 10.5 12 15l5-4.5M5 19h14',
+  more: 'M6 12h.01M12 12h.01M18 12h.01',
+  unread: 'M4 7l8 6 8-6M4 6h16v12H4z',
+}
+
+export function Icon({ name, size = 18, filled = false }: { name: keyof typeof P | string; size?: number; filled?: boolean }) {
+  return (
+    <svg className="ic" width={size} height={size} viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor"
+      strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={P[name] || P.folder} />
+    </svg>
+  )
+}
+
+export const folderIcon = (role: string | null) =>
+  role === 'inbox' ? 'inbox' : role === 'sent' ? 'sent' : role === 'drafts' ? 'drafts' : role === 'trash' ? 'trash'
+    : role === 'spam' ? 'spam' : role === 'archive' ? 'archive' : role === 'flagged' ? 'star' : role === 'all' ? 'all' : 'folder'

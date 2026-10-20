@@ -1,0 +1,69 @@
+{
+  "name": "roarmail",
+  "productName": "RoarMail",
+  "version": "0.1.0",
+  "description": "RoarMail: a desktop mail client for Mac and Windows. TheMadlions Lab, Experiment 03.",
+  "author": "THEMADLIONS",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --loader:.sql=text --outfile=dist/main.js",
+    "build:preload": "esbuild src/preload/index.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --outfile=dist/preload.js",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:preload && npm run build:renderer",
+    "start": "npm run build && electron .",
+    "postinstall": "electron-builder install-app-deps",
+    "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never && electron-builder --mac dmg --x64 --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "imapflow": "^2.5.8",
+    "mailparser": "^3.10.0",
+    "nodemailer": "^10.1.7"
+  },
+  "devDependencies": {
+    "@fontsource/jost": "^5.3.0",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "dompurify": "^3.4.17",
+    "electron": "^44.9.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^5.9.0",
+    "vite": "^7.3.7"
+  },
+  "build": {
+    "appId": "com.themadlions.roarmail",
+    "productName": "RoarMail",
+    "directories": { "output": "out", "buildResources": "build" },
+    "files": ["dist/**/*", "package.json"],
+    "asarUnpack": ["**/node_modules/better-sqlite3/**"],
+    "afterPack": "./build/adhoc-sign.js",
+    "protocols": [{ "name": "Email", "schemes": ["mailto"] }],
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "artifactName": "RoarMail-${version}-beta-Mac-${arch}.${ext}"
+    },
+    "dmg": { "artifactName": "RoarMail-${version}-beta-Mac-${arch}.${ext}", "title": "RoarMail" },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "artifactName": "RoarMail-${version}-beta-Windows-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "RoarMail"
+    }
+  }
+}

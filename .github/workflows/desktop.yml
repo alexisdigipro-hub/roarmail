@@ -1,0 +1,85 @@
+name: RoarMail desktop apps
+
+# Builds RoarMail for Mac (.dmg, Apple Silicon and Intel) and Windows (.exe) and puts them on a GitHub release,
+# whose files are the download links (and what the app's updater reads). Run it from the Actions tab
+# (Run workflow) or by pushing a tag desktop-v*.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      # GitHub's Macs sometimes fail to make a .dmg ("hdiutil: resource busy"): try up to three times
+      - if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            if npm run dist:mac > build.log 2>&1; then cat build.log; exit 0; fi
+            echo "attempt $i failed"; tail -40 build.log; hdiutil detach /Volumes/RoarMail -force || true; rm -rf out; sleep 10
+          done
+          echo "::error title=Mac build::$(tail -25 build.log | tr '\n' ' ' | cut -c1-3500)"
+          exit 1
+      - if: runner.os == 'Windows'
+        run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roarmail-${{ runner.os }}
+          path: |
+            out/*.dmg
+            out/*.exe
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: package.json
+          sparse-checkout-cone-mode: false
+      - id: v
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: files
+          merge-multiple: true
+      # a copy under a plain name too, so links like releases/latest/download/RoarMail-Mac-arm64.dmg always work
+      - run: |
+          cd files
+          for f in *; do
+            case "$f" in
+              *-Mac-arm64.dmg) cp "$f" RoarMail-Mac-arm64.dmg ;;
+              *-Mac-x64.dmg) cp "$f" RoarMail-Mac-x64.dmg ;;
+              *-Windows-Setup.exe) cp "$f" RoarMail-Windows-Setup.exe ;;
+            esac
+          done
+          ls -la
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-build-{0}', github.run_number) }}
+          name: RoarMail ${{ steps.v.outputs.version }} beta · ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build {0}', github.run_number) }}
+          make_latest: true
+          body: |
+            RoarMail ${{ steps.v.outputs.version }} beta for Mac and Windows. TheMadlions Lab, Experiment 03.
+
+            Mac with Apple Silicon (M1 to M4): RoarMail-${{ steps.v.outputs.version }}-beta-Mac-arm64.dmg · Mac with Intel: RoarMail-${{ steps.v.outputs.version }}-beta-Mac-x64.dmg · Windows: RoarMail-${{ steps.v.outputs.version }}-beta-Windows-Setup.exe
+
+            The app is not signed by Apple yet: the first time, right-click RoarMail in Applications and choose Open.
+          files: files/*
