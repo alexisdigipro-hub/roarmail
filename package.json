@@ -1,7 +1,7 @@
 {
   "name": "roarmail",
   "productName": "RoarMail",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "RoarMail: a desktop mail client for Mac and Windows. TheMadlions Lab, Experiment 03.",
   "author": "THEMADLIONS",
   "license": "UNLICENSED",
@@ -24,7 +24,12 @@
     "nodemailer": "^10.1.7"
   },
   "devDependencies": {
+    "@fontsource/dm-sans": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/jost": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.0",
     "@types/nodemailer": "^8.0.2",
@@ -42,20 +47,48 @@
   "build": {
     "appId": "com.themadlions.roarmail",
     "productName": "RoarMail",
-    "directories": { "output": "out", "buildResources": "build" },
-    "files": ["dist/**/*", "assets/**/*", "package.json"],
-    "asarUnpack": ["**/node_modules/better-sqlite3/**"],
+    "directories": {
+      "output": "out",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**"
+    ],
     "afterPack": "./build/adhoc-sign.js",
-    "protocols": [{ "name": "Email", "schemes": ["mailto"] }],
+    "protocols": [
+      {
+        "name": "Email",
+        "schemes": [
+          "mailto"
+        ]
+      }
+    ],
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.productivity",
       "identity": null,
       "artifactName": "RoarMail-${version}-beta-Mac-${arch}.${ext}"
     },
-    "dmg": { "artifactName": "RoarMail-${version}-beta-Mac-${arch}.${ext}", "title": "RoarMail" },
+    "dmg": {
+      "artifactName": "RoarMail-${version}-beta-Mac-${arch}.${ext}",
+      "title": "RoarMail"
+    },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "artifactName": "RoarMail-${version}-beta-Windows-Setup.${ext}"
     },
     "nsis": {

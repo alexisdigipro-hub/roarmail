@@ -27,6 +27,15 @@ const PREFETCH = 40
 const POLL_MS = 5 * 60e3
 const UNDO_MS = 5e3
 
+/** every setting and its default; stored as text in the settings table */
+const SETTINGS: Settings = {
+  undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive',
+  blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15,
+  runAtLogin: false, appearance: 'system',
+  theme: 'simba', accent: 'red', font: 'system', density: 'standard', radius: 12,
+  motion: true, focusRings: false, glass: true, textSize: 2, lite: false,
+}
+
 type Row = Record<string, any>
 type MoveKind = 'archive' | 'trash' | 'move' | 'delete'
 
@@ -1193,17 +1202,19 @@ export class MailService {
 
   settings(): Settings {
     const m = new Map((this.db.prepare('select key, value from settings').all() as Row[]).map((r) => [r.key, r.value]))
-    return {
-      undoSendSeconds: Math.max(0, Math.min(30, Number(m.get('undoSendSeconds') ?? 5))),
-      swipeLeft: (m.get('swipeLeft') || 'trash') as Settings['swipeLeft'],
-      swipeRight: (m.get('swipeRight') || 'archive') as Settings['swipeRight'],
-      blockTrackers: m.get('blockTrackers') !== 'false',
-      stripTracking: m.get('stripTracking') !== 'false',
-      lock: m.get('lock') === 'true',
-      lockAfter: Math.max(0, Number(m.get('lockAfter') ?? 15)),
-      appearance: (['dark', 'light'].includes(m.get('appearance')) ? m.get('appearance') : 'system') as Settings['appearance'],
-      runAtLogin: m.get('runAtLogin') === 'true',
+    const out: Record<string, unknown> = {}
+    for (const [k, def] of Object.entries(SETTINGS)) {
+      const v = m.get(k)
+      out[k] = v == null ? def : typeof def === 'boolean' ? v === 'true' : typeof def === 'number' ? (Number.isFinite(Number(v)) ? Number(v) : def) : v
     }
+    const s = out as unknown as Settings
+    s.undoSendSeconds = Math.max(0, Math.min(30, s.undoSendSeconds))
+    s.lockAfter = Math.max(0, s.lockAfter)
+    s.radius = Math.max(4, Math.min(16, s.radius))
+    s.textSize = Math.max(0, Math.min(4, s.textSize))
+    if (!['system', 'dark', 'light'].includes(s.appearance)) s.appearance = 'system'
+    if (!['simba', 'pumba'].includes(s.theme)) s.theme = 'simba'
+    return s
   }
 
   setSetting(key: keyof Settings, value: unknown) {

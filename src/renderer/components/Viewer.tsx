@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import type { Account, Address, MessageFull, MessageRow, Settings } from '../../shared/api'
 import { checkLink, isTracker, stripTracking, type LinkWarning } from '../privacy'
+import { TEXT_SIZES } from '../look'
 import { fullDate, size, t, when, type Key } from '../i18n'
 import { Icon } from './Icon'
 
@@ -213,11 +214,11 @@ function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: bool
       FORBID_ATTR: ['srcset'], ALLOW_UNKNOWN_PROTOCOLS: false, ADD_DATA_URI_TAGS: ['img'],
     }) as string
     DOMPurify.removeAllHooks()
-    const css = `<style>html,body{margin:0;padding:0;background:#fff;color:#1a1a1a;font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}
+    const css = `<style>html,body{margin:0;padding:0;background:#fff;color:#1a1a1a;font:${TEXT_SIZES[prefs.textSize] ?? 15.5}px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;word-wrap:break-word;overflow-wrap:anywhere}
       body{padding:18px 22px}img{max-width:100%;height:auto}pre.plain{white-space:pre-wrap;font:inherit;margin:0}a{color:#c00000}
       blockquote{margin:0 0 0 4px;padding-left:12px;border-left:3px solid #ddd;color:#555}table{max-width:100%}</style>`
     return { html: css + clean, blocked, trackers }
-  }, [m, images, prefs.blockTrackers])
+  }, [m, images, prefs.blockTrackers, prefs.textSize])
 
   useEffect(() => {
     const f = frame.current

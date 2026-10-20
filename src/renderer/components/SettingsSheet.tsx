@@ -1,37 +1,157 @@
-// Settings: accounts (name, colour, signature, remove), signatures, and general (undo send, swipes).
-import { useEffect, useRef, useState } from 'react'
+// Settings, laid out like RoarMe's: a list of pages on the left (icons, current values, a chevron, the lens
+// sliding to the open one), the page on the right with a big title. Appearance carries RoarMe's look settings.
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import DOMPurify from 'dompurify'
 import type { Account, LockState, Settings, Signature, SwipeAction } from '../../shared/api'
 import { t, type Key } from '../i18n'
+import { ACCENTS, FONTS, TEXT_SIZES, applyLook, revealFrom, useLens } from '../look'
 import { Icon } from './Icon'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
-type Tab = 'accounts' | 'signatures' | 'privacy' | 'general'
+type Page = 'accounts' | 'appearance' | 'signatures' | 'privacy' | 'general' | 'keys'
+const PAGES: [Page, string][] = [
+  ['accounts', 'inbox'], ['appearance', 'palette'], ['signatures', 'compose'], ['privacy', 'shield'], ['general', 'gear'], ['keys', 'keyboard'],
+]
 
-export function SettingsSheet({ accounts, onAddAccount, onClose }: { accounts: Account[]; onAddAccount: () => void; onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('accounts')
+export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
+  accounts: Account[]; onAddAccount: () => void; onClose: () => void; onLook: (s: Settings) => void
+}) {
+  const [page, setPage] = useState<Page>('accounts')
   const [sigs, setSigs] = useState<Signature[]>([])
+  const [prefs, setPrefs] = useState<Settings | null>(null)
+  const nav = useLens<HTMLDivElement>(page)
   const loadSigs = () => window.roarmail.signatures().then(setSigs)
-  useEffect(() => { loadSigs() }, [])
+  useEffect(() => { loadSigs(); window.roarmail.settings().then(setPrefs) }, [])
+
+  const value = (p: Page) => {
+    if (!prefs) return ''
+    if (p === 'accounts') return String(accounts.length)
+    if (p === 'appearance') return prefs.theme === 'pumba' ? 'Pumba' : 'Simba'
+    if (p === 'signatures') return sigs.length ? String(sigs.length) : ''
+    if (p === 'privacy') return prefs.lock ? t.appLockShort : ''
+    return ''
+  }
 
   return (
-    <div className="sheet-wrap" onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
+    <div className="sheet-wrap" onKeyDown={(e) => { if (e.key === 'Escape') onClose() }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="sheet settings">
-        <div className="settings-head">
-          <div className="tabs">
-            {(['accounts', 'signatures', 'privacy', 'general'] as Tab[]).map((k) => (
-              <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{t[k]}</button>
+        <nav className="set-side">
+          <div className="set-brand"><b>ROAR</b><i>MAIL</i></div>
+          <div className="set-list list-lens lens" ref={nav}>
+            {PAGES.map(([k, icon]) => (
+              <button key={k} className={`set-nav ${page === k ? 'on' : ''}`} onClick={() => setPage(k)}>
+                <Icon name={icon} size={17} />
+                <span className="grow">{t[k as Key]}</span>
+                <span className="set-val">{value(k)}</span>
+                <Icon name="chevron" size={13} />
+              </button>
             ))}
           </div>
-          <button className="tool" onClick={onClose} title={t.done}><Icon name="close" /></button>
-        </div>
-        <div className="settings-body">
-          {tab === 'accounts' && <Accounts accounts={accounts} sigs={sigs} onAdd={onAddAccount} />}
-          {tab === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
-          {tab === 'privacy' && <Privacy />}
-          {tab === 'general' && <General />}
+        </nav>
+        <section className="set-page" key={page}>
+          <div className="set-head">
+            <h2>{t[page as Key]}</h2>
+            <button className="tool" onClick={onClose} title={t.done}><Icon name="close" /></button>
+          </div>
+          <div className="settings-body">
+            {page === 'accounts' && <Accounts accounts={accounts} sigs={sigs} onAdd={onAddAccount} />}
+            {page === 'appearance' && prefs && <Appearance s={prefs} onChange={(n) => { setPrefs(n); applyLook(n); onLook(n) }} />}
+            {page === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
+            {page === 'privacy' && <Privacy />}
+            {page === 'general' && <General />}
+            {page === 'keys' && <Shortcuts />}
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+/** RoarMe's Appearance page: theme, day and night, accent, font, spacing, corners, text size, motion and the rest */
+function Appearance({ s, onChange }: { s: Settings; onChange: (s: Settings) => void }) {
+  const set = <K extends keyof Settings>(k: K, v: Settings[K], e?: MouseEvent) => {
+    const next = { ...s, [k]: v }
+    window.roarmail.setSetting(k, v)
+    if (e && (k === 'appearance' || k === 'theme')) revealFrom(e, () => onChange(next)); else onChange(next)
+  }
+  const modes: [Settings['appearance'], string][] = [['system', t.ap_auto], ['dark', t.ap_dark], ['light', t.ap_light]]
+  const dens: [Settings['density'], string][] = [['relaxed', t.den_relaxed], ['standard', t.den_standard], ['tight', t.den_tight]]
+  const themeSeg = useLens<HTMLDivElement>(s.theme)
+  const modeSeg = useLens<HTMLDivElement>(s.appearance)
+  const denSeg = useLens<HTMLDivElement>(s.density)
+  return (
+    <div className="stack">
+      <div className="set-preview">
+        <div className="msg on"><div className="avatar" style={{ background: 'hsl(20 45% 38%)' }}>ΜΠ</div>
+          <div className="msg-body"><div className="row"><i className="dot" /><b className="grow">Μαρία Παπαδοπούλου</b><span className="count">2</span><span className="muted small">10:24</span></div>
+            <div className="subj">{t.previewSubject}</div><div className="snip muted">{t.previewText}</div></div></div>
+        <div className="row"><button className="pill primary small">{t.send}</button><button className="pill small">{t.reply}</button></div>
+      </div>
+
+      <div className="set-row"><span>{t.theme}</span>
+        <div className="theme-tiles seg lens" ref={themeSeg}>
+          {(['simba', 'pumba'] as const).map((th) => (
+            <button key={th} className={`theme-tile ${th} ${s.theme === th ? 'on' : ''}`} onClick={(e) => set('theme', th, e)}>
+              <i className="tile-art" /><span>{th === 'simba' ? 'Simba' : 'Pumba'}</span>
+            </button>
+          ))}
         </div>
       </div>
+      <div className="set-row"><span>{t.dayNight}</span>
+        <div className="seg lens" ref={modeSeg}>
+          {modes.map(([k, label]) => <button key={k} className={s.appearance === k ? 'on' : ''} onClick={(e) => set('appearance', k, e)}>{label}</button>)}
+        </div>
+      </div>
+      <div className="set-row"><span>{t.accent}</span>
+        <div className="accents">
+          <button className={`accent-dot theme-own ${!s.accent ? 'on' : ''}`} title={t.themeColor} onClick={() => set('accent', '')} />
+          {ACCENTS.map(([k, label, hex]) => (
+            <button key={k} className={`accent-dot ${s.accent === k ? 'on' : ''} ${k === 'white' ? 'white' : ''}`} title={label} style={{ ['--c' as any]: hex }} onClick={() => set('accent', k)} />
+          ))}
+        </div>
+      </div>
+      <div className="set-row"><span>{t.font}</span>
+        <select value={s.font} onChange={(e) => set('font', e.target.value as Settings['font'])}>
+          {FONTS.map(([k, label, fam]) => <option key={k} value={k} style={{ fontFamily: fam }}>{label}</option>)}
+        </select>
+      </div>
+      <div className="set-row"><span>{t.density}</span>
+        <div className="seg lens" ref={denSeg}>
+          {dens.map(([k, label]) => <button key={k} className={s.density === k ? 'on' : ''} onClick={() => set('density', k)}>{label}</button>)}
+        </div>
+      </div>
+      <div className="set-row"><span>{t.corners} <b className="muted">{s.radius}px</b></span>
+        <input type="range" min={4} max={16} step={2} value={s.radius} onChange={(e) => set('radius', Number(e.target.value))} />
+      </div>
+      <div className="set-row"><span>{t.textSize} <b className="muted">{TEXT_SIZES[s.textSize]}px</b></span>
+        <input type="range" min={0} max={4} step={1} value={s.textSize} onChange={(e) => set('textSize', Number(e.target.value))} />
+      </div>
+      <Toggle label={t.motion} hint={t.motionHint} on={s.motion} set={(v) => set('motion', v)} />
+      <Toggle label={t.glassLook} hint={t.glassHint} on={s.glass} set={(v) => set('glass', v)} />
+      <Toggle label={t.focusRings} hint={t.focusHint} on={s.focusRings} set={(v) => set('focusRings', v)} />
+      <Toggle label={t.lite} hint={t.liteHint} on={s.lite} set={(v) => set('lite', v)} />
+    </div>
+  )
+}
+
+export function Toggle({ label, hint, on, set, disabled }: { label: string; hint?: string; on: boolean; set: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <label className={`toggle ${disabled ? 'off' : ''}`}>
+      <span className="grow"><b>{label}</b>{hint && <small className="muted">{hint}</small>}</span>
+      <span className="switch"><input type="checkbox" checked={on} disabled={disabled} onChange={(e) => set(e.target.checked)} /><i /></span>
+    </label>
+  )
+}
+
+function Shortcuts() {
+  const rows: [string, Key][] = [
+    ['C', 'compose'], ['R', 'reply'], ['A', 'replyAll'], ['F', 'forward'], ['E', 'archiveIt'], ['#', 'trashIt'], ['M', 'moveTo'],
+    ['B', 'snoozeIt'], ['S', 'flag'], ['U', 'markUnread'], ['Z', 'undo'], ['/', 'search'], ['J / ↓', 'nextMsg'], ['K / ↑', 'prevMsg'],
+    ['⌘A', 'selectAll'], ['⌘↵', 'send'], ['Esc', 'cancel'],
+  ]
+  return (
+    <div className="keys">
+      {rows.map(([k, label]) => <div className="key-row" key={k}><kbd>{k}</kbd><span>{t[label]}</span></div>)}
     </div>
   )
 }
@@ -122,12 +242,7 @@ function General() {
   const swipes: SwipeAction[] = ['archive', 'trash', 'snooze', 'flag', 'seen', 'none']
   return (
     <div className="stack">
-      <label>{t.appearance}
-        <select value={s.appearance} onChange={(e) => set('appearance', e.target.value as Settings['appearance'])}>
-          <option value="system">{t.ap_system}</option><option value="dark">{t.ap_dark}</option><option value="light">{t.ap_light}</option>
-        </select>
-      </label>
-      <label className="check"><input type="checkbox" checked={s.runAtLogin} onChange={(e) => set('runAtLogin', e.target.checked)} />{t.runAtLogin}</label>
+      <Toggle label={t.runAtLoginShort} hint={t.runAtLogin} on={s.runAtLogin} set={(v) => set('runAtLogin', v)} />
       <label>{t.undoSend}
         <select value={s.undoSendSeconds} onChange={(e) => set('undoSendSeconds', Number(e.target.value))}>
           {[0, 5, 10, 20, 30].map((n) => <option key={n} value={n}>{n ? `${n} ${t.seconds}` : t.off}</option>)}
@@ -143,7 +258,6 @@ function General() {
           {swipes.map((w) => <option key={w} value={w}>{t[`sw_${w}` as Key]}</option>)}
         </select>
       </label>
-      <p className="muted small">{t.shortcuts}</p>
     </div>
   )
 }
@@ -161,8 +275,8 @@ function Privacy() {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => { setS({ ...s, [k]: v }); window.roarmail.setSetting(k, v) }
   return (
     <div className="stack">
-      <label className="check"><input type="checkbox" checked={s.blockTrackers} onChange={(e) => set('blockTrackers', e.target.checked)} />{t.blockTrackers}</label>
-      <label className="check"><input type="checkbox" checked={s.stripTracking} onChange={(e) => set('stripTracking', e.target.checked)} />{t.stripTracking}</label>
+      <Toggle label={t.blockTrackersShort} hint={t.blockTrackers} on={s.blockTrackers} set={(v) => set('blockTrackers', v)} />
+      <Toggle label={t.stripTrackingShort} hint={t.stripTracking} on={s.stripTracking} set={(v) => set('stripTracking', v)} />
 
       <div className="panel">
         <label className="check"><input type="checkbox" disabled={!lock.available} checked={s.lock && lock.available} onChange={(e) => set('lock', e.target.checked)} />

@@ -1,8 +1,6 @@
-/* RoarMail, in the THEMADLIONS family look (RoarMe "Lions"): near-black graphite, Jost, Rosso Corsa #d40000,
-   panels as soft tiles with a hairline, controls as pills. Light follows the system. */
 /* RoarMail wears RoarMe's main theme, Simba (RoarMe "ember" in red, Alex 20 Oct): graphite glass panels that float
    on a soft graphite backdrop, one red accent that glows, the chosen thing lit from inside, 12px corners,
-   the system font for reading and Jost only for the wordmark. Light follows the system. */
+   the system font for reading and Jost only for the wordmark. Pumba and the look settings: look.css. */
 :root {
   --bg: #1b1e23; --panel: rgba(44, 49, 57, .62); --panel-2: rgba(52, 58, 67, .92); --panel-3: rgba(64, 70, 80, .95);
   --side: rgba(58, 64, 74, .55);
@@ -24,8 +22,7 @@
   --top: 40px;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) {
-  :root {
+html[data-mode='light'] {
     --bg: #eceef1; --panel: rgba(255, 255, 255, .62); --panel-2: rgba(255, 255, 255, .96); --panel-3: #ffffff;
     --side: rgba(255, 255, 255, .5);
     --glass: rgba(20, 24, 30, .045); --glass-2: rgba(20, 24, 30, .08);
@@ -36,7 +33,7 @@
     --float: rgba(255, 255, 255, .97);
     color-scheme: light;
   }
-}
+
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -284,9 +281,8 @@ iframe.body { display: block; width: 100%; border: 0; border-radius: 14px; backg
 /* =====================================================================
    Simba (RoarMe's main theme): the columns float as glass cards on the graphite backdrop
    ===================================================================== */
-@media (prefers-color-scheme: light) {
-  body { background: radial-gradient(1200px 700px at 50% -12%, #ffffff 0%, transparent 62%), linear-gradient(180deg, #f1f2f4 0%, #e3e6ea 100%); }
-}
+html[data-mode='light'] body { background: radial-gradient(1200px 700px at 50% -12%, #ffffff 0%, transparent 62%), linear-gradient(180deg, #f1f2f4 0%, #e3e6ea 100%); }
+
 body::before {
   content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background: radial-gradient(520px 420px at 82% 88%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 70%),
@@ -355,11 +351,10 @@ body::before {
 .swatch.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
 iframe.body { border-radius: var(--r); }
 .list-foot { border-top-color: var(--edge); }
-@media (prefers-color-scheme: light) {
-  .tabs { background: rgba(20, 24, 30, .06); }
-  .acc.all { background: linear-gradient(135deg, #d8dce2, #b9bfc8); color: #1b1f25; }
-  .sheet-wrap { background: rgba(40, 46, 56, .25); }
-}
+html[data-mode='light'] .tabs { background: rgba(20, 24, 30, .06); }
+html[data-mode='light'] .acc.all { background: linear-gradient(135deg, #d8dce2, #b9bfc8); color: #1b1f25; }
+html[data-mode='light'] .sheet-wrap { background: rgba(40, 46, 56, .25); }
+
 
 /* ---------- privacy: trackers, links, sender checks, lock ---------- */
 .shield { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; padding: 4px 10px; border-radius: 999px; font-size: 12px;

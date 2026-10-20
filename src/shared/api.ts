@@ -129,6 +129,22 @@ export interface Settings {
   runAtLogin: boolean
   /** follow the system, or always dark / always light */
   appearance: 'system' | 'dark' | 'light'
+  // the look, as in RoarMe's Settings > Appearance
+  theme: 'simba' | 'pumba'
+  /** a key of ACCENTS, or '' for the theme's own colour */
+  accent: string
+  font: 'system' | 'inter' | 'manrope' | 'dmsans' | 'grotesk' | 'serif' | 'mono'
+  density: 'relaxed' | 'standard' | 'tight'
+  /** corner radius in px, 4 to 16 */
+  radius: number
+  motion: boolean
+  focusRings: boolean
+  /** glass panels with blur, or solid */
+  glass: boolean
+  /** reading text size, 0 to 4 */
+  textSize: number
+  /** power saving: no blur, no animation */
+  lite: boolean
 }
 
 export interface LockState { available: boolean; enabled: boolean; locked: boolean; method: 'touchid' | 'none' }

@@ -1,4 +1,5 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
+import { LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListScope, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
 import { t, when, type Key } from './i18n'
@@ -34,12 +35,14 @@ export default function App() {
   const [showScheduled, setShowScheduled] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
   const [outbox, setOutbox] = useState<OutboxItem[]>([])
-  const [prefs, setPrefs] = useState<Settings>({ undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false })
+  const [prefs, setPrefs] = useState<Settings>({ ...LOOK_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false })
   const [locked, setLocked] = useState(false)
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
   const [update, setUpdate] = useState<{ status: string; version: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const scopeRef = useRef(scope); scopeRef.current = scope
+  const [intro, setIntro] = useState(true)
+  const folderLens = useLens<HTMLDivElement>(`${scope.accountId}|${scope.folderId || ''}|${scope.role || ''}|${folders.length}`)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const loadAccounts = useCallback(() => api.accounts().then(setAccounts), [])
@@ -59,6 +62,8 @@ export default function App() {
 
   useEffect(() => { api.lockState().then((l) => { setLocked(l.locked); if (!l.locked) { loadAccounts(); loadOutbox(); api.settings().then(setPrefs) } }) }, [])
   useEffect(() => { loadFolders(); loadRows(); setSelected([]) }, [scope])
+  // RoarMe's opening: the side from the left, the rows in turn, the reader rising (once)
+  useEffect(() => { const h = setTimeout(() => setIntro(false), 1600); return () => clearTimeout(h) }, [])
   useEffect(() => api.on((e) => {
     if (e.type === 'accounts') loadAccounts()
     if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) loadFolders()
@@ -243,7 +248,7 @@ export default function App() {
   const later = outbox.filter((o) => o.status !== 'failed' && o.scheduled)
 
   return (
-    <div className="app">
+    <div className={`app ${intro ? 'intro' : ''}`}>
       <nav className="rail">
         <div className="drag" />
         <button className={`acc all ${scope.accountId === 'all' ? 'on' : ''}`} title={t.allInboxes} onClick={() => setScope({ accountId: 'all', role: 'inbox' })}>
@@ -269,6 +274,7 @@ export default function App() {
             <b>{accountOf(scope.accountId)?.displayName || accountOf(scope.accountId)?.email.split('@')[0]}</b>
             <span className="muted small">{accountOf(scope.accountId)?.email}</span>
           </div>
+          <div className="folder-list list-lens lens" ref={folderLens}>
           {folders.map((f) => {
             const on = scope.folderId ? scope.folderId === f.id : f.role === 'inbox'
             return (
@@ -280,6 +286,7 @@ export default function App() {
               </button>
             )
           })}
+          </div>
         </aside>
       )}
 
@@ -361,7 +368,7 @@ export default function App() {
         <button className="update pill primary" onClick={() => api.update.install()}>{t.updateReady} {update.version} · {t.restart}</button>
       )}
       {adding && <AddAccount first={false} onDone={() => { setAdding(false); loadAccounts() }} onCancel={() => setAdding(false)} />}
-      {settingsOpen && <SettingsSheet accounts={accounts} onAddAccount={() => setAdding(true)} onClose={() => { setSettingsOpen(false); api.settings().then(setPrefs) }} />}
+      {settingsOpen && <SettingsSheet accounts={accounts} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}
       {moving && (
         <MovePicker accountId={moving.accountId} exclude={moving.exclude} onClose={() => setMoving(null)}
           onPick={(fid) => { const targets = list.filter((r) => moving.ids.includes(keyOf(r))); setMoving(null); act(targets, 'move', fid) }} />

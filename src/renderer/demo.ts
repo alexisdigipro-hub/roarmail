@@ -1,5 +1,6 @@
 // The web demo (themadlions.com/roarmail): the same screens over a MailApi that lives in memory, filled with
 // sample mail. Nothing connects anywhere and nothing is kept; it shows the app and how it feels.
+import { LOOK_DEFAULTS } from './look'
 import type {
   Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailApi, MailEvent, MessageFull, MessageRow, OutboxItem,
   Settings, Signature, SnoozedItem,
@@ -70,7 +71,7 @@ const msgs: DemoMsg[] = [
 ]
 
 const sigs: Signature[] = [{ id: 's1', name: 'THEMADLIONS', html: '<b>Alex Konstantinidis</b><br>THEMADLIONS · themadlions.com' }]
-let settings: Settings = { undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false }
+let settings: Settings = { ...LOOK_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false }
 const outbox: (OutboxItem & { draft: Draft })[] = []
 const snoozes: (SnoozedItem & { msgId: string; origin: string; timer?: ReturnType<typeof setTimeout> })[] = []
 const pending = new Map<string, { ids: string[]; from: Map<string, string>; timer: ReturnType<typeof setTimeout> }>()
