@@ -339,3 +339,69 @@ small.block { display: block; margin-top: 2px; font-size: 12px; }
 .update-panel p { margin: 0; }
 .update-bar { height: 6px; border-radius: 6px; background: var(--glass-2); overflow: hidden; }
 .update-bar i { display: block; height: 100%; background: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); transition: width .3s; }
+
+/* account pictures: in the rail and in Settings > Accounts */
+.acc-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+.avatar-row { align-items: center; gap: 14px; }
+.big-acc { width: 56px; height: 56px; flex: none; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 600; overflow: hidden; }
+
+/* ---------- the writing window (21 Oct 2026): tools in the head, Apple Mail's format bar, a corner to resize ---------- */
+.composer { max-width: 100%; max-height: 100%; }
+.composer-head { gap: 4px; }
+.composer-tools { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); }
+.composer-tools .tool { width: 32px; height: 32px; }
+.composer-tools .tool.on-filter, .rt-btn:hover { color: var(--accent-2); }
+.composer-head .sep { height: 18px; }
+.field .sig-pick { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; flex: none; }
+.field .sig-pick select { flex: none; width: 170px; height: 28px; padding: 0 8px; border-radius: var(--r); background: var(--field); box-shadow: inset 0 0 0 1px var(--edge); }
+.field select.priority { flex: none; width: 112px; height: 28px; padding: 0 8px; border-radius: var(--r); background: var(--field); box-shadow: inset 0 0 0 1px var(--edge); font-size: 12.5px; }
+.field select.priority.high { color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+.fmt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 22px; padding: 8px 0; border-bottom: 1px solid var(--edge); }
+.fmt-bar select { height: 28px; padding: 0 8px; border: 0; border-radius: var(--r); background: var(--field); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge); font-size: 12.5px; max-width: 130px; }
+.fmt-bar select.narrow { max-width: 74px; }
+.fmt-bar .fmt { min-width: 28px; height: 28px; padding: 0 6px; border-radius: var(--r); display: inline-grid; place-items: center; color: var(--text); font-size: 13.5px; }
+.fmt-bar .fmt:hover { background: var(--glass-2); }
+.fmt-bar .sep { height: 18px; margin: 0 4px; }
+.swatch-pick { display: inline-flex; margin: 0; width: 28px; height: 28px; border-radius: var(--r); overflow: hidden; box-shadow: inset 0 0 0 1px var(--edge-2); cursor: pointer; }
+.swatch-pick input { width: 40px; height: 40px; margin: -6px; border: 0; padding: 0; background: none; cursor: pointer; }
+.editor h1 { font-size: 26px; margin: .3em 0; } .editor h2 { font-size: 21px; margin: .3em 0; } .editor h3 { font-size: 17px; margin: .3em 0; }
+.editor blockquote { margin: 0 0 0 4px; padding-left: 12px; border-left: 3px solid var(--edge-2); color: var(--muted); }
+.editor pre { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+/* the remind-me menu in the foot sat on two lines (a sheet's labels are columns) */
+.sheet label.remind { flex-direction: row; align-items: center; margin: 0; font-size: inherit; }
+.composer-resize { position: absolute; right: 2px; bottom: 2px; width: 18px; height: 18px; cursor: nwse-resize; z-index: 5; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--edge-2) 50%, var(--edge-2) 58%, transparent 58%, transparent 70%, var(--edge-2) 70%, var(--edge-2) 78%, transparent 78%); border-bottom-right-radius: 14px; opacity: .8; }
+.composer-resize:hover { opacity: 1; }
+
+/* the filter bar's pop-overs (calendar, sort) and the chips of what is filtered */
+.filters { position: relative; }
+.filters .tool:disabled { opacity: .35; cursor: default; }
+.pop { position: absolute; top: 34px; z-index: 30; padding: 8px; border-radius: var(--r); background: var(--float); box-shadow: var(--shadow), inset 0 0 0 1px var(--edge-2);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); animation: rm-slide-in .25s var(--ease, ease) both; }
+.day-pop { left: 80px; display: flex; flex-direction: column; gap: 8px; }
+.day-pop input { height: 34px; padding: 0 10px; border: 0; border-radius: var(--r); background: var(--field); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge); color-scheme: inherit; }
+.sort-pop { left: 110px; min-width: 210px; display: flex; flex-direction: column; }
+.sort-pop button { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; text-align: left; color: var(--text); font-size: 13px; }
+.sort-pop button:hover { background: var(--glass-2); }
+.sort-pop .check { width: 14px; color: var(--accent-2); }
+.sort-pop hr { width: 100%; border: 0; border-top: 1px solid var(--edge); margin: 6px 0; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip.on-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12px; color: var(--accent-2); background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+
+/* Alex's favourite (21 Oct 2026): a dark glass capsule with round buttons inside, for groups of tools */
+.pill-group, .composer-tools { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-3) 70%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), inset 0 0 0 1px var(--edge-2), 0 6px 18px rgba(0, 0, 0, .25);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.pill-group .tool, .composer-tools .tool { width: 30px; height: 30px; border-radius: 50%; color: var(--text); opacity: .85; }
+.pill-group .tool:hover, .composer-tools .tool:hover { opacity: 1; background: var(--glass-2); }
+.pill-group .tool.on-filter, .composer-tools .tool.on-filter { opacity: 1; color: #fff; background: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent); }
+html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { background: rgba(255, 255, 255, .7); }
+.composer-tools .sep { height: 16px; margin: 0 3px; }
+/* the sheet's own inputs are tall; the format bar and the reminder menu stay compact */
+.sheet .fmt-bar select { height: 28px; min-height: 0; padding: 0 6px; font-size: 12.5px; width: auto; }
+.sheet .fmt-bar select:nth-of-type(1) { width: 104px; } .sheet .fmt-bar select:nth-of-type(2) { width: 132px; } .sheet .fmt-bar select:nth-of-type(3) { width: 72px; }
+.sheet .fmt-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.sheet .fmt-bar .fmt { flex: none; }
+.sheet label.remind select { height: 30px; min-height: 0; padding: 0 6px; width: auto; max-width: 220px; background: none; box-shadow: none; }
+.sheet .field select.priority, .sheet .field .sig-pick select { height: 28px; min-height: 0; }
+.acct-name b.plain-case { text-transform: none; }

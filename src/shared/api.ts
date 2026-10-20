@@ -43,6 +43,8 @@ export interface Account {
   junkDays: number
   /** unread in this account's inbox (the number on its icon in the rail) */
   unread: number
+  /** the account's picture (a small PNG data URL), shown in the rail; null = its initials */
+  avatar: string | null
 }
 
 export interface Alias { id: string; email: string; name: string }
@@ -52,6 +54,8 @@ export interface AccountPatch {
   displayName?: string; color?: string; signatureId?: string | null
   enabled?: boolean; description?: string; attachments?: Account['attachments']
   roles?: Account['roles']; trashDays?: number; junkDays?: number
+  /** null removes the picture */
+  avatar?: null
 }
 
 export interface Folder {
@@ -118,10 +122,17 @@ export interface ListScope {
   accountId: string | 'all'; folderId?: string; role?: FolderRole
   /** the filter buttons above the list (Airmail's): only unread, starred, with attachments, or from today */
   filter?: ListFilter
-  /** newest first (default) or oldest first */
+  /** newest first (default) or oldest first; with another sort, reversed */
   oldest?: boolean
+  /** Airmail's sort menu: by date (default), sender, subject, unread first, attachments first, account */
+  sort?: ListSort
+  /** the calendar button: only mail from this day (any time in it) */
+  day?: number
+  /** the person button: all mail from or to this address, in every folder but Trash and Junk */
+  person?: string
 }
-export type ListFilter = 'unread' | 'flagged' | 'attachments' | 'today'
+export type ListFilter = 'unread' | 'flagged' | 'attachments' | 'today' | 'threads'
+export type ListSort = 'date' | 'sender' | 'subject' | 'unread' | 'attachments' | 'account'
 
 export interface Draft {
   /** local draft id, set once saved */
@@ -138,6 +149,8 @@ export interface Draft {
   replyToMessageId?: string
   /** an alias of the account to send as (identities); none = the account's own address */
   identityId?: string
+  /** the ! next to the subject: sent as the X-Priority / Importance headers */
+  priority?: 'high' | 'normal' | 'low'
   /** the server draft (a message in Drafts) this one replaces */
   replacesMessageId?: string
   attachments?: string[] // local file paths
@@ -307,6 +320,12 @@ export interface MailApi {
   removeAlias(id: string): Promise<void>
   /** every folder of an account, for the role pickers (hidden ones too) */
   serverFolders(accountId: string): Promise<{ path: string; name: string }[]>
+  /** asks for an image, makes it a round-ready square and keeps it as the account's picture; false = cancelled */
+  pickAvatar(accountId: string): Promise<boolean>
+  /** the system's emoji picker, typing into the focused field (Mac and Windows) */
+  emojiPanel(): Promise<void>
+  /** the unified folders (All Inboxes, All Sent, All Trash…): every switched-on account's folder of that role together */
+  unifiedFolders(): Promise<Folder[]>
   /** RoarMail as the computer's mail app (mailto: links) */
   isDefaultMail(): Promise<boolean>
   makeDefaultMail(): Promise<boolean>

@@ -1,7 +1,7 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
-import type { Account, Action, Folder, ListFilter, ListScope, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
+import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
 import { Icon, folderIcon } from './components/Icon'
 import { AddAccount } from './components/AddAccount'
@@ -18,7 +18,10 @@ import { actionSound, playNewMail, setActionSounds } from './sounds'
 const api = window.roarmail
 const keyOf = (r: MessageRow) => r.threadId || r.id
 // the filter buttons above the list, like Airmail's
-const FILTERS: [ListFilter, string, Key][] = [['unread', 'unread', 'fl_unread'], ['flagged', 'star', 'fl_flagged'], ['attachments', 'clip', 'fl_attachments'], ['today', 'calendar', 'fl_today']]
+const FILTERS: [ListFilter, string, Key][] = [['unread', 'unread', 'fl_unread'], ['flagged', 'star', 'fl_flagged'], ['attachments', 'clip', 'fl_attachments'], ['threads', 'chat', 'fl_threads']]
+// Airmail's sort menu
+const SORTS: [ListSort, Key][] = [['date', 'so_date'], ['sender', 'so_sender'], ['subject', 'so_subject'], ['unread', 'so_unread'], ['attachments', 'so_attachments'], ['account', 'so_account']]
+const dayKey = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const clean = (e: any) => String(e?.message || e).replace(/^.*Error:\s*/, '')
 
 interface Toast { text: string; undo?: () => void; ms?: number }
@@ -33,6 +36,9 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<MessageRow[] | null>(null)
   const [searching, setSearching] = useState(false)
+  // the calendar and sort pop-overs of the filter bar
+  const [pop, setPop] = useState<'day' | 'sort' | null>(null)
+  const [dayPick, setDayPick] = useState('')
   const [adding, setAdding] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [compose, setCompose] = useState<ComposeSeed | null>(null)
@@ -57,7 +63,7 @@ export default function App() {
   const loadAccounts = useCallback(() => api.accounts().then(setAccounts), [])
   const loadFolders = useCallback(() => {
     const s = scopeRef.current
-    if (s.accountId === 'all') setFolders([])
+    if (s.accountId === 'all') api.unifiedFolders().then(setFolders)
     else api.folders(s.accountId).then(setFolders)
   }, [])
   const loadRows = useCallback(() => api.messages(scopeRef.current).then(setRows), [])
@@ -268,10 +274,11 @@ export default function App() {
 
   const title = useMemo(() => {
     if (results) return t.searchResults
+    if (scope.person) return list[0] ? (list.find((r) => r.fromEmail === scope.person)?.fromName || scope.person) : scope.person
     if (scope.folderId) { const f = folders.find((x) => x.id === scope.folderId); return f ? (f.role ? t[f.role as Key] : f.name) : '' }
-    if (scope.accountId === 'all') return t.allInboxes
+    if (scope.accountId === 'all') return t[`all_${scope.role || 'inbox'}` as Key] || t.allInboxes
     return t.inbox
-  }, [scope, folders, results])
+  }, [scope, folders, results, list])
 
   if (locked) return <LockScreen />
   if (!accounts) return <div className="boot"><div className="spinner" /></div>
@@ -303,7 +310,7 @@ export default function App() {
           <button key={a.id} className={`acc ${scope.accountId === a.id ? 'on' : ''} ${a.state}`} style={{ ['--c' as any]: a.color }}
             title={`${a.email}${a.state !== 'online' ? ` · ${t[a.state as Key] || a.state}` : ''}`}
             onClick={() => setScope({ accountId: a.id, role: 'inbox' })}>
-            {initials(a.description || a.displayName || a.email)}
+            {a.avatar ? <img className="acc-img" src={a.avatar} alt="" /> : initials(a.description || a.displayName || a.email)}
             {prefs.accountBadges && a.unread > 0 && <span className="acc-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
           </button>
         ))}
@@ -314,6 +321,25 @@ export default function App() {
         <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
       </nav>
 
+      {scope.accountId === 'all' && (
+        <aside className="folders">
+          <div className="drag" />
+          <div className="acct-name">
+            <b className="plain-case">{t.allAccounts}</b>
+            <span className="muted small">{accounts.length} {t.accounts.toLowerCase()}</span>
+          </div>
+          <div className="folder-list list-lens lens" ref={folderLens}>
+          {folders.map((f) => (
+            <button key={f.id} className={`folder ${scope.role === f.role ? 'on' : ''}`} style={{ paddingLeft: 14 }}
+              onClick={() => setScope({ accountId: 'all', role: f.role! })}>
+              <Icon name={folderIcon(f.role)} size={16} />
+              <span className="grow ellipsis">{t[`all_${f.role}` as Key] || t[f.role as Key]}</span>
+              {counter(f) > 0 && <span className={`count ${(f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter) === 'total' ? 'total' : ''}`}>{counter(f)}</span>}
+            </button>
+          ))}
+          </div>
+        </aside>
+      )}
       {scope.accountId !== 'all' && (
         <aside className="folders">
           <div className="drag" />
@@ -336,7 +362,7 @@ export default function App() {
           </div>
         </aside>
       )}
-      {scope.accountId !== 'all' && <Splitter col="folders" width={widths.folders} onChange={setWidth} title={t.resizeCol} />}
+      {<Splitter col="folders" width={widths.folders} onChange={setWidth} title={t.resizeCol} />}
 
       <section className="list">
         <div className="list-head">
@@ -350,18 +376,54 @@ export default function App() {
             <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`${t.search}  /`} />
             {query && <button onClick={() => setQuery('')}><Icon name="close" size={13} /></button>}
           </label>
-          {!results && (
+          {!results && (<>
             <div className="filters">
+              <div className="pill-group">
               {FILTERS.map(([f, icon, label]) => (
                 <button key={f} className={`tool small ${scope.filter === f ? 'on-filter' : ''}`} title={t[label]}
                   onClick={() => setScope((s) => ({ ...s, filter: s.filter === f ? undefined : f }))}><Icon name={icon} size={15} filled={f === 'flagged' && scope.filter === f} /></button>
               ))}
+              <button className={`tool small ${scope.day ? 'on-filter' : ''}`} title={t.fl_day}
+                onClick={() => { setDayPick(dayKey(scope.day || Date.now())); setPop(pop === 'day' ? null : 'day') }}><Icon name="calendar" size={15} /></button>
+              <button className={`tool small ${scope.sort && scope.sort !== 'date' || scope.oldest ? 'on-filter' : ''}`} title={t.fl_sort}
+                onClick={() => setPop(pop === 'sort' ? null : 'sort')}><Icon name="sort" size={15} /></button>
+              <button className={`tool small ${scope.person ? 'on-filter' : ''}`} disabled={!scope.person && !current}
+                title={scope.person ? `${t.fl_personOff}` : current ? `${t.fl_person} ${current.fromName || current.fromEmail}` : t.fl_personHint}
+                onClick={() => setScope((s) => ({ ...s, person: s.person ? undefined : current?.fromEmail }))}><Icon name="target" size={15} /></button>
+              </div>
               <span className="grow" />
               {searching && <span className="muted small">{t.searchingServers}</span>}
-              <button className={`tool small ${scope.oldest ? 'on-filter' : ''}`} title={scope.oldest ? t.oldestFirst : t.newestFirst}
-                onClick={() => setScope((s) => ({ ...s, oldest: !s.oldest || undefined }))}><Icon name="sort" size={15} /></button>
+              {pop === 'day' && (
+                <div className="pop day-pop" onKeyDown={(e) => { if (e.key === 'Escape') setPop(null) }}>
+                  <input type="date" value={dayPick} autoFocus onChange={(e) => setDayPick(e.target.value)} />
+                  <div className="row end">
+                    <button className="pill small ghost" onClick={() => { setScope((s) => ({ ...s, day: undefined })); setPop(null) }}>{t.fl_none}</button>
+                    <button className="pill small primary" disabled={!dayPick} onClick={() => {
+                      const [y, mo, d] = dayPick.split('-').map(Number)
+                      setScope((s) => ({ ...s, day: new Date(y, mo - 1, d).getTime() })); setPop(null)
+                    }}>{t.fl_apply}</button>
+                  </div>
+                </div>
+              )}
+              {pop === 'sort' && (
+                <div className="pop sort-pop">
+                  {SORTS.map(([k, label]) => (
+                    <button key={k} className={(scope.sort || 'date') === k ? 'on' : ''} onClick={() => { setScope((s) => ({ ...s, sort: k === 'date' ? undefined : k })); setPop(null) }}>
+                      <span className="check">{(scope.sort || 'date') === k ? '✓' : ''}</span>{t[label]}</button>
+                  ))}
+                  <hr />
+                  <button className={!scope.oldest ? 'on' : ''} onClick={() => { setScope((s) => ({ ...s, oldest: undefined })); setPop(null) }}><span className="check">{!scope.oldest ? '✓' : ''}</span>{t.so_desc}</button>
+                  <button className={scope.oldest ? 'on' : ''} onClick={() => { setScope((s) => ({ ...s, oldest: true })); setPop(null) }}><span className="check">{scope.oldest ? '✓' : ''}</span>{t.so_asc}</button>
+                </div>
+              )}
             </div>
-          )}
+            {(scope.person || scope.day) && (
+              <div className="filter-chips">
+                {scope.person && <button className="chip on-chip" onClick={() => setScope((s) => ({ ...s, person: undefined }))}><Icon name="target" size={12} /> {scope.person} <Icon name="close" size={11} /></button>}
+                {scope.day && <button className="chip on-chip" onClick={() => setScope((s) => ({ ...s, day: undefined }))}><Icon name="calendar" size={12} /> {new Date(scope.day).toLocaleDateString()} <Icon name="close" size={11} /></button>}
+              </div>
+            )}
+         </>)}
           {failed.map((o) => (
             <div key={o.id} className="outbox-bar failed">
               <span className="grow ellipsis"><b>{t.sendFailed}:</b> {o.subject || t.noSubject} ({o.error})</span>

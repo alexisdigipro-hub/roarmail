@@ -240,6 +240,14 @@ function AccountInfo({ a, sigs }: { a: Account; sigs: Signature[] }) {
   }
   return (
     <>
+      <div className="row avatar-row">
+        <span className="acc big-acc" style={{ ['--c' as any]: a.color, background: a.color }}>
+          {a.avatar ? <img className="acc-img" src={a.avatar} alt="" /> : (a.description || a.displayName || a.email).slice(0, 2).toUpperCase()}
+        </span>
+        <div className="grow"><b>{t.ac_picture}</b><small className="muted block">{t.ac_pictureHint}</small></div>
+        <button className="pill small" onClick={() => window.roarmail.pickAvatar(a.id).catch(() => setError(t.ac_badPicture))}>{a.avatar ? t.ac_pictureChange : t.ac_pictureAdd}</button>
+        {a.avatar && <button className="pill small ghost" onClick={() => up({ avatar: null })}>{t.delete}</button>}
+      </div>
       <Toggle label={t.ac_enabled} hint={t.ac_enabledHint} on={a.enabled} set={(v) => up({ enabled: v })} />
       <div className="row two">
         <label className="grow">{t.ac_description}

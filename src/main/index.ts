@@ -261,6 +261,21 @@ app.whenReady().then(() => {
   handle('mail:addAlias', (_e, id, email, name) => mail.addAlias(id, email, name))
   handle('mail:removeAlias', (_e, id) => mail.removeAlias(id))
   handle('mail:serverFolders', (_e, id) => mail.serverFolders(id))
+  handle('mail:unifiedFolders', () => mail.unifiedFolders())
+  handle('mail:emojiPanel', () => { if (app.isEmojiPanelSupported()) app.showEmojiPanel() })
+  // Settings > Accounts > Picture: any image, cut to the middle square and made small (160 px) before it is kept
+  handle('mail:pickAvatar', async (_e, id: string) => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'heic', 'gif', 'webp', 'tiff'] }] })
+    if (r.canceled || !r.filePaths[0]) return false
+    let img = nativeImage.createFromPath(r.filePaths[0])
+    if (img.isEmpty()) img = await nativeImage.createThumbnailFromPath(r.filePaths[0], { width: 480, height: 480 }).catch(() => nativeImage.createEmpty())
+    if (img.isEmpty()) throw new Error('not-an-image')
+    const { width, height } = img.getSize()
+    const side = Math.min(width, height)
+    const square = img.crop({ x: Math.floor((width - side) / 2), y: Math.floor((height - side) / 2), width: side, height: side })
+    mail.setAvatar(id, square.resize({ width: 160, height: 160, quality: 'best' }).toDataURL())
+    return true
+  })
   // Settings > General > Default mail app: mailto: links open RoarMail (the packaged app declares mailto, see package.json)
   handle('mail:isDefaultMail', () => app.isDefaultProtocolClient('mailto'))
   handle('mail:makeDefaultMail', () => { app.setAsDefaultProtocolClient('mailto'); return app.isDefaultProtocolClient('mailto') })

@@ -1,6 +1,6 @@
 // Writing a message: new, reply, reply all, forward, or a draft picked up again. Saved as a draft while
 // writing; closing offers to keep it in Drafts. Cmd/Ctrl+Enter sends, Esc closes.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import type { Account, Address, Draft, MessageFull, RoarTransferLink, Signature } from '../../shared/api'
 import { fullDate, size, t } from '../i18n'
@@ -8,6 +8,7 @@ import { Icon } from './Icon'
 import { clean as roarError, useRoarMe } from './RoarMe'
 import type { ComposeKind } from './Viewer'
 import { TimePicker } from './TimePicker'
+import { FONTS } from '../look'
 
 export interface ComposeSeed {
   kind: ComposeKind | 'new' | 'draft'
@@ -22,6 +23,16 @@ export interface ComposeSeed {
 const fmt = (a: Address) => (a.name ? `${a.name.replace(/[",]/g, '')} <${a.address}>` : a.address)
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 const SIG = 'data-roarmail-signature'
+
+// the size of the writing window: dragged at its corner, kept for next time (Alex, 21 Oct 2026)
+const SIZE_KEY = 'roarmail.composer'
+const SIZE_DEF = { w: 820, h: 720 }
+const fit = (v: { w: number; h: number }) => ({ w: Math.round(Math.max(560, Math.min(innerWidth - 24, v.w))), h: Math.round(Math.max(420, Math.min(innerHeight - 24, v.h))) })
+const savedSize = () => { try { const v = JSON.parse(localStorage.getItem(SIZE_KEY) || 'null'); return v?.w ? fit(v) : fit(SIZE_DEF) } catch { return fit(SIZE_DEF) } }
+
+// Apple Mail's format bar: paragraph styles, sizes (the editor's 1 to 7) and quick colours
+const BLOCKS: [string, string][] = [['p', 'fm_body'], ['h1', 'fm_title'], ['h2', 'fm_heading'], ['h3', 'fm_subheading'], ['blockquote', 'fm_quote'], ['pre', 'fm_mono']]
+const SIZES: [string, string][] = [['1', '10'], ['2', '13'], ['3', '16'], ['4', '18'], ['5', '24'], ['6', '32'], ['7', '48']]
 // attachments over this go as a RoarTransfer link by default (most mail servers refuse 20-25 MB); any file can
 const LINK_AT = 20 * 1024 * 1024
 
@@ -89,6 +100,13 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const [sigs, setSigs] = useState<Signature[]>([])
   const [later, setLater] = useState(false)
   const [remindDays, setRemindDays] = useState(0)
+  const [priority, setPriority] = useState<Draft['priority']>(seed.draft?.priority || 'normal')
+  const [sigId, setSigId] = useState<string>(() => accounts.find((a) => a.id === init.accountId)?.signatureId || '')
+  const [box, setBox] = useState(savedSize)
+  const [fmtBar, setFmtBar] = useState(() => { try { return localStorage.getItem('roarmail.fmtbar') === '1' } catch { return false } })
+  // files sent up with the RoarTransfer button; each becomes a link card in the message
+  const [rt, setRt] = useState<string[]>([])
+  const range = useRef<Range | null>(null)
   const [roar] = useRoarMe()
   const roarReady = !!roar?.signedIn && !roar.needsMfa
   const [sizes, setSizes] = useState<Record<string, number>>({})
@@ -111,14 +129,15 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     id: draftId.current, accountId, identityId: identityId || undefined, to, cc, bcc, subject,
     html: body.current?.innerHTML || '', text: body.current?.innerText || '',
     ...replyMeta(), replacesMessageId: seed.draft?.replacesMessageId, attachments: files,
+    priority: priority === 'normal' ? undefined : priority,
   })
 
   // the signature of the chosen account, placed above the quoted text
-  const placeSignature = (list: Signature[], accId: string) => {
+  const placeSignature = (list: Signature[], accId: string, pick?: string) => {
     const el = body.current
     if (!el) return
-    const sigId = accounts.find((a) => a.id === accId)?.signatureId
-    const html = sigId ? list.find((s) => s.id === sigId)?.html || '' : ''
+    const sid = pick ?? accounts.find((a) => a.id === accId)?.signatureId
+    const html = sid ? list.find((s) => s.id === sid)?.html || '' : ''
     let box = el.querySelector(`[${SIG}]`) as HTMLElement | null
     if (!box && !html) return
     if (!box) {
@@ -191,8 +210,72 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     return () => clearInterval(h)
   })
 
+  // the editor keeps its selection while a select or colour box of the format bar has the focus
+  useEffect(() => {
+    const keep = () => {
+      const sel = getSelection()
+      if (sel && sel.rangeCount && body.current?.contains(sel.anchorNode)) range.current = sel.getRangeAt(0).cloneRange()
+    }
+    document.addEventListener('selectionchange', keep)
+    return () => document.removeEventListener('selectionchange', keep)
+  }, [])
+  const exec = (cmd: string, value?: string) => {
+    const el = body.current
+    if (!el) return
+    el.focus()
+    if (range.current) { const sel = getSelection(); sel?.removeAllRanges(); sel?.addRange(range.current) }
+    document.execCommand('styleWithCSS', false, 'true')
+    document.execCommand(cmd, false, value)
+    dirty.current = true
+  }
+  const toggleFmt = () => setFmtBar((v) => { try { localStorage.setItem('roarmail.fmtbar', v ? '0' : '1') } catch { /* this run only */ } return !v })
+
+  // the corner handle: the window stays centred, so it grows twice as fast as the pointer moves
+  const resize = (e: RPointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const h = e.currentTarget, x0 = e.clientX, y0 = e.clientY, b0 = box
+    h.setPointerCapture(e.pointerId)
+    let last = b0
+    const move = (ev: PointerEvent) => { last = fit({ w: b0.w + (ev.clientX - x0) * 2, h: b0.h + (ev.clientY - y0) * 2 }); setBox(last) }
+    const up = () => {
+      h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up)
+      try { localStorage.setItem(SIZE_KEY, JSON.stringify(last)) } catch { /* this run only */ }
+    }
+    h.addEventListener('pointermove', move); h.addEventListener('pointerup', up)
+  }
+  // double-click on the handle: as big as the window, or back to the usual size
+  const toggleBig = () => {
+    const big = fit({ w: innerWidth, h: innerHeight })
+    const next = box.w >= big.w - 4 && box.h >= big.h - 4 ? fit(SIZE_DEF) : big
+    setBox(next)
+    try { localStorage.setItem(SIZE_KEY, JSON.stringify(next)) } catch { /* this run only */ }
+  }
+
+  // the RoarTransfer button (as in RoarMe): files go up at once and their links land in the message
+  async function transferNow() {
+    if (!roarReady) { setError(t.rt_needSignIn); return }
+    const picked = await window.roarmail.pickFiles()
+    if (!picked.length) return
+    setError('')
+    setRt((r) => [...r, ...picked])
+    for (const f of picked) {
+      setUp((u) => ({ ...u, [f]: 0 }))
+      try {
+        const link = await window.roarmail.roarmeTransfer(f)
+        placeCard(transferCard(link))
+        dirty.current = true
+      } catch (e: any) {
+        if (!/cancel/i.test(String(e?.message || e))) setError(roarError(e))
+      } finally {
+        setUp((u) => { const rest = { ...u }; delete rest[f]; return rest })
+        setRt((r) => r.filter((x) => x !== f))
+      }
+    }
+  }
+
   async function send(at?: number) {
     if (!to.trim() && !cc.trim() && !bcc.trim()) { setError(t.noRecipient); return }
+    if (rt.length) { setError(t.rt_wait); return }
     setBusy(true); setError('')
     try {
       await saving.current
@@ -222,16 +305,25 @@ export function Composer({ seed, accounts, onClose, onSent }: {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send() }
       if (e.key === 'Escape') { e.preventDefault(); asking ? setAsking(false) : close() }
     }}>
-      <div className="sheet composer" onInput={() => { dirty.current = true }}>
+      <div className="sheet composer" style={{ width: box.w, height: box.h }} onInput={() => { dirty.current = true }}>
         <div className="composer-head">
           <b>{title}</b>
+          <span className="grow" />
+          <div className="composer-tools">
+            <button className={`tool ${fmtBar ? 'on-filter' : ''}`} title={t.fm_bar} onClick={toggleFmt}><Icon name="aa" /></button>
+            <button className="tool" title={t.emoji} onMouseDown={(e) => e.preventDefault()} onClick={() => { body.current?.focus(); window.roarmail.emojiPanel() }}><Icon name="emoji" /></button>
+            <span className="sep" />
+            <button className="tool" title={t.attach} onClick={async () => { const p = await window.roarmail.pickFiles(); if (p.length) { setFiles([...files, ...p]); dirty.current = true } }}><Icon name="clip" /></button>
+            <button className="tool rt-btn" title={t.rt_button} onClick={transferNow}><Icon name="roarUp" /></button>
+          </div>
+          <span className="sep" />
           <button className="tool" onClick={() => close()} title={t.discard}><Icon name="close" /></button>
         </div>
-        {(accounts.length > 1 || accounts.some((a) => a.aliases.length)) && (
+        {(accounts.length > 1 || accounts.some((a) => a.aliases.length) || sigs.length > 0) && (
           <div className="field"><span>{t.from}</span>
             <select value={`${accountId}|${identityId}`} onChange={(e) => {
               const [a, i] = e.target.value.split('|')
-              if (a !== accountId) placeSignature(sigs, a)
+              if (a !== accountId) { placeSignature(sigs, a); setSigId(accounts.find((x) => x.id === a)?.signatureId || '') }
               setAccountId(a); setIdentityId(i || ''); dirty.current = true
             }}>
               {accounts.flatMap((a) => [
@@ -239,13 +331,58 @@ export function Composer({ seed, accounts, onClose, onSent }: {
                 ...a.aliases.map((x) => <option key={x.id} value={`${a.id}|${x.id}`}>{(x.name || a.displayName) ? `${x.name || a.displayName} <${x.email}>` : x.email}</option>),
               ])}
             </select>
+            {sigs.length > 0 && (
+              <label className="sig-pick" title={t.signature}>
+                <span className="muted small">{t.signature}</span>
+                <select value={sigId} onChange={(e) => { setSigId(e.target.value); placeSignature(sigs, accountId, e.target.value); dirty.current = true }}>
+                  <option value="">{t.noSignature}</option>
+                  {sigs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+              </label>
+            )}
           </div>
         )}
         <Recipients label={t.to} value={to} onChange={setTo} autoFocus={seed.kind === 'new' && !init.to}
           extra={!showCc && <button className="link small" onClick={() => setShowCc(true)}>{t.cc} / {t.bcc}</button>} />
         {showCc && <Recipients label={t.cc} value={cc} onChange={setCc} />}
         {showCc && <Recipients label={t.bcc} value={bcc} onChange={setBcc} />}
-        <div className="field"><span>{t.subject}</span><input value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
+        <div className="field"><span>{t.subject}</span><input value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <select className={`priority ${priority}`} title={t.rm_priority} value={priority} onChange={(e) => { setPriority(e.target.value as Draft['priority']); dirty.current = true }}>
+            <option value="normal">{t.pr_normal}</option><option value="high">! {t.pr_high}</option><option value="low">↓ {t.pr_low}</option>
+          </select>
+        </div>
+        {fmtBar && (
+          <div className="fmt-bar" onMouseDown={(e) => { if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).closest('button')) e.preventDefault() }}>
+            <select title={t.fm_style} defaultValue="" onChange={(e) => { exec('formatBlock', e.target.value); e.target.value = '' }}>
+              <option value="" disabled>{t.fm_style}</option>
+              {BLOCKS.map(([k, label]) => <option key={k} value={k}>{t[label as keyof typeof t] as string}</option>)}
+            </select>
+            <select title={t.font} defaultValue="" onChange={(e) => { exec('fontName', e.target.value); e.target.value = '' }}>
+              <option value="" disabled>{t.font}</option>
+              {FONTS.map(([k, label, fam]) => <option key={k} value={fam} style={{ fontFamily: fam }}>{label}</option>)}
+            </select>
+            <select className="narrow" title={t.fm_size} defaultValue="" onChange={(e) => { exec('fontSize', e.target.value); e.target.value = '' }}>
+              <option value="" disabled>{t.fm_size}</option>
+              {SIZES.map(([k, px]) => <option key={k} value={k}>{px}</option>)}
+            </select>
+            <label className="swatch-pick" title={t.fm_color}><input type="color" defaultValue="#d40000" onChange={(e) => exec('foreColor', e.target.value)} /></label>
+            <button className="fmt" title={t.fm_clear} onClick={() => exec('removeFormat')}><Icon name="clearFmt" size={15} /></button>
+            <span className="sep" />
+            <button className="fmt" title={t.fm_bold} onClick={() => exec('bold')}><b>B</b></button>
+            <button className="fmt" title={t.fm_italic} onClick={() => exec('italic')}><i>I</i></button>
+            <button className="fmt" title={t.fm_underline} onClick={() => exec('underline')}><u>U</u></button>
+            <button className="fmt" title={t.fm_strike} onClick={() => exec('strikeThrough')}><s>S</s></button>
+            <span className="sep" />
+            <button className="fmt" title={t.fm_left} onClick={() => exec('justifyLeft')}><Icon name="alignL" size={15} /></button>
+            <button className="fmt" title={t.fm_center} onClick={() => exec('justifyCenter')}><Icon name="alignC" size={15} /></button>
+            <button className="fmt" title={t.fm_right} onClick={() => exec('justifyRight')}><Icon name="alignR" size={15} /></button>
+            <span className="sep" />
+            <button className="fmt" title={t.fm_bullets} onClick={() => exec('insertUnorderedList')}><Icon name="listUl" size={15} /></button>
+            <button className="fmt" title={t.fm_numbers} onClick={() => exec('insertOrderedList')}><Icon name="listOl" size={15} /></button>
+            <button className="fmt" title={t.fm_outdent} onClick={() => exec('outdent')}><Icon name="outdent" size={15} /></button>
+            <button className="fmt" title={t.fm_indent} onClick={() => exec('indent')}><Icon name="indent" size={15} /></button>
+          </div>
+        )}
         <div className="editor" ref={body} contentEditable suppressContentEditableWarning spellCheck />
         {files.length > 0 && (
           <div className="files">
@@ -269,10 +406,20 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             })}
           </div>
         )}
+        {rt.length > 0 && (
+          <div className="files">
+            {rt.map((f) => (
+              <span className="chip as-link" key={f}>
+                <Icon name="roar" size={14} /> {f.split(/[\\/]/).pop()}
+                <span className="muted">{t.rt_up} {Math.round((up[f] || 0) * 100)}%</span>
+                <button title={t.cancel} onClick={() => window.roarmail.roarmeCancelTransfer(f)}><Icon name="close" size={12} /></button>
+              </span>
+            ))}
+          </div>
+        )}
         {!roarReady && roar && files.some((f) => sizes[f] > LINK_AT) && <p className="muted small hint-big">{t.rt_big}</p>}
         {error && <p className="error">{error}</p>}
         <div className="composer-foot">
-          <button className="tool" title={t.attach} onClick={async () => { const p = await window.roarmail.pickFiles(); if (p.length) { setFiles([...files, ...p]); dirty.current = true } }}><Icon name="clip" /></button>
           <label className={`remind ${remindDays ? 'on' : ''}`} title={t.remind}>
             <Icon name="bell" size={16} />
             <select value={remindDays} onChange={(e) => setRemindDays(Number(e.target.value))}>
@@ -298,6 +445,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             </div>
           </div>
         )}
+        <div className="composer-resize" title={t.resizeWin} onPointerDown={resize} onDoubleClick={toggleBig} />
       </div>
     </div>
   )

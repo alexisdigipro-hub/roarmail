@@ -78,7 +78,7 @@ const toAccount = (r: Row, state: Account['state'], error: string | undefined, a
   enabled: !!r.enabled, description: r.description || '', aliases,
   attachments: ['all', 'recent', 'none'].includes(r.attachments) ? r.attachments : 'recent',
   roles: (() => { try { return JSON.parse(r.roles_json || '{}') } catch { return {} } })(),
-  trashDays: r.trash_days || 0, junkDays: r.junk_days || 0, unread: r.inbox_unread || 0,
+  trashDays: r.trash_days || 0, junkDays: r.junk_days || 0, unread: r.inbox_unread || 0, avatar: r.avatar || null,
 })
 
 // the text version of HTML mail carries [image: …] and [https://…] marks; a snippet reads better without them
@@ -251,6 +251,7 @@ export class MailService {
   updateAccount(id: string, patch: AccountPatch) {
     const set = (col: string, v: unknown) => this.db.prepare(`update accounts set ${col} = ?, updated_at = ? where id = ?`).run(v, now(), id)
     if (patch.description != null) set('description', String(patch.description).trim().slice(0, 80))
+    if (patch.avatar === null) set('avatar', null)
     if (patch.attachments && ['all', 'recent', 'none'].includes(patch.attachments)) { set('attachments', patch.attachments); this.prefetch(id).catch(() => {}) }
     if (patch.trashDays != null) set('trash_days', Math.max(0, Math.round(Number(patch.trashDays) || 0)))
     if (patch.junkDays != null) set('junk_days', Math.max(0, Math.round(Number(patch.junkDays) || 0)))
@@ -302,6 +303,23 @@ export class MailService {
   removeAlias(id: string) {
     this.db.prepare('delete from identities where id = ? and is_default = 0').run(id)
     this.emit({ type: 'accounts' })
+  }
+
+  /** the account's picture, from an image file (index.ts has made it a small square PNG) */
+  setAvatar(id: string, dataUrl: string) {
+    this.db.prepare('update accounts set avatar = ?, updated_at = ? where id = ?').run(dataUrl, now(), id)
+    this.emit({ type: 'accounts' })
+  }
+
+  /** the unified folders: each role across every switched-on account, with the counts added up */
+  unifiedFolders(): Folder[] {
+    const roles: FolderRole[] = ['inbox', 'snoozed', 'flagged', 'drafts', 'sent', 'archive', 'all', 'spam', 'trash']
+    const rows = this.db.prepare(`select coalesce(f.special, f.role) as r, sum(f.unread) as unread, sum(f.total) as total, count(*) as n from folders f
+      where coalesce(f.special, f.role) is not null and ${ON} group by r`).all() as Row[]
+    return roles.flatMap((role) => {
+      const r = rows.find((x) => x.r === role)
+      return r || role === 'inbox' ? [{ id: `all:${role}`, accountId: 'all', path: role, name: role, role, unread: r?.unread || 0, total: r?.total || 0, depth: 0 }] : []
+    })
   }
 
   /** every folder of the account, for choosing which is Sent, Trash and the rest */
@@ -696,23 +714,42 @@ export class MailService {
 
   /** the list: one row per conversation, its newest message on top */
   list(scope: ListScope, before?: number): MessageRow[] {
-    const limit = 120
+    // a sort other than by date has no paging: one longer page
+    const byDate = !scope.sort || scope.sort === 'date'
+    const limit = byDate ? 120 : 600
     const cut = before ?? (scope.oldest ? 0 : Number.MAX_SAFE_INTEGER)
     // the filter buttons: a conversation counts when any of its messages here does
     const having = scope.filter === 'unread' ? 'and unread_n > 0' : scope.filter === 'flagged' ? 'and flag_n > 0'
-      : scope.filter === 'attachments' ? 'and att_n > 0' : scope.filter === 'today' ? 'and last_date >= @today' : ''
+      : scope.filter === 'attachments' ? 'and att_n > 0' : scope.filter === 'today' ? 'and last_date >= @today'
+      : scope.filter === 'threads' ? 'and n > 1' : ''
     const today = new Date(); today.setHours(0, 0, 0, 0)
-    const where = scope.folderId
-      ? 'mf.folder_id = @folder'
-      : `f.role = @role ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
+    // a chosen day (the calendar button): from its start to the next
+    const day = scope.day ? new Date(scope.day) : null
+    if (day) day.setHours(0, 0, 0, 0)
+    // the person button: everything from or to that address, in every folder but Trash and Junk
+    const who = scope.person?.toLowerCase().trim()
+    const where = who
+      ? `(m.from_email = @who or instr(lower(m.to_json), @whoq) > 0 or instr(lower(m.cc_json), @whoq) > 0) and coalesce(f.role, '') not in ('trash', 'spam')
+         ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
+      : scope.folderId
+        ? 'mf.folder_id = @folder'
+        : `coalesce(f.special, f.role) = @role ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
+    const dir = scope.oldest ? 'asc' : 'desc'
+    const order = scope.sort === 'sender' ? `lower(coalesce(nullif(m.from_name, ''), m.from_email)) ${scope.oldest ? 'desc' : 'asc'}, last_date desc`
+      : scope.sort === 'subject' ? `lower(m.subject) ${scope.oldest ? 'desc' : 'asc'}, last_date desc`
+      : scope.sort === 'unread' ? `unread_n > 0 ${dir}, last_date desc`
+      : scope.sort === 'attachments' ? `att_n > 0 ${dir}, last_date desc`
+      : scope.sort === 'account' ? `m.account_id ${dir}, last_date desc`
+      : `last_date ${dir}`
     const rows = this.db.prepare(`select m.*, max(m.date) as last_date, count(*) as n, sum(m.seen = 0) as unread_n,
         sum(m.flagged) as flag_n, sum(m.has_attachments) as att_n, group_concat(m.id) as ids
       from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
-      where ${where} and ${ON} and m.pending_op is null
+      where ${where} and ${ON} and m.pending_op is null ${day ? 'and m.date >= @dayFrom and m.date < @dayTo' : ''}
       group by coalesce(m.thread_id, m.id)
-      having ${scope.oldest ? 'last_date > @cut' : 'last_date < @cut'} ${having}
-      order by last_date ${scope.oldest ? 'asc' : 'desc'} limit @limit`)
-      .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit, today: today.getTime() }) as Row[]
+      having ${byDate ? (scope.oldest ? 'last_date > @cut' : 'last_date < @cut') : '1'} ${having}
+      order by ${order} limit @limit`)
+      .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit, today: today.getTime(),
+        who: who || '', whoq: who ? `"${who}"` : '', dayFrom: day?.getTime() || 0, dayTo: day ? day.getTime() + 864e5 : 0 }) as Row[]
     return rows.map(toRow)
   }
 
@@ -1116,7 +1153,7 @@ export class MailService {
       id, account_id: d.accountId,
       identity: d.identityId && this.db.prepare('select 1 from identities where id = ? and account_id = ?').get(d.identityId, d.accountId) ? d.identityId : null,
       reply: d.replyToMessageId && this.db.prepare('select 1 from messages where id = ?').get(d.replyToMessageId) ? d.replyToMessageId : null,
-      to: JSON.stringify({ to: d.to, inReplyTo: d.inReplyTo || null, references: d.references || null, text: d.text }),
+      to: JSON.stringify({ to: d.to, inReplyTo: d.inReplyTo || null, references: d.references || null, text: d.text, priority: d.priority || null }),
       cc: d.cc || '', bcc: d.bcc || '', subject: d.subject, html: d.html, atts: JSON.stringify(d.attachments || []),
       replaces: d.replacesMessageId || null, push, updated: now(),
     })
@@ -1126,7 +1163,7 @@ export class MailService {
     const meta = JSON.parse(r.to_json || '{}')
     return {
       id: r.id, accountId: r.account_id, identityId: r.identity_id || undefined, to: meta.to || '', cc: r.cc_json || '', bcc: r.bcc_json || '', subject: r.subject, html: r.html,
-      text: meta.text || '', inReplyTo: meta.inReplyTo || undefined, references: meta.references || undefined,
+      text: meta.text || '', priority: meta.priority || undefined, inReplyTo: meta.inReplyTo || undefined, references: meta.references || undefined,
       replyToMessageId: r.reply_to_message || undefined, replacesMessageId: r.replaces_message_id || undefined,
       attachments: JSON.parse(r.attachments_json || '[]'),
     }
@@ -1192,6 +1229,7 @@ export class MailService {
       to: d.to || undefined, cc: d.cc || undefined, bcc: d.bcc || undefined, subject: d.subject,
       html: d.html, text: d.text, messageId, date: new Date(),
       inReplyTo: d.inReplyTo || undefined, references: d.references || undefined,
+      priority: d.priority === 'high' || d.priority === 'low' ? d.priority : undefined,
       attachments: (d.attachments || []).filter((p) => fs.existsSync(p)).map((p) => ({ path: p, filename: path.basename(p) })),
       headers: { 'X-Mailer': `RoarMail ${app.getVersion()}` },
     })

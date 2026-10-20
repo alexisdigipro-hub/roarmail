@@ -19,7 +19,7 @@ const H = 3600e3
 const now = Date.now()
 const uid = () => Math.random().toString(36).slice(2, 10)
 
-const extra = { enabled: true, description: '', aliases: [], attachments: 'recent' as const, roles: {}, trashDays: 0, junkDays: 0, unread: 0 }
+const extra = { enabled: true, description: '', aliases: [], attachments: 'recent' as const, roles: {}, trashDays: 0, junkDays: 0, unread: 0, avatar: null }
 const accounts: Account[] = [
   { id: 'a1', email: 'alex@themadlions.com', displayName: 'Alex', color: '#d40000', provider: 'imap', imapHost: 'linux207.papaki.gr', imapPort: 993, imapTls: 'tls', smtpHost: 'linux207.papaki.gr', smtpPort: 465, smtpTls: 'tls', username: 'alex@themadlions.com', signatureId: 's1', state: 'online', ...extra },
   { id: 'a2', email: 'roar.demo@gmail.com', displayName: 'Alex K.', color: '#2f9bff', provider: 'gmail', imapHost: 'imap.gmail.com', imapPort: 993, imapTls: 'tls', smtpHost: 'smtp.gmail.com', smtpPort: 465, smtpTls: 'tls', username: 'roar.demo@gmail.com', signatureId: null, state: 'online', ...extra },
@@ -97,15 +97,23 @@ function recount() {
 const pendingHas = (id: string) => [...pending.values()].some((p) => p.ids.includes(id))
 
 function list(scope: ListScope): MessageRow[] {
-  const inScope = msgs.filter((m) => !pendingHas(m.id) && (scope.folderId ? m.folderId === scope.folderId
-    : role(m.folderId) === (scope.role || 'inbox') && (scope.accountId === 'all' || m.accountId === scope.accountId)))
+  const who = scope.person?.toLowerCase()
+  const dayFrom = scope.day ? new Date(scope.day).setHours(0, 0, 0, 0) : 0
+  const inScope = msgs.filter((m) => !pendingHas(m.id) && (who
+    ? (m.fromEmail === who || [...m.to, ...m.cc].some((a) => a.address.toLowerCase() === who)) && (scope.accountId === 'all' || m.accountId === scope.accountId) && role(m.folderId) !== 'trash'
+    : scope.folderId ? m.folderId === scope.folderId
+    : role(m.folderId) === (scope.role || 'inbox') && (scope.accountId === 'all' || m.accountId === scope.accountId))
+    && (!dayFrom || (m.date >= dayFrom && m.date < dayFrom + 864e5)))
   const groups = new Map<string, DemoMsg[]>()
   for (const m of inScope) groups.set(m.threadId, [...(groups.get(m.threadId) || []), m])
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const keep = (r: MessageRow) => scope.filter === 'unread' ? !r.seen : scope.filter === 'flagged' ? r.flagged
-    : scope.filter === 'attachments' ? r.hasAttachments : scope.filter === 'today' ? r.date >= today.getTime() : true
+    : scope.filter === 'attachments' ? r.hasAttachments : scope.filter === 'today' ? r.date >= today.getTime() : scope.filter === 'threads' ? r.count > 1 : true
+  const by = (a: MessageRow, b: MessageRow) => scope.sort === 'sender' ? (a.fromName || a.fromEmail).localeCompare(b.fromName || b.fromEmail)
+    : scope.sort === 'subject' ? a.subject.localeCompare(b.subject) : scope.sort === 'unread' ? Number(a.seen) - Number(b.seen)
+    : scope.sort === 'attachments' ? Number(b.hasAttachments) - Number(a.hasAttachments) : scope.sort === 'account' ? a.accountId.localeCompare(b.accountId) : b.date - a.date
   return [...groups.values()].map((g) => { g.sort((a, b) => b.date - a.date); return row(g[0], g) }).filter(keep)
-    .sort((a, b) => (scope.oldest ? a.date - b.date : b.date - a.date))
+    .sort((a, b) => (scope.oldest ? -by(a, b) : by(a, b)))
 }
 
 function full(m: DemoMsg): MessageFull {
@@ -169,6 +177,16 @@ export function createDemo(): MailApi & { update: any } {
     removeAlias: async (aid) => { for (const a of accounts) a.aliases = a.aliases.filter((x) => x.id !== aid); emit({ type: 'accounts' }) },
     serverFolders: async (id) => folders.filter((f) => f.accountId === id && f.role !== 'inbox' && f.role !== 'snoozed').map((f) => ({ path: f.path, name: f.name })),
     searchOnline: async (q, a) => api.search(q, a),
+    pickAvatar: async () => false,
+    emojiPanel: async () => {},
+    unifiedFolders: async () => {
+      recount()
+      const order: FolderRole[] = ['inbox', 'snoozed', 'drafts', 'sent', 'archive', 'trash']
+      return order.map((role) => {
+        const fs = folders.filter((f) => f.role === role)
+        return { id: `all:${role}`, accountId: 'all', path: role, name: role, role, unread: fs.reduce((n, f) => n + f.unread, 0), total: fs.reduce((n, f) => n + f.total, 0), depth: 0 }
+      })
+    },
     resetSettings: async () => { settings = { ...LOOK_DEFAULTS, ...GENERAL_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false } },
     clearCache: async () => 0,
     isDefaultMail: async () => false,
