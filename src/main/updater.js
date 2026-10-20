@@ -27,36 +27,41 @@ const newer = (a, b) => {
   for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0)
   return false
 }
-// the installer for this computer among the release's files
-const pick = (assets) => {
-  const re = process.platform === 'win32' ? /Windows-Setup\.exe$/
-    : process.arch === 'arm64' ? /Mac-arm64\.dmg$/ : /Mac-x64\.dmg$/
-  const list = assets.filter((a) => re.test(a.name))
-  return list.find((a) => /\d+\.\d+\.\d+/.test(a.name)) || list[0] || null
-}
+// The newest release is read from GitHub's public release page, not its API: the API allows only 60 questions
+// an hour per internet connection, which an office or a mobile network shares (0.2.1). github.com/<repo>/releases/latest
+// forwards to the newest release's page; its address gives the tag and its title the version.
+const SUFFIX = () => (process.platform === 'win32' ? 'Windows-Setup.exe' : process.arch === 'arm64' ? 'Mac-arm64.dmg' : 'Mac-x64.dmg')
 const dir = () => path.join(app.getPath('userData'), 'updates')
+
+async function latest() {
+  const r = await net.fetch(`https://github.com/${REPO}/releases/latest`, { headers: { 'User-Agent': 'RoarMail', Accept: 'text/html' } })
+  if (!r.ok) throw new Error(`GitHub ${r.status}`)
+  const html = await r.text()
+  const tag = decodeURIComponent((String(r.url).match(/\/releases\/tag\/([^/?#]+)/) || html.match(/\/releases\/tag\/([^"'/?#]+)/) || [])[1] || '')
+  const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || ''
+  const version = (title.match(/RoarMail (\d+\.\d+\.\d+)/) || tag.match(/(\d+\.\d+\.\d+)/) || [])[1] || ''
+  return { tag, version }
+}
 
 async function check() {
   if (!app.isPackaged || busy || state.status === 'ready') return state
   busy = true
   try {
     send({ status: 'checking', error: '' })
-    const r = await net.fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'RoarMail' } })
-    if (!r.ok) throw new Error(`GitHub ${r.status}`)
-    const d = await r.json()
-    const version = (String(d.name || '').match(/(\d+\.\d+\.\d+)/) || [])[1] || ''
-    if (!version || !newer(version, app.getVersion())) { send({ status: 'idle', version: '' }); return state }
-    const asset = pick(d.assets || [])
-    if (!asset) { send({ status: 'idle', version: '' }); return state }
+    const { tag, version } = await latest()
+    if (!tag || !version || !newer(version, app.getVersion())) { send({ status: 'idle', version: '' }); return state }
+    const name = `RoarMail-${version}-beta-${SUFFIX()}`
     fs.mkdirSync(dir(), { recursive: true })
     // anything older left from before goes
     for (const f of fs.readdirSync(dir())) if (!f.includes(version)) { try { fs.rmSync(path.join(dir(), f), { force: true, recursive: true }) } catch { /* in use */ } }
-    const target = path.join(dir(), asset.name.includes(version) ? asset.name : `${version}-${asset.name}`)
-    if (!(fs.existsSync(target) && fs.statSync(target).size === asset.size)) {
+    const target = path.join(dir(), name)
+    // the file only gets its final name once complete, so one that is there is whole
+    if (!fs.existsSync(target)) {
       send({ status: 'downloading', version, progress: 0 })
-      const res = await net.fetch(asset.browser_download_url, { headers: { 'User-Agent': 'RoarMail' } })
+      const res = await net.fetch(`https://github.com/${REPO}/releases/download/${encodeURIComponent(tag)}/${name}`, { headers: { 'User-Agent': 'RoarMail' } })
+      if (res.status === 404) { send({ status: 'idle', version: '' }); return state }
       if (!res.ok || !res.body) throw new Error(`download ${res.status}`)
-      const total = Number(res.headers.get('content-length')) || asset.size || 0
+      const total = Number(res.headers.get('content-length')) || 0
       const part = `${target}.part`
       const out = fs.createWriteStream(part)
       const reader = res.body.getReader()
@@ -70,7 +75,7 @@ async function check() {
         if (p !== last) { last = p; send({ progress: p }) }
       }
       await new Promise((ok, bad) => { out.end(); out.on('finish', ok); out.on('error', bad) })
-      if (asset.size && fs.statSync(part).size !== asset.size) throw new Error('incomplete download')
+      if (total && fs.statSync(part).size !== total) throw new Error('incomplete download')
       fs.renameSync(part, target)
     }
     file = target
