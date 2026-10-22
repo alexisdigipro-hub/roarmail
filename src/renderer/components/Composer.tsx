@@ -2,7 +2,7 @@
 // writing; closing offers to keep it in Drafts. Cmd/Ctrl+Enter sends, Esc closes.
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Address, Draft, MessageFull, RoarTransferLink, Signature } from '../../shared/api'
+import type { Account, Address, Draft, MessageFull, RoarTransferFile, RoarTransferLink, Signature } from '../../shared/api'
 import { fullDate, size, t } from '../i18n'
 import { Icon } from './Icon'
 import { clean as roarError, useRoarMe } from './RoarMe'
@@ -36,15 +36,20 @@ const SIZES: [string, string][] = [['1', '10'], ['2', '13'], ['3', '16'], ['4', 
 // attachments over this go as a RoarTransfer link by default (most mail servers refuse 20-25 MB); any file can
 const LINK_AT = 20 * 1024 * 1024
 
-/** the card a RoarTransfer link becomes in the email: plain inline styles and a table, so every mail program shows it */
+/** the card a RoarTransfer link becomes in the email: one link for all its files (22 Oct 2026, as roartransfer.com),
+ * plain inline styles and a table, so every mail program shows it */
 function transferCard(l: RoarTransferLink) {
   const until = new Date(l.expires).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
   const font = 'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif'
-  return `<table data-roarmail-transfer cellpadding="0" cellspacing="0" border="0" style="margin:12px 0;border:1px solid #d9dce1;border-radius:12px;border-collapse:separate"><tr><td style="padding:12px 16px;${font}">`
-    + `<div style="font-size:11px;letter-spacing:.08em;color:#8a8f98">ROARTRANSFER</div>`
-    + `<div style="margin:4px 0 2px"><a href="${esc(l.url)}" style="font-size:15px;font-weight:600;color:#d40000;text-decoration:none">⬇ ${esc(l.name)}</a></div>`
-    + `<div style="font-size:12.5px;color:#6b7079">${size(l.size)} · ${esc(t.rt_until)} ${esc(until)}</div>`
-    + `<div style="font-size:11.5px;color:#8a8f98;margin-top:4px">${esc(l.url)}</div></td></tr></table>`
+  const files = l.files?.length ? l.files : [{ name: l.name, size: l.size }]
+  const rows = files.slice(0, 8).map((f) => `<div style="font-size:13.5px;color:#30343b;margin:2px 0">📎 ${esc(f.name)} <span style="color:#8a8f98">· ${size(f.size)}</span></div>`).join('')
+    + (files.length > 8 ? `<div style="font-size:12.5px;color:#8a8f98">+ ${files.length - 8}</div>` : '')
+  return `<table data-roarmail-transfer cellpadding="0" cellspacing="0" border="0" style="margin:12px 0;border:1px solid #d9dce1;border-radius:12px;border-collapse:separate"><tr><td style="padding:14px 16px;${font}">`
+    + `<div style="font-size:11px;letter-spacing:.08em;color:#8a8f98">ROARTRANSFER · ${files.length} · ${size(l.size)}</div>`
+    + `<div style="margin:8px 0">${rows}</div>`
+    + `<a href="${esc(l.url)}" style="display:inline-block;padding:9px 18px;border-radius:999px;background:#d40000;color:#fff;font-size:14px;font-weight:600;text-decoration:none">⬇ ${esc(t.rt_download)}</a>`
+    + `<div style="font-size:12.5px;color:#6b7079;margin-top:8px">${l.locked ? `🔒 ${esc(t.rt_locked)} · ` : ''}${esc(t.rt_until)} ${esc(until)}</div>`
+    + `<div style="font-size:11.5px;color:#8a8f98;margin-top:2px">${esc(l.url)}</div></td></tr></table>`
 }
 
 function prefill(seed: ComposeSeed, accounts: Account[]) {
@@ -111,6 +116,11 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const roarReady = !!roar?.signedIn && !roar.needsMfa
   const [sizes, setSizes] = useState<Record<string, number>>({})
   const [asLink, setAsLink] = useState<Record<string, boolean>>({})
+  // RoarTransfer as on roartransfer.com (22 Oct 2026): 1 day up to 5 GB or 3 days up to 3 GB, a password, an email when downloaded
+  const [rtDays, setRtDays] = useState(3)
+  const [rtPw, setRtPw] = useState('')
+  const [rtNotify, setRtNotify] = useState(true)
+  const rtMax = (rtDays === 1 ? 5 : 3) * 1024 ** 3
   const [up, setUp] = useState<Record<string, number>>({})
   const body = useRef<HTMLDivElement>(null)
   const dirty = useRef(false)
@@ -171,19 +181,24 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   }, [files])
   useEffect(() => window.roarmail.on((e) => { if (e.type === 'transfer') setUp((u) => (e.file in u ? { ...u, [e.file]: e.progress } : u)) }), [])
 
-  /** the files marked as links go up to RoarMe first; each becomes a card in the email and leaves the attachments */
-  async function sendLinks(): Promise<string[]> {
-    let left = files
-    for (const f of files.filter((x) => roarReady && asLink[x])) {
+  /** files up to RoarTransfer one by one, then ONE link for all of them, which becomes a card in the email */
+  async function upload(list: string[], onEach?: (f: string) => void) {
+    const done: RoarTransferFile[] = []
+    for (const f of list) {
       setUp((u) => ({ ...u, [f]: 0 }))
-      try {
-        const link = await window.roarmail.roarmeTransfer(f)
-        placeCard(transferCard(link))
-        left = left.filter((x) => x !== f)
-        setFiles(left)
-        dirty.current = true
-      } finally { setUp((u) => { const rest = { ...u }; delete rest[f]; return rest }) }
+      try { done.push(await window.roarmail.roarmeTransfer(f, rtDays)); onEach?.(f) } finally { setUp((u) => { const rest = { ...u }; delete rest[f]; return rest }) }
     }
+    if (done.length) {
+      placeCard(transferCard(await window.roarmail.roarmeTransferBundle(done, { title: subject.trim(), password: rtPw, notify: rtNotify })))
+      dirty.current = true
+    }
+  }
+  /** the files marked as links go up first and leave the attachments */
+  async function sendLinks(): Promise<string[]> {
+    const list = files.filter((x) => roarReady && asLink[x])
+    if (list.some((f) => sizes[f] > rtMax)) throw new Error('roarme-too-big')
+    let left = files
+    await upload(list, (f) => { left = left.filter((x) => x !== f); setFiles(left) })
     return left
   }
   // above the signature, else above the quoted mail, else at the end
@@ -251,26 +266,16 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     try { localStorage.setItem(SIZE_KEY, JSON.stringify(next)) } catch { /* this run only */ }
   }
 
-  // the RoarTransfer button (as in RoarMe): files go up at once and their links land in the message
+  // the RoarTransfer button (as in RoarMe): files go up at once and one link for them lands in the message
   async function transferNow() {
     if (!roarReady) { setError(t.rt_needSignIn); return }
     const picked = await window.roarmail.pickFiles()
     if (!picked.length) return
     setError('')
     setRt((r) => [...r, ...picked])
-    for (const f of picked) {
-      setUp((u) => ({ ...u, [f]: 0 }))
-      try {
-        const link = await window.roarmail.roarmeTransfer(f)
-        placeCard(transferCard(link))
-        dirty.current = true
-      } catch (e: any) {
-        if (!/cancel/i.test(String(e?.message || e))) setError(roarError(e))
-      } finally {
-        setUp((u) => { const rest = { ...u }; delete rest[f]; return rest })
-        setRt((r) => r.filter((x) => x !== f))
-      }
-    }
+    try { await upload(picked) } catch (e: any) {
+      if (!/cancel/i.test(String(e?.message || e))) setError(roarError(e))
+    } finally { setRt((r) => r.filter((x) => !picked.includes(x))) }
   }
 
   async function send(at?: number) {
@@ -415,6 +420,15 @@ export function Composer({ seed, accounts, onClose, onSent }: {
                 <button title={t.cancel} onClick={() => window.roarmail.roarmeCancelTransfer(f)}><Icon name="close" size={12} /></button>
               </span>
             ))}
+          </div>
+        )}
+        {roarReady && (files.some((f) => asLink[f]) || rt.length > 0) && (
+          <div className="rt-opts">
+            <span className="rt-plans">
+              {[1, 3].map((d) => <button key={d} className={rtDays === d ? 'on' : ''} disabled={rt.length > 0} onClick={() => setRtDays(d)}>{d === 1 ? t.rt_day1 : t.rt_days3}</button>)}
+            </span>
+            <input type="password" autoComplete="new-password" placeholder={t.rt_pw} value={rtPw} disabled={rt.length > 0} onChange={(e) => setRtPw(e.target.value.slice(0, 100))} />
+            <label><input type="checkbox" checked={rtNotify} disabled={rt.length > 0} onChange={(e) => setRtNotify(e.target.checked)} /> {t.rt_notify}</label>
           </div>
         )}
         {!roarReady && roar && files.some((f) => sizes[f] > LINK_AT) && <p className="muted small hint-big">{t.rt_big}</p>}

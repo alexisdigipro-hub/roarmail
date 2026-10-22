@@ -9,23 +9,23 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { safeStorage } from 'electron'
-import type { RoarMeStatus, RoarRoom, RoarPerson, RoarTask, RoarTransferLink, RoarWork, RoarTaskInput } from '../shared/api'
+import type { RoarMeStatus, RoarRoom, RoarPerson, RoarTask, RoarTransferFile, RoarTransferLink, RoarWork, RoarTaskInput } from '../shared/api'
 
 // RoarMe's project and its publishable key (public by design, as in RoarMe's own src/lib.js)
 const URL = 'https://bzmjhbnwhdwmncxkqkdl.supabase.co'
 const KEY = 'sb_publishable_7mQ3e0NH5lCmdoIKx2-FUA_EgCoXx9X'
 export const ROARME_WEB = 'https://alexisdigipro-hub.github.io/roarme/'
 const MAX_FILE = 50 * 1024 * 1024 // RoarMe's chat file limit; bigger goes by RoarTransfer (later)
-// RoarTransfer: up to 3 GB, kept 3 days, sent in 6 MB pieces that pick up where they stopped (as RoarMe's src/lib.js)
-const TRANSFER_MAX = 3 * 1024 * 1024 * 1024
-const TUS_URL = URL.replace('.supabase.co', '.storage.supabase.co') + '/storage/v1/upload/resumable'
-const PIECE = 6 * 1024 * 1024
+// RoarTransfer on Cloudflare R2 since 22 Oct 2026, as roartransfer.com (RoarMe's Edge Function roartransfer-r2)
+const R2_FN = `${URL}/functions/v1/roartransfer-r2`
+const R2_PART = 16 * 1024 * 1024
+const GB = 1024 ** 3
+const TRANSFER_PAGE = 'https://roartransfer.com/'
 const MIME: Record<string, string> = {
   pdf: 'application/pdf', zip: 'application/zip', mov: 'video/quicktime', mp4: 'video/mp4', m4v: 'video/mp4', mxf: 'application/mxf',
   wav: 'audio/wav', mp3: 'audio/mpeg', aif: 'audio/aiff', aiff: 'audio/aiff', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
   tif: 'image/tiff', tiff: 'image/tiff', psd: 'image/vnd.adobe.photoshop', mkv: 'video/x-matroska', webm: 'video/webm',
 }
-const token = (n = 24) => { const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; return [...crypto.randomBytes(n)].map((b) => a[b % a.length]).join('') }
 
 /** the session, encrypted on disk (Keychain / DPAPI) */
 function vaultStorage() {
@@ -193,67 +193,93 @@ export class RoarMe {
     }
   }
 
-  /** a big attachment as a RoarTransfer link: the file goes up to RoarMe (the person's own folder u/<id>/), the email
-   * carries https://…/roarme/?t=<token>, good for 3 days. progress gets 0..1. */
-  async transfer(file: string, progress: (p: number) => void, stop: { stopped?: boolean } = {}): Promise<RoarTransferLink> {
-    const me = await this.userId()
+  /** a call to RoarTransfer's bridge to Cloudflare R2 (RoarMe's Edge Function roartransfer-r2), signed in */
+  private async r2(body: Record<string, unknown>) {
+    const { data } = await this.sb.auth.getSession()
+    if (!data.session) throw new Error('roarme-signed-out')
+    const r = await fetch(R2_FN, { method: 'POST', headers: { apikey: KEY, Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    let d: any = {}
+    try { d = await r.json() } catch { /* not JSON */ }
+    if (!r.ok) throw Object.assign(new Error(d.error === 'signed-out' ? 'roarme-signed-out' : d.error || `RoarTransfer (${r.status})`), { fatal: r.status < 500 })
+    return d
+  }
+
+  /** a big attachment for a RoarTransfer link, as on roartransfer.com (Alex, 22 Oct 2026): the file goes to
+   * Cloudflare R2 in 16 MB pieces, three at a time, each signed by roartransfer-r2. days 1 = up to 5 GB, 3 = up to 3 GB.
+   * Gives the file's token; transferBundle then makes ONE link for all the email's files. progress gets 0..1. */
+  async transfer(file: string, progress: (p: number) => void, stop: { stopped?: boolean } = {}, days = 3): Promise<RoarTransferFile> {
     const size = fs.statSync(file).size
-    if (size > TRANSFER_MAX) throw new Error('roarme-too-big')
+    if (size > (days === 1 ? 5 : 3) * GB) throw new Error('roarme-too-big')
     const name = path.basename(file)
     const type = MIME[path.extname(name).slice(1).toLowerCase()] || 'application/octet-stream'
-    const objectName = `u/${me}/${crypto.randomUUID()}-${name.replace(/[^\w.\-]+/g, '_').slice(-120)}`
-    const head = async () => {
-      const { data } = await this.sb.auth.getSession()
-      if (!data.session) throw new Error('roarme-signed-out')
-      return { Authorization: `Bearer ${data.session.access_token}`, apikey: KEY, 'Tus-Resumable': '1.0.0' }
+    const made = await this.r2({ action: 'create', name, size, type, days })
+    const n = Math.max(1, Math.ceil(size / R2_PART))
+    const urls: Record<number, string> = {}
+    const etags: Record<number, string> = {}
+    const loaded: Record<number, number> = {}
+    const tell = () => progress(Object.values(loaded).reduce((a, x) => a + x, 0) / size)
+    let next = 1
+    let signing: Promise<void> | null = null
+    const urlFor = async (i: number) => {
+      while (!urls[i]) {
+        if (!signing) {
+          const want: number[] = []
+          for (let k = i; k <= Math.min(n, i + 19); k++) if (!urls[k] && !etags[k]) want.push(k)
+          signing = this.r2({ action: 'sign', key: made.key, uploadId: made.uploadId, parts: want })
+            .then((got) => { Object.assign(urls, got.urls) })
+            .finally(() => { signing = null })
+        }
+        await signing
+      }
+      return urls[i]
     }
-    const b64 = (v: string) => Buffer.from(v).toString('base64')
-    const failed = async (r: Response) => {
-      const text = await r.text().catch(() => '')
-      if (r.status === 403 || /row-level security|unauthorized/i.test(text)) return new Error('roarme-transfer-off')
-      if (r.status === 413) return new Error('roarme-too-big')
-      let m = `RoarTransfer (${r.status})`; try { m = JSON.parse(text).message || m } catch { /* plain text */ }
-      return new Error(m)
-    }
-    const made = await fetch(TUS_URL, {
-      method: 'POST',
-      headers: {
-        ...(await head()), 'Upload-Length': String(size), 'x-upsert': 'false',
-        'Upload-Metadata': [['bucketName', 'roar-transfers'], ['objectName', objectName], ['contentType', type], ['cacheControl', '3600']].map(([k, v]) => `${k} ${b64(v)}`).join(','),
-      },
-    })
-    if (made.status !== 201) throw await failed(made)
-    const loc = made.headers.get('location') || ''
-    const at = /^https?:/.test(loc) ? loc : new globalThis.URL(loc, TUS_URL).href
     const fd = await fs.promises.open(file, 'r')
-    try {
-      let offset = 0
-      let tries = 0
-      while (offset < size) {
+    const worker = async () => {
+      for (;;) {
         if (stop.stopped) throw new Error('cancelled')
-        const len = Math.min(PIECE, size - offset)
+        const i = next++
+        if (i > n) return
+        const from = (i - 1) * R2_PART
+        const len = Math.min(R2_PART, size - from)
         const buf = new Uint8Array(len)
-        await fd.read(buf, 0, len, offset)
-        try {
-          const r = await fetch(at, { method: 'PATCH', headers: { ...(await head()), 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream' }, body: buf })
-          if (r.status === 204) { offset = Number(r.headers.get('upload-offset')) || offset + len; tries = 0; progress(offset / size); continue }
-          if (r.status !== 409 && r.status < 500) throw Object.assign(await failed(r), { fatal: true })
-          throw new Error(`RoarTransfer (${r.status})`)
-        } catch (e: any) {
-          if (stop.stopped || e?.fatal) throw e
-          if (++tries > 6) throw e
-          // wait a little, then ask how far it really got and go on from there
-          await new Promise((ok) => setTimeout(ok, Math.min(30000, 1000 * 2 ** tries)))
-          try { const h = await fetch(at, { method: 'HEAD', headers: await head() }); if (h.status === 200) offset = Number(h.headers.get('upload-offset')) || offset } catch { /* still offline */ }
+        await fd.read(buf, 0, len, from)
+        let tries = 0
+        for (;;) {
+          try {
+            const r = await fetch(await urlFor(i), { method: 'PUT', body: buf })
+            if (r.ok) { etags[i] = r.headers.get('etag') || ''; loaded[i] = len; tell(); break }
+            if (r.status === 403) delete urls[i] // its signature ran out: sign it again
+            throw new Error(`RoarTransfer (${r.status})`)
+          } catch (e: any) {
+            if (stop.stopped || e?.fatal) throw e
+            if (++tries > 6) throw e
+            await new Promise((ok) => setTimeout(ok, Math.min(30000, 1000 * 2 ** tries)))
+          }
         }
       }
+    }
+    try { await Promise.all([worker(), worker(), worker()]) } catch (e) {
+      this.r2({ action: 'abort', key: made.key, uploadId: made.uploadId }).catch(() => {})
+      throw e
     } finally { await fd.close() }
+    const parts = Object.keys(etags).map((k) => ({ n: +k, etag: etags[+k] }))
+    const fin = await this.r2({ action: 'complete', key: made.key, uploadId: made.uploadId, parts, name, size, type, days })
     progress(1)
-    const t = token()
-    const expires = new Date(Date.now() + 3 * 864e5).toISOString()
-    const { error } = await this.sb.from('roar_transfer_links').insert({ token: t, path: objectName, name, size, type, expires_at: expires })
-    if (error) throw new Error(/row-level security/i.test(error.message) ? 'roarme-transfer-off' : error.message)
-    return { url: `${ROARME_WEB}?t=${t}`, name, size, expires }
+    return { token: fin.token, name, size: fin.size || size, type, expires: fin.expires }
+  }
+
+  /** one link for every file an email sends by RoarTransfer, with the email's subject as its title, an optional
+   * password and an email to the sender when someone downloads. With one file, its own link if the bundle fails. */
+  async transferBundle(files: RoarTransferFile[], opts: { title?: string; password?: string; notify?: boolean } = {}): Promise<RoarTransferLink> {
+    const size = files.reduce((a, f) => a + f.size, 0)
+    const name = files.length === 1 ? files[0].name : `${files.length} files`
+    try {
+      const b = await this.r2({ action: 'bundle', tokens: files.map((f) => f.token), title: opts.title || '', message: '', recipients: [], password: opts.password || '', notify: !!opts.notify })
+      return { url: TRANSFER_PAGE + b.token, name, size, expires: b.expires, files, locked: !!opts.password }
+    } catch (e) {
+      if (files.length === 1) return { url: TRANSFER_PAGE + files[0].token, name, size, expires: files[0].expires, files, locked: false }
+      throw e
+    }
   }
 
   /** RoarMe's desktop app when it is installed (roarme://, from RoarMe 1.5), else the RoarMe site */

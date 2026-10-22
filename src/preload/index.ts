@@ -76,6 +76,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   roarmeOpen: call('roarmeOpen') as MailApi['roarmeOpen'],
   roarmeTransfer: call('roarmeTransfer') as MailApi['roarmeTransfer'],
   roarmeCancelTransfer: call('roarmeCancelTransfer') as MailApi['roarmeCancelTransfer'],
+  roarmeTransferBundle: call('roarmeTransferBundle') as MailApi['roarmeTransferBundle'],
   fileSizes: call('fileSizes') as MailApi['fileSizes'],
   snooze: call('snooze') as MailApi['snooze'],
   snoozed: call('snoozed') as MailApi['snoozed'],

@@ -313,8 +313,9 @@ export function createDemo(): MailApi & { update: any } {
     // RoarTransfer in the demo: a sample big film file, "uploaded" in three seconds
     roarmeTransfer: async (file) => {
       for (let i = 1; i <= 10; i++) { await new Promise((ok) => setTimeout(ok, 300)); emit({ type: 'transfer', file, progress: i / 10 }) }
-      return { url: 'https://alexisdigipro-hub.github.io/roarme/', name: file.split('/').pop() || file, size: demoSizes[file] || 0, expires: new Date(Date.now() + 3 * 24 * H).toISOString() }
+      return { token: uid(), name: file.split('/').pop() || file, size: demoSizes[file] || 0, type: '', expires: new Date(Date.now() + 3 * 24 * H).toISOString() }
     },
+    roarmeTransferBundle: async (files, opts) => ({ url: 'https://roartransfer.com/', name: files.length === 1 ? files[0].name : `${files.length} files`, size: files.reduce((a, f) => a + f.size, 0), expires: files[0].expires, files, locked: !!opts.password }),
     roarmeCancelTransfer: async () => {},
     fileSizes: async (files) => files.map((f) => demoSizes[f] ?? 240e3),
     pickFiles: async () => ['Demo/Elysium_trailer_ProRes.mov'],

@@ -293,8 +293,10 @@ export interface RoarPerson { id: string; name: string; username: string; avatar
 export interface RoarMeStatus { signedIn: boolean; needsMfa: boolean; email?: string; me?: RoarPerson }
 export interface RoarRoom { id: string; kind: string; title: string; avatar?: string; members: RoarPerson[]; unread: number }
 export interface RoarTask { id: string; title: string; notes: string; due: string | null; priority: 'low' | 'normal' | 'high'; status: 'pending' | 'open' | 'doing' | 'done' | 'declined'; mine: boolean; from?: string; to?: string }
-/** a big attachment sent as a RoarTransfer link instead of inside the email */
-export interface RoarTransferLink { url: string; name: string; size: number; expires: string }
+/** one file up on RoarTransfer (Cloudflare R2), before its email's link is made */
+export interface RoarTransferFile { token: string; name: string; size: number; type: string; expires: string }
+/** the big attachments of an email sent as ONE RoarTransfer link instead of inside the email (22 Oct 2026) */
+export interface RoarTransferLink { url: string; name: string; size: number; expires: string; files?: RoarTransferFile[]; locked?: boolean }
 export interface RoarTaskInput { title: string; notes: string; due?: string; priority?: 'low' | 'normal' | 'high'; assignee?: string }
 export interface RoarWork {
   tasks: RoarTask[]
@@ -413,7 +415,9 @@ export interface MailApi {
   /** RoarMe's app (roarme://) when installed, else the RoarMe site; a chat, a message in it, or the hub */
   roarmeOpen(where: { roomId?: string; messageId?: string; hub?: 'tasks' | 'calendar' }): Promise<void>
   /** sends a local file up to RoarTransfer (progress comes as 'transfer' events) and returns its 3-day link */
-  roarmeTransfer(file: string): Promise<RoarTransferLink>
+  roarmeTransfer(file: string, days?: number): Promise<RoarTransferFile>
+  /** one link for the email's transfers: the subject as title, a password, an email when downloaded */
+  roarmeTransferBundle(files: RoarTransferFile[], opts: { title?: string; password?: string; notify?: boolean }): Promise<RoarTransferLink>
   roarmeCancelTransfer(file: string): Promise<void>
   /** the size in bytes of local files (attachments in the composer); -1 when missing */
   fileSizes(files: string[]): Promise<number[]>

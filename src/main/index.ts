@@ -7,7 +7,7 @@ import { openStore } from './store'
 import { MailService } from './mail'
 import { autodetect } from './autodetect'
 import { RoarMe } from './roarme'
-import type { LockState, MailEvent, MessageRow, NewMailSound } from '../shared/api'
+import type { LockState, MailEvent, MessageRow, NewMailSound, RoarTransferFile } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const updater = require('./updater.js')
 
@@ -344,14 +344,21 @@ app.whenReady().then(() => {
   handle('mail:roarmeOpen', (_e, where) => roarme.open(where || {}))
   // big attachments as RoarTransfer links: only files the person picked in the composer (a draft's attachments)
   const transfers = new Map<string, { stopped?: boolean }>()
-  handle('mail:roarmeTransfer', async (_e, file: string) => {
+  handle('mail:roarmeTransfer', async (_e, file: string, days?: number) => {
     if (typeof file !== 'string' || !path.isAbsolute(file) || !fs.statSync(file).isFile()) throw new Error('roarme-no-file')
     const stop = {}
     transfers.set(file, stop)
     let last = 0
     try {
-      return await roarme.transfer(file, (p) => { const now = Date.now(); if (p === 1 || now - last > 250) { last = now; emit({ type: 'transfer', file, progress: p }) } }, stop)
+      return await roarme.transfer(file, (p) => { const now = Date.now(); if (p === 1 || now - last > 250) { last = now; emit({ type: 'transfer', file, progress: p }) } }, stop, days === 1 ? 1 : 3)
     } finally { transfers.delete(file) }
+  })
+  // one link for an email's transfers (the files' tokens come back from roarmeTransfer; roartransfer-r2 checks they are the sender's)
+  handle('mail:roarmeTransferBundle', (_e, files: RoarTransferFile[], opts: { title?: string; password?: string; notify?: boolean }) => {
+    const list = (Array.isArray(files) ? files : []).filter((f) => f && typeof f.token === 'string').slice(0, 200)
+    if (!list.length) throw new Error('roarme-no-file')
+    const o = opts && typeof opts === 'object' ? opts : {}
+    return roarme.transferBundle(list, { title: String(o.title || '').slice(0, 120), password: String(o.password || '').slice(0, 100), notify: !!o.notify })
   })
   handle('mail:roarmeCancelTransfer', (_e, file: string) => { const s = transfers.get(file); if (s) s.stopped = true })
   handle('mail:fileSizes', (_e, files: string[]) => (Array.isArray(files) ? files : []).map((f) => { try { return fs.statSync(String(f)).size } catch { return -1 } }))
