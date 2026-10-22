@@ -55,6 +55,10 @@ export default function App() {
   const [syncing, setSyncing] = useState<Record<string, boolean>>({})
   const [update, setUpdate] = useState<{ status: string; version: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  // search is a magnifier in the filter capsule; it opens into a field (the button, or /)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const openSearch = () => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 0) }
+  const closeSearch = () => { setQuery(''); setSearchOpen(false) }
   const scopeRef = useRef(scope); scopeRef.current = scope
   const [intro, setIntro] = useState(true)
   const [widths, setWidth] = useWidths()
@@ -297,7 +301,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (compose || adding || moving || snoozing || roar || settingsOpen || el.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(el.tagName)) {
-        if (e.key === 'Escape' && el === searchRef.current) { setQuery(''); searchRef.current?.blur() }
+        if (e.key === 'Escape' && el === searchRef.current) { closeSearch(); searchRef.current?.blur() }
         return
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'a') { e.preventDefault(); setSelected(list.map(keyOf)); return }
@@ -311,7 +315,7 @@ export default function App() {
       if (k === 'ArrowDown' || k === 'j') { e.preventDefault(); move(1) }
       else if (k === 'ArrowUp' || k === 'k') { e.preventDefault(); move(-1) }
       else if (k === 'c' || k === 'n') { e.preventDefault(); setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId }) }
-      else if (k === '/') { e.preventDefault(); searchRef.current?.focus() }
+      else if (k === '/') { e.preventDefault(); openSearch() }
       else if (k === 'z' && toast?.undo) { toast.undo(); setToast(null) }
       else if (k === 'Escape') setSelected([])
       else if (!chosen.length) return
@@ -445,14 +449,19 @@ export default function App() {
             <h3 className="grow ellipsis">{title}</h3>
             <button className="tool" title={`${t.compose} (C)`} onClick={() => setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId })}><Icon name="compose" /></button>
           </div>
-          <label className="search">
-            <Icon name="search" size={15} />
-            <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`${t.search}  /`} />
-            {query && <button onClick={() => setQuery('')}><Icon name="close" size={13} /></button>}
-          </label>
-          {!results && (<>
+          {(searchOpen || query) && (
+            <label className="search search-cap">
+              <Icon name="search" size={15} />
+              <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t.search}
+                onBlur={() => { if (!query.trim()) setSearchOpen(false) }} />
+              <button title={t.cancel} onMouseDown={(e) => e.preventDefault()} onClick={closeSearch}><Icon name="close" size={13} /></button>
+            </label>
+          )}
+          {!results && !searchOpen && (<>
             <div className="filters">
               <div className="pill-group">
+              <button className="tool small" title={`${t.search} (/)`} onClick={openSearch}><Icon name="search" size={15} /></button>
+              <span className="sep" />
               {FILTERS.map(([f, icon, label]) => (
                 <button key={f} className={`tool small ${scope.filter === f ? 'on-filter' : ''}`} title={t[label]}
                   onClick={() => setScope((s) => ({ ...s, filter: s.filter === f ? undefined : f }))}><Icon name={icon} size={15} filled={f === 'flagged' && scope.filter === f} /></button>

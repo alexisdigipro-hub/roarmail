@@ -469,3 +469,13 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 .set-group-title { margin: 10px 12px 2px; }
 .set-side .set-nav { height: 32px; }
 .set-side .set-brand { margin-bottom: 4px; }
+
+/* search: a magnifier in the filter capsule that opens into this field (Alex, 21 Oct 2026) */
+.search.search-cap { height: 36px; margin-top: 10px; border-radius: 999px; padding: 0 6px 0 12px;
+  background: color-mix(in srgb, var(--panel-3) 70%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), inset 0 0 0 1px var(--edge-2), 0 6px 18px rgba(0, 0, 0, .25);
+  animation: rm-slide-in .25s var(--ease, ease) both; }
+.search.search-cap:focus-within { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.search.search-cap button { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+.search.search-cap button:hover { color: var(--text); background: var(--glass-2); }
+.pill-group .sep { width: 1px; height: 16px; margin: 0 3px; background: var(--edge-2); }
+.list-head .filters { margin-top: 10px; }
