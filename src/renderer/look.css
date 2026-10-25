@@ -479,3 +479,5 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 .search.search-cap button:hover { color: var(--text); background: var(--glass-2); }
 .pill-group .sep { width: 1px; height: 16px; margin: 0 3px; background: var(--edge-2); }
 .list-head .filters { margin-top: 10px; }
+/* Privacy Policy and Terms (Alex, 25 Oct) */
+.legal-links { gap: 8px; flex-wrap: wrap; }
