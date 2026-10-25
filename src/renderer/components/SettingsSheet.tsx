@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import type { Account, Folder, LockState, NewMailSound, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
-import { t, when, type Key } from '../i18n'
+import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
 import { Icon } from './Icon'
@@ -653,6 +653,11 @@ function Updates({ s, set }: { s: Settings; set: Set }) {
       <Group note={t.up_how}>
         <Toggle label={t.up_auto} hint={t.up_autoHint} on={s.autoUpdate} set={(v) => set('autoUpdate', v)} />
       </Group>
+      {/* Privacy Policy and Terms (Alex, 25 Oct): on the company site, opened in the browser */}
+      <div className="row legal-links">
+        {([['privacy', t.lg_privacy], ['terms', t.lg_terms]] as const).map(([at, label]) => (
+          <button key={at} className="pill" onClick={() => window.roarmail.openExternal(`https://themadlions.com/legal/roarmail/${lang === 'el' ? '?lang=el' : ''}#${at}`)}>{label}</button>))}
+      </div>
     </div>
   )
 }
