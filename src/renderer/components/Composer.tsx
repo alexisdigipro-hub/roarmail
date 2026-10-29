@@ -108,7 +108,10 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const [priority, setPriority] = useState<Draft['priority']>(seed.draft?.priority || 'normal')
   const [sigId, setSigId] = useState<string>(() => accounts.find((a) => a.id === init.accountId)?.signatureId || '')
   const [box, setBox] = useState(savedSize)
-  const [fmtBar, setFmtBar] = useState(() => { try { return localStorage.getItem('roarmail.fmtbar') === '1' } catch { return false } })
+  // the format bar shows unless it was hidden with the Aa button (29 Oct 2026: on by default, with every text tool)
+  const [fmtBar, setFmtBar] = useState(() => { try { return localStorage.getItem('roarmail.fmtbar') !== '0' } catch { return true } })
+  const [linkAsk, setLinkAsk] = useState<string | null>(null)
+  const [states, setStates] = useState<Record<string, boolean>>({})
   // files sent up with the RoarTransfer button; each becomes a link card in the message
   const [rt, setRt] = useState<string[]>([])
   const range = useRef<Range | null>(null)
@@ -231,8 +234,18 @@ export function Composer({ seed, accounts, onClose, onSent }: {
       const sel = getSelection()
       if (sel && sel.rangeCount && body.current?.contains(sel.anchorNode)) range.current = sel.getRangeAt(0).cloneRange()
     }
+    // which of bold, italic… the text under the cursor has, so their buttons light up
+    const lit = () => {
+      const sel = getSelection()
+      if (!sel || !body.current?.contains(sel.anchorNode)) return
+      const next: Record<string, boolean> = {}
+      for (const c of ['bold', 'italic', 'underline', 'strikeThrough', 'superscript', 'subscript', 'insertUnorderedList', 'insertOrderedList',
+        'justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull']) next[c] = document.queryCommandState(c)
+      setStates((s) => (Object.keys(next).some((k) => s[k] !== next[k]) ? next : s))
+    }
     document.addEventListener('selectionchange', keep)
-    return () => document.removeEventListener('selectionchange', keep)
+    document.addEventListener('selectionchange', lit)
+    return () => { document.removeEventListener('selectionchange', keep); document.removeEventListener('selectionchange', lit) }
   }, [])
   const exec = (cmd: string, value?: string) => {
     const el = body.current
@@ -243,6 +256,10 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     document.execCommand(cmd, false, value)
     dirty.current = true
   }
+  // a format button that lights up while the text under the cursor has that format
+  const fb = (c: string, title: string, children: ReactNode) => (
+    <button className={`fmt ${states[c] ? 'on' : ''}`} title={title} onClick={() => exec(c)}>{children}</button>
+  )
   const toggleFmt = () => setFmtBar((v) => { try { localStorage.setItem('roarmail.fmtbar', v ? '0' : '1') } catch { /* this run only */ } return !v })
 
   // the corner handle: the window stays centred, so it grows twice as fast as the pointer moves
@@ -371,21 +388,45 @@ export function Composer({ seed, accounts, onClose, onSent }: {
               {SIZES.map(([k, px]) => <option key={k} value={k}>{px}</option>)}
             </select>
             <label className="swatch-pick" title={t.fm_color}><input type="color" defaultValue="#d40000" onChange={(e) => exec('foreColor', e.target.value)} /></label>
+            <label className="swatch-pick marker" title={t.fm_highlight}><Icon name="marker" size={13} /><input type="color" defaultValue="#fff59d" onChange={(e) => exec('hiliteColor', e.target.value)} /></label>
             <button className="fmt" title={t.fm_clear} onClick={() => exec('removeFormat')}><Icon name="clearFmt" size={15} /></button>
             <span className="sep" />
-            <button className="fmt" title={t.fm_bold} onClick={() => exec('bold')}><b>B</b></button>
-            <button className="fmt" title={t.fm_italic} onClick={() => exec('italic')}><i>I</i></button>
-            <button className="fmt" title={t.fm_underline} onClick={() => exec('underline')}><u>U</u></button>
-            <button className="fmt" title={t.fm_strike} onClick={() => exec('strikeThrough')}><s>S</s></button>
+            {fb('bold', t.fm_bold, <b>B</b>)}
+            {fb('italic', t.fm_italic, <i>I</i>)}
+            {fb('underline', t.fm_underline, <u>U</u>)}
+            {fb('strikeThrough', t.fm_strike, <s>S</s>)}
+            {fb('superscript', t.fm_sup, <span>x<sup>2</sup></span>)}
+            {fb('subscript', t.fm_sub, <span>x<sub>2</sub></span>)}
             <span className="sep" />
-            <button className="fmt" title={t.fm_left} onClick={() => exec('justifyLeft')}><Icon name="alignL" size={15} /></button>
-            <button className="fmt" title={t.fm_center} onClick={() => exec('justifyCenter')}><Icon name="alignC" size={15} /></button>
-            <button className="fmt" title={t.fm_right} onClick={() => exec('justifyRight')}><Icon name="alignR" size={15} /></button>
+            {fb('justifyLeft', t.fm_left, <Icon name="alignL" size={15} />)}
+            {fb('justifyCenter', t.fm_center, <Icon name="alignC" size={15} />)}
+            {fb('justifyRight', t.fm_right, <Icon name="alignR" size={15} />)}
+            {fb('justifyFull', t.fm_justify, <Icon name="alignJ" size={15} />)}
             <span className="sep" />
-            <button className="fmt" title={t.fm_bullets} onClick={() => exec('insertUnorderedList')}><Icon name="listUl" size={15} /></button>
-            <button className="fmt" title={t.fm_numbers} onClick={() => exec('insertOrderedList')}><Icon name="listOl" size={15} /></button>
+            {fb('insertUnorderedList', t.fm_bullets, <Icon name="listUl" size={15} />)}
+            {fb('insertOrderedList', t.fm_numbers, <Icon name="listOl" size={15} />)}
             <button className="fmt" title={t.fm_outdent} onClick={() => exec('outdent')}><Icon name="outdent" size={15} /></button>
             <button className="fmt" title={t.fm_indent} onClick={() => exec('indent')}><Icon name="indent" size={15} /></button>
+            <span className="sep" />
+            <button className="fmt" title={t.fm_quote} onClick={() => exec('formatBlock', 'blockquote')}><Icon name="quote" size={15} /></button>
+            <button className={`fmt ${linkAsk != null ? 'on' : ''}`} title={t.fm_link} onClick={() => setLinkAsk((v) => (v == null ? '' : null))}><Icon name="link" size={15} /></button>
+            <button className="fmt" title={t.fm_unlink} onClick={() => exec('unlink')}><Icon name="unlink" size={15} /></button>
+            <button className="fmt" title={t.fm_rule} onClick={() => exec('insertHorizontalRule')}><Icon name="rule" size={15} /></button>
+            <span className="sep" />
+            <button className="fmt" title={t.fm_undo} onClick={() => exec('undo')}><Icon name="undo" size={15} /></button>
+            <button className="fmt" title={t.fm_redo} onClick={() => exec('redo')}><Icon name="redo" size={15} /></button>
+            {linkAsk != null && (
+              <form className="link-ask" onSubmit={(e) => {
+                e.preventDefault()
+                const url = linkAsk.trim()
+                if (url) exec('createLink', /^[a-z][\w+.-]*:/i.test(url) ? url : `https://${url}`)
+                setLinkAsk(null)
+              }}>
+                <input autoFocus value={linkAsk} placeholder={t.fm_linkPh} onChange={(e) => setLinkAsk(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setLinkAsk(null) } }} />
+                <button className="pill small primary">OK</button>
+              </form>
+            )}
           </div>
         )}
         <div className="editor" ref={body} contentEditable suppressContentEditableWarning spellCheck />
