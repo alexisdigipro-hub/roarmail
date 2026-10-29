@@ -267,6 +267,8 @@ export interface Settings {
   previewLines: number
   /** Appearance > List: the round picture or initials at the start of each row */
   listAvatars: boolean
+  /** Appearance > List > Conversations: the messages of a conversation from the oldest down, or the newest on top */
+  threadOrder: 'oldest' | 'newest'
   /** the unified folders shown under All accounts (roles, comma separated; the inbox always shows) */
   unifiedShown: string
   /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
@@ -326,6 +328,8 @@ export interface MailApi {
   autodetect(email: string): Promise<ServerConfig>
   testAccount(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }>
   addAccount(cfg: ServerConfig, password: string): Promise<Account>
+  /** Sign in with Microsoft in the browser, then the account is added (or an existing one signs in again) */
+  addMicrosoft(cfg: ServerConfig): Promise<{ ok: true } | { ok: false; error: string }>
   updateAccount(id: string, patch: AccountPatch): Promise<void>
   /** every account, the switched-off ones too (Settings > Accounts); accounts() lists only the ones on */
   allAccounts(): Promise<Account[]>

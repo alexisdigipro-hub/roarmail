@@ -336,6 +336,11 @@ function ListPage({ s, set }: { s: Settings; set: Set }) {
         <Toggle label={t.ap_senderPics} hint={s.privacyMode ? t.ap_senderPicsOff : t.ap_senderPicsHint} on={s.senderPictures && !s.privacyMode} disabled={s.privacyMode || !s.listAvatars} set={(v) => set('senderPictures', v)} />
         <Toggle label={t.ap_accColours} hint={t.ap_accColoursHint} on={s.accountColours} set={(v) => set('accountColours', v)} />
       </Group>
+      <Group title={t.sec_thread}>
+        <Line label={t.ap_threadOrder}>
+          <Choice value={s.threadOrder} onChange={(v) => set('threadOrder', v)} options={[['oldest', t.ap_oldestFirst], ['newest', t.ap_newestFirst]] as [Settings['threadOrder'], string][]} />
+        </Line>
+      </Group>
       <Group title={t.sec_counters}>
         <Line label={t.ap_inboxCounter}><Choice value={s.inboxCounter} onChange={(v) => set('inboxCounter', v)} options={counters} /></Line>
         <Line label={t.ap_folderCounter}><Choice value={s.folderCounter} onChange={(v) => set('folderCounter', v)} options={counters} /></Line>

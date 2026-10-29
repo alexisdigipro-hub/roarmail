@@ -11,7 +11,8 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
   const [pass, setPass] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [manual, setManual] = useState(false)
-  const [busy, setBusy] = useState<'' | 'checking' | 'testing'>('')
+  const [busy, setBusy] = useState<'' | 'checking' | 'testing' | 'microsoft'>('')
+  const [usePass, setUsePass] = useState(false)
   const [error, setError] = useState('')
 
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
@@ -38,11 +39,23 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
     } finally { setBusy('') }
   }
 
+  // Outlook.com and Microsoft 365: Microsoft's sign-in in the browser instead of a password (29 Oct 2026)
+  const viaMicrosoft = cfg?.provider === 'microsoft' && !usePass
+  async function microsoft() {
+    if (!cfg) return
+    setBusy('microsoft'); setError('')
+    try {
+      const r = await window.roarmail.addMicrosoft({ ...cfg, email: email.trim(), displayName: name.trim(), username: cfg.username || email.trim() })
+      if (!r.ok) { setError(errorText(r.error)); return }
+      onDone()
+    } finally { setBusy('') }
+  }
+
   const set = (k: keyof ServerConfig) => (v: string) => setCfg((c) => c && ({ ...c, [k]: /Port$/.test(k) ? Number(v) || 0 : v }))
 
   return (
     <div className="sheet-wrap">
-      <form className="sheet add" onSubmit={(e) => { e.preventDefault(); cfg ? connect() : lookup() }}>
+      <form className="sheet add" onSubmit={(e) => { e.preventDefault(); viaMicrosoft ? microsoft() : cfg ? connect() : lookup() }}>
         <div className="brand"><b>ROAR</b><i>MAIL</i></div>
         <h1>{first ? t.welcome : t.addAccount}</h1>
         <p className="muted">{t.welcomeSub}</p>
@@ -52,8 +65,11 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
 
         {cfg && (
           <>
-            <label>{t.password}<input type="password" autoFocus value={pass} onChange={(e) => setPass(e.target.value)} /></label>
-            {cfg.hint && <p className="hint">{t[`hint_${cfg.hint}` as Key]}</p>}
+            {!viaMicrosoft && <label>{t.password}<input type="password" autoFocus value={pass} onChange={(e) => setPass(e.target.value)} /></label>}
+            {cfg.hint && (cfg.provider !== 'microsoft' || viaMicrosoft) && <p className="hint">{t[`hint_${cfg.hint}` as Key]}</p>}
+            {cfg.provider === 'microsoft' && (
+              <button type="button" className="link" onClick={() => { setUsePass((v) => !v); setError('') }}>{usePass ? t.msUseSignIn : t.msUsePassword}</button>
+            )}
             <button type="button" className="link" onClick={() => setManual((m) => !m)}>
               <Icon name="chevron" size={14} /> {t.advanced}
             </button>
@@ -70,12 +86,12 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
         )}
 
         {error && <p className="error">{error}</p>}
-        {busy && <p className="muted">{busy === 'checking' ? t.checking : t.testing}</p>}
+        {busy && <p className="muted">{busy === 'checking' ? t.checking : busy === 'microsoft' ? t.msWaiting : t.testing}</p>}
 
         <div className="row end">
-          {cfg ? <button type="button" className="pill ghost" onClick={() => { setCfg(null); setError(''); setManual(false) }}>{t.back}</button>
+          {cfg ? <button type="button" className="pill ghost" onClick={() => { setCfg(null); setError(''); setManual(false); setUsePass(false) }}>{t.back}</button>
             : !first && <button type="button" className="pill ghost" onClick={onCancel}>{t.cancel}</button>}
-          <button className="pill primary" disabled={!!busy || !validEmail || (!!cfg && !pass)}>{cfg ? t.connect : t.next}</button>
+          <button className="pill primary" disabled={!!busy || !validEmail || (!!cfg && !viaMicrosoft && !pass)}>{viaMicrosoft ? t.msSignIn : cfg ? t.connect : t.next}</button>
         </div>
       </form>
     </div>

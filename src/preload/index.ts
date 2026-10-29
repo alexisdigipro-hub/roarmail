@@ -10,6 +10,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   autodetect: call('autodetect') as MailApi['autodetect'],
   testAccount: call('testAccount') as MailApi['testAccount'],
   addAccount: call('addAccount') as MailApi['addAccount'],
+  addMicrosoft: call('addMicrosoft') as MailApi['addMicrosoft'],
   removeAccount: call('removeAccount') as MailApi['removeAccount'],
   accounts: call('accounts') as MailApi['accounts'],
   folders: call('folders') as MailApi['folders'],

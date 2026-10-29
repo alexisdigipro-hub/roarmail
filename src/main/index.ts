@@ -231,6 +231,7 @@ app.whenReady().then(() => {
   handle('mail:autodetect', (_e, email: string) => autodetect(email))
   handle('mail:testAccount', (_e, cfg, pass) => mail.test(cfg, pass))
   handle('mail:addAccount', (_e, cfg, pass) => mail.add(cfg, pass))
+  handle('mail:addMicrosoft', (_e, cfg) => mail.addMicrosoft(cfg))
   handle('mail:removeAccount', (_e, id) => mail.remove(id))
   handle('mail:accounts', () => mail.accounts())
   handle('mail:folders', (_e, id) => mail.folders(id))

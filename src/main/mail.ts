@@ -17,6 +17,7 @@ import { app, net, shell } from 'electron'
 import type { DB } from './store'
 import { fold, now, uuid } from './store'
 import { seal, open } from './vault'
+import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './microsoft'
 import type {
   Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   Security, ServerConfig, Settings, Signature, SnoozedItem,
@@ -74,7 +75,7 @@ const SETTINGS: Settings = {
   language: 'auto', unifiedInbox: true, linksInBackground: false, dockMode: 'both', notifyReply: true, markRead: 'open',
   accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
-  autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true,
+  autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash',
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
@@ -128,18 +129,21 @@ function hasAttachment(node: any): boolean {
   return Array.isArray(node.childNodes) && node.childNodes.some(hasAttachment)
 }
 
-function imapOptions(cfg: { imapHost: string; imapPort: number; imapTls: string; username: string }, pass: string) {
+/** a password, or a Microsoft access token (Sign in with Microsoft) */
+type Cred = string | { accessToken: string }
+
+function imapOptions(cfg: { imapHost: string; imapPort: number; imapTls: string; username: string }, cred: Cred) {
   return {
     host: cfg.imapHost, port: cfg.imapPort, secure: cfg.imapTls === 'tls', doSTARTTLS: cfg.imapTls === 'starttls' ? true : undefined,
-    auth: { user: cfg.username, pass }, logger: false as const, emitLogs: false,
+    auth: typeof cred === 'string' ? { user: cfg.username, pass: cred } : { user: cfg.username, accessToken: cred.accessToken }, logger: false as const, emitLogs: false,
     tls: { servername: cfg.imapHost }, connectionTimeout: 20e3, greetingTimeout: 15e3, socketTimeout: 5 * 60e3,
   }
 }
 
-function smtpTransport(cfg: { smtpHost: string; smtpPort: number; smtpTls: string; username: string }, pass: string) {
+function smtpTransport(cfg: { smtpHost: string; smtpPort: number; smtpTls: string; username: string }, cred: Cred) {
   return nodemailer.createTransport({
     host: cfg.smtpHost, port: cfg.smtpPort, secure: cfg.smtpTls === 'tls', requireTLS: cfg.smtpTls === 'starttls',
-    auth: { user: cfg.username, pass }, tls: { servername: cfg.smtpHost }, connectionTimeout: 20e3,
+    auth: typeof cred === 'string' ? { user: cfg.username, pass: cred } : { type: 'OAuth2', user: cfg.username, accessToken: cred.accessToken }, tls: { servername: cfg.smtpHost }, connectionTimeout: 20e3,
   })
 }
 
@@ -197,6 +201,7 @@ export class MailService {
   private state = new Map<string, { state: Account['state']; error?: string }>()
   private retry = new Map<string, NodeJS.Timeout>()
   private backfilling = new Set<string>()
+  private tokens = new Map<string, { access: string; expires: number }>()
   private poll: NodeJS.Timeout | null = null
   private lastClean = 0
   private ticker: NodeJS.Timeout | null = null
@@ -242,7 +247,7 @@ export class MailService {
       })
   }
 
-  async test(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }> {
+  async test(cfg: ServerConfig, password: Cred): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }> {
     const c = { ...cfg }
     const tryImap = async () => { const cl = new ImapFlow(imapOptions(c, password)); await cl.connect(); await cl.logout() }
     const trySmtp = async () => { const t = smtpTransport(c, password); try { await t.verify() } finally { t.close() } }
@@ -316,7 +321,7 @@ export class MailService {
   async updateServer(id: string, cfg: ServerConfig, password?: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const r = this.accountRow(id)
     const pass = password || open(r.secret)
-    const t = await this.test({ ...cfg, email: r.email, displayName: r.display_name, provider: r.provider }, pass)
+    const t = await this.test({ ...cfg, email: r.email, displayName: r.display_name, provider: r.provider }, password || await this.cred(r))
     if (!t.ok) return t
     const c = t.cfg
     this.db.prepare(`update accounts set imap_host = ?, imap_port = ?, imap_tls = ?, smtp_host = ?, smtp_port = ?, smtp_tls = ?, username = ?,
@@ -439,7 +444,7 @@ export class MailService {
       let c = this.worker.get(accountId)
       if (!c || !c.usable) {
         const r = this.accountRow(accountId)
-        c = new ImapFlow(imapOptions(this.cfgOf(r), open(r.secret)))
+        c = new ImapFlow(imapOptions(this.cfgOf(r), await this.cred(r)))
         c.on('error', () => {})
         await c.connect()
         this.worker.set(accountId, c)
@@ -551,6 +556,47 @@ export class MailService {
     }
   }
 
+  /** what the account signs in with: its password, or for Sign in with Microsoft an access token, renewed before it runs out */
+  private async cred(r: Row): Promise<Cred> {
+    const secret = open(r.secret)
+    if (!secret.startsWith(OAUTH_PREFIX)) return secret
+    const had = this.tokens.get(r.id)
+    if (had && had.expires > Date.now() + 120e3) return { accessToken: had.access }
+    const t = await msRefresh(secret.slice(OAUTH_PREFIX.length))
+    this.tokens.set(r.id, t)
+    if (t.refresh !== secret.slice(OAUTH_PREFIX.length)) this.db.prepare('update accounts set secret = ? where id = ?').run(seal(OAUTH_PREFIX + t.refresh), r.id)
+    return { accessToken: t.access }
+  }
+
+  /**
+   * Sign in with Microsoft: the browser sign-in, then the account is tested and added like any other, with Microsoft's
+   * servers; an account already there (signed out, or added with a password before) takes the new sign-in instead
+   */
+  async addMicrosoft(cfg: ServerConfig): Promise<{ ok: true } | { ok: false; error: string }> {
+    try {
+      const tk = await msSignIn(cfg.email || undefined)
+      const email = tk.email || cfg.email
+      if (!email) return { ok: false, error: 'auth' }
+      const c: ServerConfig = { ...cfg, email, username: email, displayName: cfg.displayName || tk.name }
+      const tested = await this.test(c, { accessToken: tk.access })
+      if (!tested.ok) return tested
+      const old = this.db.prepare('select id from accounts where lower(email) = lower(?) and enabled = 1').get(email) as Row
+      if (old) {
+        this.db.prepare('update accounts set secret = ?, updated_at = ? where id = ?').run(seal(OAUTH_PREFIX + tk.refresh), now(), old.id)
+        this.tokens.set(old.id, tk)
+        this.stopAccount(old.id); this.startAccount(old.id)
+        this.emit({ type: 'accounts' })
+        return { ok: true }
+      }
+      const a = await this.add(tested.cfg, OAUTH_PREFIX + tk.refresh)
+      this.tokens.set(a.id, tk)
+      return { ok: true }
+    } catch (e: any) {
+      const m = String(e?.message || e)
+      return { ok: false, error: /^ms_/.test(m) ? m : friendly(e) }
+    }
+  }
+
   private scheduleRetry(id: string, ms = 30e3) {
     clearTimeout(this.retry.get(id))
     this.retry.set(id, setTimeout(() => { if (this.exists(id)) this.startAccount(id) }, ms))
@@ -562,7 +608,9 @@ export class MailService {
   private async startIdle(id: string) {
     this.idle.get(id)?.close()
     const r = this.accountRow(id)
-    const c = new ImapFlow(imapOptions(this.cfgOf(r), open(r.secret)))
+    const cred = await this.cred(r).catch(() => null)
+    if (!cred) { this.scheduleRetry(id); return }
+    const c = new ImapFlow(imapOptions(this.cfgOf(r), cred))
     this.idle.set(id, c)
     let timer: NodeJS.Timeout | null = null
     c.on('error', () => {})
@@ -1512,7 +1560,7 @@ export class MailService {
       const mail = this.compose(d, messageId)
       const raw = await mail.compile().build()
       const envelope = mail.compile().getEnvelope()
-      const t = smtpTransport(this.cfgOf(r), open(r.secret))
+      const t = smtpTransport(this.cfgOf(r), await this.cred(r))
       try { await t.sendMail({ envelope, raw }) } finally { t.close() }
 
       // sent: the draft goes, the people written to are remembered for autocomplete
@@ -1697,6 +1745,7 @@ export class MailService {
     // Privacy mode wins over the single switches
     if (s.privacyMode) { s.blockTrackers = true; s.stripTracking = true; s.senderPictures = false }
     s.previewLines = Math.max(0, Math.min(3, Math.round(s.previewLines)))
+    if (!['oldest', 'newest'].includes(s.threadOrder)) s.threadOrder = 'oldest'
     for (const k of ['inboxCounter', 'folderCounter'] as const) if (!['unread', 'total', 'none'].includes(s[k])) s[k] = 'unread'
     if (!['system', 'dark', 'light'].includes(s.appearance)) s.appearance = 'system'
     if (!['simba', 'pumba'].includes(s.theme)) s.theme = 'simba'

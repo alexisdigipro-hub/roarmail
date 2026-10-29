@@ -170,6 +170,7 @@ export function createDemo(): MailApi & { update: any } {
     autodetect: async (email) => ({ email, displayName: '', username: email, provider: 'imap', imapHost: `mail.${email.split('@')[1] || 'example.com'}`, imapPort: 993, imapTls: 'tls', smtpHost: `mail.${email.split('@')[1] || 'example.com'}`, smtpPort: 465, smtpTls: 'tls' }),
     testAccount: async () => ({ ok: false, error: 'Στο demo δεν συνδέονται λογαριασμοί. Κατέβασε την εφαρμογή για Mac ή Windows. / The demo cannot connect accounts; download the app.' }),
     addAccount: async () => { throw new Error('demo') },
+    addMicrosoft: async () => ({ ok: false, error: 'Στο demo δεν συνδέονται λογαριασμοί. / The demo cannot connect accounts.' }),
     updateAccount: async (id, patch) => { const a = accounts.find((x) => x.id === id); if (a) Object.assign(a, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); emit({ type: 'accounts' }) },
     allAccounts: async () => { recount(); return accounts.map((a) => ({ ...a, unread: folders.find((f) => f.accountId === a.id && f.role === 'inbox')?.unread || 0 })) },
     updateServer: async () => ({ ok: false, error: 'Στο demo δεν αλλάζουν οι servers. / The demo cannot change servers.' }),

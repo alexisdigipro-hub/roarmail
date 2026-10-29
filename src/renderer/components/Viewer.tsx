@@ -77,9 +77,10 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar }: {
 
       <div className="read" key={key}>
         <h2 className="subject">{row.subject || t.noSubject}{items.length > 1 && <span className="muted count-pill">{items.length}</span>}</h2>
-        {items.map((m, i) => open.has(m.id)
-          ? <MessageCard key={m.id} id={m.id} accounts={accounts} prefs={prefs} isLast={i === items.length - 1}
-              onLoaded={(full) => { if (i === items.length - 1) last.current = full }}
+        {/* Settings > Message list > Conversations: oldest first (as written) or the newest on top */}
+        {(prefs.threadOrder === 'newest' ? [...items].reverse() : items).map((m) => open.has(m.id)
+          ? <MessageCard key={m.id} id={m.id} accounts={accounts} prefs={prefs} isLast={m === items[items.length - 1]}
+              onLoaded={(full) => { if (m === items[items.length - 1]) last.current = full }}
               onFold={items.length > 1 ? () => setOpen((s) => { const n = new Set(s); n.delete(m.id); return n }) : undefined}
               onCompose={onCompose} />
           : (
