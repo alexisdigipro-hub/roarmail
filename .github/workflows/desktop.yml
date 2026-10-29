@@ -73,8 +73,9 @@ jobs:
           ls -la
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-build-{0}', github.run_number) }}
-          name: RoarMail ${{ steps.v.outputs.version }} beta · ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build {0}', github.run_number) }}
+          # always a desktop-vX.Y.Z tag: the app's updater only takes those (a run from the Actions tab made desktop-build-N, which no app picked up)
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v{0}', steps.v.outputs.version) }}
+          name: RoarMail ${{ steps.v.outputs.version }} beta · desktop-v${{ steps.v.outputs.version }}
           make_latest: true
           body: |
             RoarMail ${{ steps.v.outputs.version }} beta for Mac and Windows. TheMadlions Lab, Experiment 03.
