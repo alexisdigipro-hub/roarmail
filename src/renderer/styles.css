@@ -465,7 +465,10 @@ html.resizing iframe { pointer-events: none; }
 .rail.wide .acc-label b { font-weight: 500; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail.wide .acc-label small { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail.wide span.acc-label.muted { font-size: 13px; color: var(--muted); }
-.rail.wide .rail-tools { flex-direction: row; justify-content: center; }
+.rail.wide .rail-tools { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 8px; }
+/* the tools stay round in the wide rail (Alex, 29 Oct: "the buttons are stretched") */
+.rail-tools .acc { flex: none; aspect-ratio: 1; }
+.rail.wide .rail-tools .acc { width: 36px; height: 36px; }
 
 /* pull down to refresh, over the list (App.tsx): a round glass button that turns as the list is pulled, red when far enough, spinning while mail comes in */
 .pull-refresh { flex: none; display: grid; place-items: center; overflow: hidden; transition: height .25s cubic-bezier(.16, 1, .3, 1); }
