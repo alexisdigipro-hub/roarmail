@@ -719,7 +719,7 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .set-row.block { display: block; }
 
 /* Contacts (Contacts.tsx): the list on the left, the card on the right; the hover card over a sender's name */
-.sheet.contacts { width: min(980px, 100%); height: min(720px, 100%); display: flex; flex-direction: column; gap: 12px; outline: none; overflow: hidden; }
+.sheet.contacts { width: min(1360px, 100%); height: 100%; max-height: none; /* nearly the whole window (Alex, 29 Oct) */ display: flex; flex-direction: column; gap: 12px; outline: none; overflow: hidden; }
 .ct-head { display: flex; align-items: center; gap: 10px; }
 .ct-head h2 { margin: 0; font-size: 22px; }
 .ct-search { flex: 1; min-width: 0; }
