@@ -171,7 +171,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
           {m.attachments.map((a) => (
             <div className="att" key={a.id}>
               <Icon name="clip" size={16} />
-              <button className="att-name" onClick={() => window.roarmail.openAttachment(a.id)} title={t.open}>{a.filename}</button>
+              <button className="att-name" onClick={() => window.roarmail.openAttachment(a.id)} title={window.roarmail.platform === 'darwin' ? t.preview : t.open}>{a.filename}</button>
               <span className="muted small">{size(a.size)}</span>
               <button className="tool small" title={t.save} onClick={() => window.roarmail.saveAttachment(a.id).then((p) => {
                 if (p && prefs.downloadsFolder) window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: `${t.savedTo} ${p.split(/[\\/]/).slice(-2, -1)[0] || ''}` }))

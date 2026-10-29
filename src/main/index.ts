@@ -396,7 +396,9 @@ app.whenReady().then(() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-'))
     const file = path.join(dir, a.filename)
     fs.writeFileSync(file, a.content)
-    await shell.openPath(file)
+    // Mac: shown in Quick Look over the window (29 Oct 2026), which also has a button to open it in its app
+    if (process.platform === 'darwin' && win) win.previewFile(file, a.filename)
+    else await shell.openPath(file)
   })
   // Settings > General > Downloads folder: saved straight there (a free name), or asked every time
   handle('mail:saveAttachment', async (_e, id) => {
