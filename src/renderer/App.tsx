@@ -326,6 +326,23 @@ export default function App() {
     } catch (err) { flash({ text: clean(err) }) }
   }
 
+  // an account's right-click menu in the rail: check it now, its inbox read, its settings
+  const accountMenu = async (a: Account, e: MouseEvent) => {
+    e.preventDefault()
+    const inbox = folders.find((f) => f.accountId === a.id && f.role === 'inbox')
+    const pick = await api.popMenu([
+      { id: 'check', label: t.refresh },
+      { id: 'read', label: t.fm_read, enabled: !!inbox && inbox.unread > 0 },
+      null,
+      { id: 'settings', label: t.pg_accounts },
+    ])
+    try {
+      if (pick === 'check') await api.refresh(a.id)
+      else if (pick === 'read' && inbox) await api.markFolderRead(inbox.id)
+      else if (pick === 'settings') { setSettingsAt({ page: 'accounts' }); setSettingsOpen(true) }
+    } catch (err) { flash({ text: clean(err) }) }
+  }
+
   const openMove = useCallback((targets: MessageRow[]) => {
     if (!targets.length) return
     const accountId = targets[0].accountId
@@ -366,7 +383,7 @@ export default function App() {
         if (e.key === 'Escape' && el === searchRef.current) { closeSearch(); searchRef.current?.blur() }
         return
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'a') { e.preventDefault(); setSelected(list.map(keyOf)); return }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a' && !el.closest?.('.read')) { e.preventDefault(); setSelected(list.map(keyOf)); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const k = e.key
       const move = (d: number) => {
@@ -488,7 +505,7 @@ export default function App() {
             onDragOver={(e) => { if (accDrag) { e.preventDefault(); setAccDrop(a.id) } }} onDragLeave={() => setAccDrop((x) => (x === a.id ? '' : x))}
             onDrop={(e) => { if (accDrag) { e.preventDefault(); moveAccount(accDrag, a.id) } }} onDragEnd={() => { setAccDrag(''); setAccDrop('') }}
             title={`${a.email}${a.state !== 'online' ? ` · ${t[a.state as Key] || a.state}` : ''}`}
-            onClick={() => setScope({ accountId: a.id, role: 'inbox' })}>
+            onClick={() => setScope({ accountId: a.id, role: 'inbox' })} onContextMenu={(e) => accountMenu(a, e)}>
             <span className={`acc ${scope.accountId === a.id ? 'on' : ''} ${a.state}`} style={{ ['--c' as any]: a.color }}>
               {a.avatar ? <img className="acc-img" src={a.avatar} alt="" /> : initials(a.description || a.displayName || a.email)}
               {prefs.accountBadges && a.unread > 0 && <span className="acc-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
@@ -550,6 +567,9 @@ export default function App() {
           <div className="acct-name row-name">
             <span className="grow name-col"><b>{accountOf(scope.accountId)?.description || accountOf(scope.accountId)?.displayName || accountOf(scope.accountId)?.email.split('@')[0]}</b>
               <small className="muted block">{accountOf(scope.accountId)?.email}</small></span>
+            {/* a new folder without hunting for the right-click (Alex, 29 Oct: "I can't even make folders") */}
+            <button className="tool small" title={t.fm_new} disabled={!folders.some((f) => f.accountId === scope.accountId)}
+              onClick={() => { const f = folders.find((x) => x.accountId === scope.accountId && x.role === 'inbox') || folders.find((x) => x.accountId === scope.accountId); if (f) setFolderAsk({ kind: 'new', folder: f }) }}><Icon name="plus" size={15} /></button>
             <button className="tool small" title={t.fm_syncEverything} onClick={() => syncEverything(scope.accountId)}><Icon name="download" size={15} /></button>
             <button className={`link small ${editFolders ? 'on' : ''}`} onClick={() => { if (!editFolders) api.hiddenFolders(scope.accountId).then(setHiddenList); setEditFolders((v) => !v) }}>{editFolders ? t.done : t.edit}</button>
           </div>
@@ -618,6 +638,11 @@ export default function App() {
               <button className={`tool small ${scope.person ? 'on-filter' : ''}`} disabled={!scope.person && !current}
                 title={scope.person ? `${t.fl_personOff}` : current ? `${t.fl_person} ${current.fromName || current.fromEmail}` : t.fl_personHint}
                 onClick={() => setScope((s) => ({ ...s, person: s.person ? undefined : current?.fromEmail }))}><Icon name="target" size={15} /></button>
+              {/* several picked (Alex, 29 Oct): Delete right in the bar */}
+              {chosen.length > 1 && (<>
+                <span className="sep" />
+                <button className="tool small danger-tool" title={`${t.trashIt} (${chosen.length})`} onClick={() => act(chosen, 'trash')}><Icon name="trash" size={15} /></button>
+              </>)}
               </div>
               <span className="grow" />
               {searching && <span className="muted small">{t.searchingServers}</span>}

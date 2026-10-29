@@ -1,5 +1,5 @@
 // RoarMail's main process: the window, the mail engine and the IPC door the screens use.
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, systemPreferences, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, systemPreferences, Tray } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -97,6 +97,7 @@ function createWindow() {
   // nothing ever navigates the app window; links go to the system browser
   win.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); openSafe(url) } })
+  editMenu(win)
   win.on('close', (e) => { if ((process.platform === 'darwin' || background) && !quitting) { e.preventDefault(); win?.hide() } })
   win.on('closed', () => { win = null })
   // full screen hides the Mac buttons, so the page drops the strip they sit in
@@ -562,5 +563,54 @@ app.whenReady().then(() => {
     { role: 'windowMenu' },
   ]))
 })
+
+/**
+ * The right-click menu everywhere the page does not draw its own (Alex, 29 Oct: "right click does nothing anywhere"):
+ * in a message, in the writing window and in every field. Copy for a selection, Cut / Copy / Paste and the spelling
+ * fixes where one types, Open / Copy Link on a link, Copy Image on a picture. The message list, the folders and the
+ * accounts have their own menus (they call preventDefault, so this one does not show there).
+ */
+function editMenu(w: BrowserWindow) {
+  w.webContents.on('context-menu', (_e, p) => {
+    const set = mail.settings().language
+    const el = set === 'el' || (set !== 'en' && app.getLocale().startsWith('el'))
+    const L = (en: string, gr: string) => (el ? gr : en)
+    const items: Electron.MenuItemConstructorOptions[] = []
+    const line = () => { if (items.length && items[items.length - 1].type !== 'separator') items.push({ type: 'separator' }) }
+    if (p.isEditable && p.misspelledWord) {
+      for (const s of p.dictionarySuggestions.slice(0, 5)) items.push({ label: s, click: () => w.webContents.replaceMisspelling(s) })
+      items.push({ label: L('Add to Dictionary', 'Προσθήκη στο λεξικό'), click: () => w.webContents.session.addWordToSpellCheckerDictionary(p.misspelledWord) })
+      line()
+    }
+    if (p.linkURL && /^(https?|mailto):/i.test(p.linkURL)) {
+      items.push({ label: L('Open Link', 'Άνοιγμα συνδέσμου'), click: () => openSafe(p.linkURL) })
+      items.push({ label: L('Copy Link', 'Αντιγραφή συνδέσμου'), click: () => clipboard.writeText(p.linkURL.replace(/^mailto:/i, '')) })
+      line()
+    }
+    if (p.mediaType === 'image' && p.hasImageContents) {
+      items.push({ label: L('Copy Image', 'Αντιγραφή εικόνας'), click: () => w.webContents.copyImageAt(p.x, p.y) })
+      line()
+    }
+    if (p.isEditable) {
+      items.push({ role: 'undo', label: L('Undo', 'Αναίρεση'), enabled: p.editFlags.canUndo }, { role: 'redo', label: L('Redo', 'Επανάληψη'), enabled: p.editFlags.canRedo })
+      line()
+      items.push(
+        { role: 'cut', label: L('Cut', 'Αποκοπή'), enabled: p.editFlags.canCut },
+        { role: 'copy', label: L('Copy', 'Αντιγραφή'), enabled: p.editFlags.canCopy },
+        { role: 'paste', label: L('Paste', 'Επικόλληση'), enabled: p.editFlags.canPaste },
+        { role: 'pasteAndMatchStyle', label: L('Paste as Plain Text', 'Επικόλληση ως απλό κείμενο'), enabled: p.editFlags.canPaste },
+        { role: 'selectAll', label: L('Select All', 'Επιλογή όλων'), enabled: p.editFlags.canSelectAll },
+      )
+    } else if (p.selectionText.trim()) {
+      items.push({ role: 'copy', label: L('Copy', 'Αντιγραφή') })
+      if (process.platform === 'darwin') items.push({ label: L(`Look Up “${p.selectionText.trim().slice(0, 24)}”`, `Αναζήτηση «${p.selectionText.trim().slice(0, 24)}»`), click: () => w.webContents.showDefinitionForSelection() })
+      items.push({ label: L('Search with Google', 'Αναζήτηση στο Google'), click: () => openSafe(`https://www.google.com/search?q=${encodeURIComponent(p.selectionText.trim().slice(0, 200))}`) })
+    } else if (!items.length) {
+      items.push({ role: 'selectAll', label: L('Select All', 'Επιλογή όλων') })
+    }
+    if (items[items.length - 1]?.type === 'separator') items.pop()
+    Menu.buildFromTemplate(items).popup({ window: w })
+  })
+}
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !background) app.quit() })
