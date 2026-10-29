@@ -150,6 +150,9 @@ export default function App() {
   const list = results ?? rows
   const senderPic = useSenderIcons(list.slice(0, 150).map((r) => r.fromEmail), prefs.senderPictures && prefs.listAvatars)
   const [editUnified, setEditUnified] = useState(false)
+  // All accounts' folders in the order dragged in Edit (Alex, 29 Oct: "reorder in edit")
+  const [uDrag, setUDrag] = useState('')
+  const [uDrop, setUDrop] = useState('')
   // a folder's right-click menu asks here for a name or a colour
   const [folderAsk, setFolderAsk] = useState<{ kind: 'new' | 'sub' | 'rename' | 'custom'; folder: Folder } | null>(null)
   const chosen = list.filter((r) => selected.includes(keyOf(r)))
@@ -575,8 +578,25 @@ export default function App() {
             <button className={`link small ${editUnified ? 'on' : ''}`} onClick={() => setEditUnified((v) => !v)}>{editUnified ? t.done : t.edit}</button>
           </div>
           <div className="folder-list list-lens lens" ref={folderLens}>
-          {folders.filter((f) => editUnified || f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)).map((f) => editUnified ? (
-            <label key={f.id} className={`folder pick ${f.role === 'inbox' ? 'fixed' : ''}`}>
+          {(() => {
+            const order = (prefs.unifiedOrder || '').split(',').filter(Boolean)
+            const at = (f: Folder) => { const i = order.indexOf(f.role!); return i < 0 ? 100 + folders.indexOf(f) : i }
+            return [...folders].sort((a, b) => at(a) - at(b))
+          })().filter((f) => editUnified || f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)).map((f, _i, shown) => editUnified ? (
+            <label key={f.id} className={`folder pick ${f.role === 'inbox' ? 'fixed' : ''} ${uDrop === f.role ? 'acc-drop' : ''} ${uDrag === f.role ? 'acc-dragging' : ''}`}
+              draggable onDragStart={(e) => { setUDrag(f.role!); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-roarmail-unified', f.role!) }}
+              onDragOver={(e) => { if (uDrag) { e.preventDefault(); setUDrop(f.role!) } }} onDragLeave={() => setUDrop((x) => (x === f.role ? '' : x))}
+              onDragEnd={() => { setUDrag(''); setUDrop('') }}
+              onDrop={(e) => {
+                if (!uDrag || uDrag === f.role) return
+                e.preventDefault()
+                const ids = shown.map((x) => x.role!).filter((r) => r !== uDrag)
+                const from = shown.findIndex((x) => x.role === uDrag), to = shown.findIndex((x) => x.role === f.role)
+                ids.splice(ids.indexOf(f.role!) + (from < to ? 1 : 0), 0, uDrag)
+                const v = ids.join(',')
+                api.setSetting('unifiedOrder', v); setPrefs((p) => ({ ...p, unifiedOrder: v })); setUDrag(''); setUDrop('')
+              }}>
+              <span className="grip" aria-hidden="true">⋮⋮</span>
               <input type="checkbox" disabled={f.role === 'inbox'} checked={f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)}
                 onChange={(e) => {
                   const now = new Set(prefs.unifiedShown.split(',').filter(Boolean))

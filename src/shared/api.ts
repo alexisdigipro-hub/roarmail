@@ -338,6 +338,8 @@ export interface Settings {
   threadOrder: 'oldest' | 'newest'
   /** the unified folders shown under All accounts (roles, comma separated; the inbox always shows) */
   unifiedShown: string
+  /** the order of All Inboxes, All Sent and the rest under All accounts (dragged in Edit); '' = the usual order */
+  unifiedOrder: string
   /** the accounts' order down the rail, dragged by hand (account ids, comma separated; new ones go last) */
   accountOrder: string
   /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
