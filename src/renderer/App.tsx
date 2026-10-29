@@ -321,7 +321,8 @@ export default function App() {
       else if (pick === 'archive' || pick === 'trash') act(targets, pick)
       else if (pick === 'move') openMove(targets)
       else if (pick === 'snooze') openSnooze(targets)
-      else if (pick === 'block') { await api.blockSender(r.fromEmail, !blocked); flash({ text: blocked ? `${t.unblock}: ${r.fromEmail}` : t.blockedNote, ms: 3500 }) }
+      // blocking also puts the message itself in the Trash (Alex, 29 Oct), with Undo like any delete
+      else if (pick === 'block') { await api.blockSender(r.fromEmail, !blocked); if (blocked) flash({ text: `${t.unblock}: ${r.fromEmail}`, ms: 3500 }); else act([r], 'trash') }
       else if (pick === 'contact') setContactsAt(r.fromEmail)
       else if (pick === 'rule') {
         setSettingsAt({ page: 'rules', rule: blankRule({ name: r.fromName || r.fromEmail, conditions: [{ field: 'from', value: r.fromEmail }] }) })

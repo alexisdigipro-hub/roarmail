@@ -164,6 +164,8 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
             onClick={() => {
               if (!blocked && !confirm(`${t.blockQ}\n\n${m.fromEmail}`)) return
               window.roarmail.blockSender(m.fromEmail, !blocked); setBlocked(!blocked); setNote(blocked ? '' : t.blockedNote)
+              // blocking also puts this message in the Trash (Alex, 29 Oct)
+              if (!blocked) window.roarmail.act([m.id], 'trash').catch(() => {})
             }}><Icon name="block" size={16} /></button>
           <span className="msg-menu-wrap">
             <button className={`tool small ${menu ? 'on' : ''}`} title={t.mm_more} onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
