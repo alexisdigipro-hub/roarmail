@@ -126,7 +126,7 @@ export interface MailStats {
 export interface Address { name?: string; address: string }
 
 /** Contacts (29 Oct 2026): a person in the address book; built from mail, signatures, imports and what was typed */
-export type ContactGroup = 'vip' | 'team' | 'clients' | 'crew' | 'blocked'
+export type ContactGroup = 'vip' | 'team' | 'clients' | 'crew' | 'blocked' | 'written' | 'recent' | `@${string}`
 export interface Contact {
   email: string; name: string; phone: string; company: string; title: string; website: string; notes: string
   groups: string[]; vip: boolean; blocked: boolean
@@ -414,6 +414,8 @@ export interface MailApi {
   contactList(query: string, group?: ContactGroup | ''): Promise<Contact[]>
   /** one person's card with their latest mail and files; a signature not read yet is read first */
   contactCard(email: string): Promise<ContactFull | null>
+  /** the companies (address endings that are not free mail services) and how many people at each */
+  contactDomains(): Promise<{ domain: string; count: number }[]>
   saveContact(email: string, patch: ContactPatch): Promise<void>
   /** a .vcf or .csv from another address book; how many people came, or null if cancelled */
   importContacts(): Promise<number | null>

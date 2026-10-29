@@ -195,6 +195,7 @@ export function createDemo(): MailApi & { update: any } {
     exportSetup: async () => null,
     contactList: async () => [],
     contactCard: async () => null,
+    contactDomains: async () => [],
     saveContact: async () => {},
     importContacts: async () => null,
     importSetup: async () => null,

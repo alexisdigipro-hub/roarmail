@@ -48,6 +48,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   exportSetup: call('exportSetup') as MailApi['exportSetup'],
   contactList: call('contactList') as MailApi['contactList'],
   contactCard: call('contactCard') as MailApi['contactCard'],
+  contactDomains: call('contactDomains') as MailApi['contactDomains'],
   saveContact: call('saveContact') as MailApi['saveContact'],
   importContacts: call('importContacts') as MailApi['importContacts'],
   importSetup: call('importSetup') as MailApi['importSetup'],

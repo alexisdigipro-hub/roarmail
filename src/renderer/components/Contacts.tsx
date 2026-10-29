@@ -8,7 +8,7 @@ import { useLens } from '../look'
 import { Icon } from './Icon'
 import { initials, tint } from './Viewer'
 
-const GROUPS: ContactGroup[] = ['vip', 'team', 'clients', 'crew', 'blocked']
+const GROUPS: ContactGroup[] = ['vip', 'team', 'clients', 'crew', 'written', 'recent', 'blocked']
 const TAGS = ['team', 'clients', 'crew']
 const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
 
@@ -25,7 +25,10 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
   const [list, setList] = useState<Contact[] | null>(null)
   const [pick, setPick] = useState(start || '')
   const [note, setNote] = useState('')
-  const seg = useLens<HTMLDivElement>(group || 'all')
+  const seg = useLens<HTMLDivElement>(group.startsWith('@') ? 'company' : group || 'all')
+  // the companies (Alex, 29 Oct: "everyone with the same @madlions.com, and others like it")
+  const [domains, setDomains] = useState<{ domain: string; count: number }[]>([])
+  useEffect(() => { window.roarmail.contactDomains().then(setDomains).catch(() => {}) }, [])
   const pic = useSenderIcons((list || []).slice(0, 120).map((c) => c.email), pictures)
   const load = () => window.roarmail.contactList(q, group).then((l) => { setList(l); if (!pick && l[0]) setPick(l[0].email) })
   useEffect(() => { const h = setTimeout(load, q ? 160 : 0); return () => clearTimeout(h) }, [q, group])
@@ -44,6 +47,15 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
           <button className={!group ? 'on' : ''} onClick={() => setGroup('')}>{t.ct_all}</button>
           {GROUPS.map((g) => <button key={g} className={group === g ? 'on' : ''} onClick={() => setGroup(g)}>{t[`ct_g_${g}` as Key]}</button>)}
         </div>
+        {domains.length > 0 && (
+          <div className="ct-domains" role="list" aria-label={t.ct_companies}>
+            <span className="muted small ct-dlabel">{t.ct_companies}</span>
+            {domains.map((d) => (
+              <button key={d.domain} className={`chip-tag ${group === `@${d.domain}` ? 'on' : ''}`} onClick={() => setGroup(group === `@${d.domain}` ? '' : `@${d.domain}`)}>
+                @{d.domain} <span className="muted">{d.count}</span></button>
+            ))}
+          </div>
+        )}
         {note && <p className="small ok-text">{note}</p>}
         <div className="ct-body">
           <div className="ct-list">
@@ -57,7 +69,7 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
                 </button>
               ))}
           </div>
-          {pick ? <ContactCard key={pick} email={pick} pictures={pictures} onWrite={onWrite} onAllMail={onAllMail} onChanged={load} />
+          {pick ? <ContactCard key={pick} email={pick} pictures={pictures} onWrite={onWrite} onAllMail={onAllMail} onChanged={load} onCompany={(d) => setGroup(`@${d}`)} />
             : <div className="ct-card empty muted">{t.ct_pick}</div>}
         </div>
       </div>
@@ -65,9 +77,10 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
   )
 }
 
-function ContactCard({ email, pictures, onWrite, onAllMail, onChanged }: {
-  email: string; pictures: boolean; onWrite: (e: string) => void; onAllMail: (e: string) => void; onChanged: () => void
+function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany }: {
+  email: string; pictures: boolean; onWrite: (e: string) => void; onAllMail: (e: string) => void; onChanged: () => void; onCompany: (domain: string) => void
 }) {
+  const domain = email.split('@')[1] || ''
   const [c, setC] = useState<ContactFull | null>(null)
   const pic = useSenderIcons([email], pictures)
   useEffect(() => { window.roarmail.contactCard(email).then(setC) }, [email])
@@ -84,7 +97,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged }: {
         <div className="grow ct-id">
           <h3 className="ellipsis">{c.name || email}</h3>
           <span className="muted ellipsis">{[c.title, c.company].filter(Boolean).join(' · ')}</span>
-          <span className="muted small ellipsis">{email}</span>
+          <span className="muted small ellipsis">{email} · <button type="button" className="link small" onClick={() => onCompany(domain)}>{t.ct_everyoneAt} @{domain}</button></span>
         </div>
       </div>
       <div className="row wrap ct-acts">

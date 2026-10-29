@@ -1514,7 +1514,11 @@ export class MailService {
   contactList(query: string, group: string): Contact[] {
     const own = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e))
     const q = `%${fold(query.trim().toLowerCase())}%`
+    // a group, an address ending ("@madlions.com": everyone at one company), people you write to, or the last 30 days
     const where = group === 'vip' ? 'and c.vip = 1' : group === 'blocked' ? 'and c.blocked = 1'
+      : group === 'written' ? 'and c.use_count > 0 and c.blocked = 0'
+      : group === 'recent' ? `and c.blocked = 0 and last > ${Date.now() - 30 * 864e5}`
+      : group.startsWith('@') ? `and c.blocked = 0 and c.email like '%' || @group`
       : group ? `and instr(',' || c.groups || ',', ',' || @group || ',') > 0` : 'and c.blocked = 0'
     const rows = this.db.prepare(`select c.*, (select count(*) from messages m where m.from_email = c.email) as n,
         max(coalesce(c.last_used, 0), coalesce((select max(date) from messages m where m.from_email = c.email), 0)) as last
@@ -1524,6 +1528,20 @@ export class MailService {
           and c.email not like '%notification%' and c.email not like 'mailer-daemon%' and c.email not like '%bounce%')
       order by c.vip desc, (c.use_count > 0) desc, last desc limit 400`).all({ q, group }) as Row[]
     return rows.filter((r) => !own.has(r.email)).map(contactOf)
+  }
+
+  /** the companies in the address book: every address ending that is not a free mail service, with how many people */
+  contactDomains(): { domain: string; count: number }[] {
+    const own = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e))
+    const counts = new Map<string, number>()
+    for (const r of this.db.prepare(`select email from contacts where blocked = 0 and (use_count > 0 or vip = 1 or groups != '' or edited != ''
+        or (select count(*) from messages m where m.from_email = contacts.email) > 0)`).all() as Row[]) {
+      if (own.has(r.email) || /no-?reply|notification|mailer-daemon|bounce/i.test(r.email)) continue
+      const d = String(r.email).split('@')[1]
+      if (!d || PERSONAL.has(d)) continue
+      counts.set(d, (counts.get(d) || 0) + 1)
+    }
+    return [...counts].map(([domain, count]) => ({ domain, count })).sort((a, b) => b.count - a.count || a.domain.localeCompare(b.domain)).slice(0, 60)
   }
 
   contactCard(email: string): ContactFull | null {

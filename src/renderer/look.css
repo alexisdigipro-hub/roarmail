@@ -785,3 +785,9 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .head .addr:hover, .head .addr-name:hover { background: var(--glass-2); color: var(--text); }
 .head .addr:focus-visible { outline: 2px solid var(--accent); }
 .head .addr-name { cursor: pointer; border-radius: 6px; padding: 0 2px; margin: 0 -2px; }
+
+/* Contacts: the companies, one chip per address ending, in a row that scrolls sideways */
+.ct-domains { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.ct-domains .chip-tag { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.ct-dlabel { flex: none; margin-right: 4px; }
+.ct-id .link.small { font-size: inherit; padding: 0; }
