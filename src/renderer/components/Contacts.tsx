@@ -1,6 +1,6 @@
 // Contacts (Alex, 29 Oct 2026): everyone you mail with, found as you type; their card fills itself from the
 // signatures in their mail, and what you type on it stays. The list on the left, the card on the right.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Contact, ContactFull, ContactGroup, ContactPatch } from '../../shared/api'
 import { t, when, type Key } from '../i18n'
 import { useSenderIcons } from '../senders'
@@ -134,7 +134,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged }: {
 
 /** the little card over a sender's name in a message: who they are, at a glance */
 export function SenderHover({ email, name, pictures, onOpen, onWrite, children }: {
-  email: string; name: string; pictures: boolean; onOpen?: (e: string) => void; onWrite?: (e: string) => void; children: React.ReactNode
+  email: string; name: string; pictures: boolean; onOpen?: (e: string) => void; onWrite?: (e: string) => void; children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const [c, setC] = useState<ContactFull | null>(null)

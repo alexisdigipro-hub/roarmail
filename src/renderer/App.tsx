@@ -759,6 +759,7 @@ export default function App() {
             setSettingsOpen(true)
           }}
           onContact={(email) => setContactsAt(email)} onWriteTo={(to) => setCompose({ kind: 'new', to })}
+          onAllMail={(person) => setScope({ accountId: 'all', person })}
           onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else if (a === 'snooze') openSnooze([current]); else act([current], a) }} />
       )}
 

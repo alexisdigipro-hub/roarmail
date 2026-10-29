@@ -1,7 +1,7 @@
 // Reading a conversation: every message of it, oldest first; the newest and the unread ones open, the rest
 // folded to one line. HTML mail is cleaned (no scripts, forms or frames) and shown in a sandboxed frame;
 // images from the web stay hidden until asked for, so senders cannot track opening.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import type { Account, Address, Invite, InviteAnswer, MessageFull, MessageRow, Settings } from '../../shared/api'
 import { checkLink, isTracker, stripTracking, type LinkWarning } from '../privacy'
@@ -15,7 +15,7 @@ export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
 export type RoarAction = 'share' | 'task'
 
-export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule, onContact, onWriteTo }: {
+export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule, onContact, onWriteTo, onAllMail }: {
   row: MessageRow | null
   accounts: Account[]
   prefs: Settings
@@ -27,6 +27,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
   /** the sender's card in Contacts, and a new message to them (the hover card over their name) */
   onContact?: (email: string) => void
   onWriteTo?: (email: string) => void
+  onAllMail?: (email: string) => void
 }) {
   const [items, setItems] = useState<MessageRow[] | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -88,7 +89,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
           ? <MessageCard key={m.id} id={m.id} accounts={accounts} prefs={prefs} isLast={m === items[items.length - 1]}
               onLoaded={(full) => { if (m === items[items.length - 1]) last.current = full }}
               onFold={items.length > 1 ? () => setOpen((s) => { const n = new Set(s); n.delete(m.id); return n }) : undefined}
-              onCompose={onCompose} onRule={onRule} onContact={onContact} onWriteTo={onWriteTo} />
+              onCompose={onCompose} onRule={onRule} onContact={onContact} onWriteTo={onWriteTo} onAllMail={onAllMail} />
           : (
             <button key={m.id} className="folded" onClick={() => setOpen((s) => new Set(s).add(m.id))}>
               <div className="avatar small-av" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
@@ -102,11 +103,11 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
   )
 }
 
-function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose, onRule, onContact, onWriteTo }: {
+function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose, onRule, onContact, onWriteTo, onAllMail }: {
   id: string; accounts: Account[]; prefs: Settings; isLast: boolean
   onLoaded: (m: MessageFull) => void; onFold?: () => void; onCompose: (kind: ComposeKind, m: MessageFull) => void
   onRule: (m: MessageFull) => void
-  onContact?: (email: string) => void; onWriteTo?: (email: string) => void
+  onContact?: (email: string) => void; onWriteTo?: (email: string) => void; onAllMail?: (email: string) => void
 }) {
   const [m, setM] = useState<MessageFull | null>(null)
   // the message's menu (the ⋯ button, or a right-click on its header): a rule, print, PDF, .eml
@@ -135,6 +136,33 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
 
   const acc = accounts.find((a) => a.id === m.accountId)
   const people = (list: Address[]) => list.map((a) => (acc && a.address.toLowerCase() === acc.email.toLowerCase() ? t.me : a.name || a.address)).join(', ')
+  // every name in the head is a button (Alex, 29 Oct: "the right functions when you click on the addresses, and save it"):
+  // write to them, copy the address, keep them in Contacts or open their card, all mail with them, block
+  const personMenu = async (e: ReactMouseEvent, a: Address) => {
+    e.preventDefault(); e.stopPropagation()
+    const email = a.address.toLowerCase()
+    const known = await window.roarmail.contactCard(email).catch(() => null)
+    const pick = await window.roarmail.popMenu([
+      { id: 'write', label: t.ct_write },
+      { id: 'copy', label: t.ad_copyAddress },
+      { id: 'copyName', label: t.ad_copyName, enabled: !!a.name },
+      null,
+      { id: 'card', label: known && (known.name || known.phone || known.company) ? t.ct_card : t.ad_save },
+      { id: 'all', label: t.ct_allMail },
+      null,
+      { id: 'block', label: known?.blocked ? t.unblockSender : t.blockSender },
+    ])
+    if (pick === 'write') onWriteTo?.(email)
+    else if (pick === 'copy') navigator.clipboard.writeText(email)
+    else if (pick === 'copyName') navigator.clipboard.writeText(a.name ? `${a.name} <${email}>` : email)
+    else if (pick === 'card') { if (a.name && !known?.name) await window.roarmail.saveContact(email, { name: a.name }); onContact?.(email) }
+    else if (pick === 'all') onAllMail?.(email)
+    else if (pick === 'block') { await window.roarmail.blockSender(email, !known?.blocked); toast(known?.blocked ? `${t.unblock}: ${email}` : t.blockedNote) }
+  }
+  const chips = (list: Address[]) => list.map((a, i) => (
+    <span key={a.address + i}>{i > 0 && ', '}<button type="button" className="addr" title={a.address} onClick={(e) => personMenu(e, a)} onContextMenu={(e) => personMenu(e, a)}>
+      {acc && a.address.toLowerCase() === acc.email.toLowerCase() ? t.me : a.name || a.address}</button></span>
+  ))
 
   const toast = (text: string) => window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: text }))
   const pick = async (what: 'rule' | 'print' | 'pdf' | 'eml') => {
@@ -153,8 +181,8 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
         {(() => { const pic = accounts.find((a) => a.email.toLowerCase() === m.fromEmail)?.avatar || senderPic(m.fromEmail); return (
           <div className={`avatar ${pic ? 'pic' : ''}`} style={{ background: pic ? '#fff' : tint(m.fromEmail) }}>{pic ? <img src={pic} alt="" /> : initials(m.fromName || m.fromEmail)}</div>) })()}
         <div className="who">
-          <div><SenderHover email={m.fromEmail} name={m.fromName} pictures={prefs.senderPictures} onOpen={onContact} onWrite={onWriteTo}><b>{m.fromName || m.fromEmail}</b></SenderHover> {m.fromName && <span className="muted">&lt;{m.fromEmail}&gt;</span>}</div>
-          <div className="muted small">{t.to}: {people(m.to)}{m.cc.length ? ` · ${t.cc}: ${people(m.cc)}` : ''}</div>
+          <div><SenderHover email={m.fromEmail} name={m.fromName} pictures={prefs.senderPictures} onOpen={onContact} onWrite={onWriteTo}><b className="addr-name" onClick={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })} onContextMenu={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })}>{m.fromName || m.fromEmail}</b></SenderHover> {m.fromName && <button type="button" className="addr muted" onClick={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })} onContextMenu={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })}>&lt;{m.fromEmail}&gt;</button>}</div>
+          <div className="muted small">{t.to}: {chips(m.to)}{m.cc.length > 0 && <> · {t.cc}: {chips(m.cc)}</>}</div>
         </div>
         <div className="muted small date">{fullDate(m.date)}{acc && <i className="acc-dot" style={{ background: acc.color }} title={acc.email} />}</div>
         <div className="card-tools" onClick={(e) => e.stopPropagation()}>

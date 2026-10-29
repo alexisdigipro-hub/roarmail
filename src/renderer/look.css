@@ -779,3 +779,9 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .ct-card { gap: 14px; }
 .ct-card > .muted.small { margin: -4px 0 0; }
 .chip-tag { height: 30px; padding: 0 14px; }
+
+/* the names and addresses in a message's head are buttons (Viewer personMenu) */
+.head .addr { all: unset; cursor: pointer; border-radius: 6px; padding: 0 2px; margin: 0 -2px; color: inherit; }
+.head .addr:hover, .head .addr-name:hover { background: var(--glass-2); color: var(--text); }
+.head .addr:focus-visible { outline: 2px solid var(--accent); }
+.head .addr-name { cursor: pointer; border-radius: 6px; padding: 0 2px; margin: 0 -2px; }
