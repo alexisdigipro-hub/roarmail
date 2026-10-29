@@ -202,6 +202,7 @@ app.whenReady().then(() => {
   }
 
   const mail = new MailService(db, emit, notify)
+  menuLanguage = () => mail.settings().language
 
   // Settings > General > Appearance: the whole app (and the system's own controls) follow it
   const applyAppearance = (v: string) => {
@@ -570,9 +571,11 @@ app.whenReady().then(() => {
  * fixes where one types, Open / Copy Link on a link, Copy Image on a picture. The message list, the folders and the
  * accounts have their own menus (they call preventDefault, so this one does not show there).
  */
+/** the language setting, once the mail engine is there (the menu is in English until then) */
+let menuLanguage: () => string = () => 'auto'
 function editMenu(w: BrowserWindow) {
   w.webContents.on('context-menu', (_e, p) => {
-    const set = mail.settings().language
+    const set = menuLanguage()
     const el = set === 'el' || (set !== 'en' && app.getLocale().startsWith('el'))
     const L = (en: string, gr: string) => (el ? gr : en)
     const items: Electron.MenuItemConstructorOptions[] = []
