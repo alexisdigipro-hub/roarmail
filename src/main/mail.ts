@@ -196,6 +196,7 @@ export class MailService {
   private idle = new Map<string, ImapFlow>()
   private state = new Map<string, { state: Account['state']; error?: string }>()
   private retry = new Map<string, NodeJS.Timeout>()
+  private backfilling = new Set<string>()
   private poll: NodeJS.Timeout | null = null
   private lastClean = 0
   private ticker: NodeJS.Timeout | null = null
@@ -483,10 +484,70 @@ export class MailService {
       }
       const sz = this.snoozedFolder(id)
       if (sz) await this.syncFolder(id, sz.id, false).catch(() => {})
+      this.backfill(id).catch(() => {})
     } catch (e) {
       const code = friendly(e)
       this.setState(id, transient(code) ? 'offline' : 'error', code)
       this.scheduleRetry(id)
+    }
+  }
+
+  /**
+   * all the older mail (29 Oct 2026): the first sync takes only the recent messages, this brings down the rest,
+   * quietly after the start, folder by folder (Inbox first, Trash and Junk last), newest first, in batches of 200
+   * between which new mail and actions get their turn. Each start picks up whatever is still missing.
+   * Gmail's All Mail and Starred are left out: their messages are already in the other folders.
+   */
+  private async backfill(accountId: string) {
+    if (this.backfilling.has(accountId)) return
+    this.backfilling.add(accountId)
+    try {
+      const order = ['inbox', 'sent', 'archive', 'drafts', '', 'trash', 'spam']
+      const rank = (f: Row) => order.indexOf(f.role || '')
+      const list = (this.db.prepare(`select id, role from folders where account_id = ? and hidden = 0
+        and (role is null or role not in ('all', 'flagged'))`).all(accountId) as Row[]).sort((a, b) => rank(a) - rank(b))
+      for (const f of list) {
+        if (!this.exists(accountId) || this.state.get(accountId)?.state !== 'online') return
+        await this.backfillFolder(accountId, f.id).catch(() => {})
+      }
+    } finally {
+      this.backfilling.delete(accountId)
+    }
+  }
+
+  private async backfillFolder(accountId: string, folderId: string) {
+    const path = () => (this.db.prepare('select path from folders where id = ?').get(folderId) as Row | undefined)?.path as string | undefined
+    const missing = await this.run(accountId, async (c) => {
+      const p = path()
+      if (!p) return []
+      const lock = await c.getMailboxLock(p)
+      try {
+        const all = ((await c.search({ all: true }, { uid: true })) || []) as number[]
+        const have = new Set((this.db.prepare('select uid from message_folders where folder_id = ?').all(folderId) as Row[]).map((r) => r.uid))
+        return all.filter((u) => !have.has(u)).reverse()
+      } finally { lock.release() }
+    })
+    if (!missing.length) return
+    const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+    if (this.accountRow(accountId).provider === 'gmail') query.threadId = true
+    for (let i = 0; i < missing.length; i += 200) {
+      if (!this.exists(accountId) || this.state.get(accountId)?.state !== 'online') return
+      const stored = await this.run(accountId, async (c) => {
+        const p = path()
+        if (!p) return false
+        const lock = await c.getMailboxLock(p)
+        try {
+          const batch: Row[] = []
+          for await (const m of c.fetch(missing.slice(i, i + 200), query as any, { uid: true })) batch.push(m as any)
+          this.storeFetched(accountId, folderId, batch)
+          return true
+        } finally { lock.release() }
+      })
+      if (!stored) return
+      this.assignThreads(accountId)
+      this.recount(folderId)
+      this.emit({ type: 'messages', accountId })
+      this.emit({ type: 'folders', accountId })
     }
   }
 
