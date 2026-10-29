@@ -263,6 +263,8 @@ export interface Settings {
   downloadsFolder: string
   /** sending again later when the outgoing server cannot be reached */
   retrySending: boolean
+  /** pictures from the web in messages: shown at once (Alex, 29 Oct), or hidden until Show */
+  remoteImages: boolean
   /** search also looks in Trash and Junk */
   searchTrash: boolean
   searchJunk: boolean

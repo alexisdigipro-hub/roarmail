@@ -71,7 +71,7 @@ const SETTINGS: Settings = {
   theme: 'simba', accent: 'red', font: 'system', density: 'standard', radius: 12,
   motion: true, focusRings: false, glass: true, textSize: 2, lite: false,
   checkEvery: 5, newMailSound: 'system', actionSounds: false, dockBadge: 'inbox', notifyFor: 'inbox',
-  downloadsFolder: '', retrySending: true, searchTrash: true, searchJunk: true,
+  downloadsFolder: '', retrySending: true, remoteImages: true, searchTrash: true, searchJunk: true,
   listFont: 'system', listSize: 14, messageFont: 'system', monoFont: 'mono', plainMono: false,
   quoteColors: true, quote1: '#6d5dfc', quote2: '#1fa3b8', quote3: '#3fae49',
   language: 'auto', unifiedInbox: true, linksInBackground: false, dockMode: 'both', notifyReply: true, markRead: 'open',

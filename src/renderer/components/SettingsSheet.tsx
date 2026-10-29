@@ -778,6 +778,7 @@ function Privacy({ s, set }: { s: Settings; set: Set }) {
         <Toggle label={t.ad_privacy} hint={t.ad_privacyHint} on={s.privacyMode} set={(v) => set('privacyMode', v)} />
       </Group>
       <Group title={t.sec_trackers}>
+        <Toggle label={t.pv_images} hint={t.pv_imagesHint} on={s.remoteImages && !s.privacyMode} disabled={s.privacyMode} set={(v) => set('remoteImages', v)} />
         <Toggle label={t.blockTrackersShort} hint={t.blockTrackers} on={s.blockTrackers || s.privacyMode} disabled={s.privacyMode} set={(v) => set('blockTrackers', v)} />
         <Toggle label={t.stripTrackingShort} hint={t.stripTracking} on={s.stripTracking || s.privacyMode} disabled={s.privacyMode} set={(v) => set('stripTracking', v)} />
       </Group>

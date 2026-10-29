@@ -23,7 +23,7 @@ export const LOOK_DEFAULTS = {
 /** Settings > General, as the main process starts them (src/main/mail.ts SETTINGS) */
 export const GENERAL_DEFAULTS = {
   checkEvery: 5, newMailSound: 'system', actionSounds: false, dockBadge: 'inbox', notifyFor: 'inbox',
-  downloadsFolder: '', retrySending: true, searchTrash: true, searchJunk: true,
+  downloadsFolder: '', retrySending: true, remoteImages: true, searchTrash: true, searchJunk: true,
   language: 'auto', unifiedInbox: true, linksInBackground: false, dockMode: 'both', notifyReply: true, markRead: 'open',
   accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
