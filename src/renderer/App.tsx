@@ -744,7 +744,7 @@ export default function App() {
         <div className="rows" key={`${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`}>
           {list.map((r) => (
             <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
-              prefs={prefs} onClick={(e) => click(r, e)} onMenu={(e) => rowMenu(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
+              prefs={prefs} onClick={(e) => click(r, e)} onMenu={(e) => rowMenu(r, e)} onBlock={async () => { await api.blockSender(r.fromEmail, true); act([r], 'trash') }} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
               onPick={() => { const k = keyOf(r); setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k) }}
               onDrag={(e) => startDrag(r, e)} onDragEnd={() => { dragging.current = null; setDropOn('') }}
               onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
@@ -832,9 +832,9 @@ export default function App() {
 }
 
 /** one conversation in the list: hover buttons, and a two-finger swipe on the trackpad */
-function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
+function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onBlock, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
   r: MessageRow; pic: string | null; on: boolean; multi: boolean; acc?: Account; prefs: Settings
-  onClick: (e: MouseEvent) => void; onMenu: (e: MouseEvent) => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
+  onClick: (e: MouseEvent) => void; onMenu: (e: MouseEvent) => void; onBlock: () => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
   onDrag: (e: DragEvent) => void; onDragEnd: () => void; onSwipe: (side: 'left' | 'right') => void
 }) {
   const [dx, setDx] = useState(0)
@@ -892,9 +892,9 @@ function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onAct, onSnooze, 
         <div className="quick" onClick={(e) => e.stopPropagation()}>
           <button title={r.seen ? t.markUnread : t.markRead} onClick={() => onAct(r.seen ? 'unseen' : 'seen')}><Icon name="dot" size={15} filled={!r.seen} /></button>
           <button title={r.flagged ? t.unflag : t.flag} onClick={() => onAct(r.flagged ? 'unflag' : 'flag')}><Icon name="star" size={15} filled={r.flagged} /></button>
-          <button title={t.snoozeIt} onClick={() => onSnooze()}><Icon name="clock" size={15} /></button>
           <button title={t.moveTo} onClick={() => onMove()}><Icon name="folder" size={15} /></button>
-          <button title={t.archiveIt} onClick={() => onAct('archive')}><Icon name="archive" size={15} /></button>
+          {/* Block sender in place of Archive and Snooze (Alex, 29 Oct): blocks, and the message goes to the Trash */}
+          {r.fromEmail && <button title={t.blockSender} onClick={() => onBlock()}><Icon name="block" size={15} /></button>}
           <button title={t.trashIt} onClick={() => onAct('trash')}><Icon name="trash" size={15} /></button>
         </div>
       </div>
