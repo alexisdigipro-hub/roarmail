@@ -16,6 +16,8 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npx tsc -p tsconfig.json
+      # the plain parts (rules, calendar invitations, templates): node's own test runner, no packages needed
+      - run: npm test
       # the screens must open (0.18.2-0.18.7 opened blank): run them as the web demo in Chrome and look for the list
       - name: Screens open
         run: |

@@ -2,22 +2,24 @@
 // sliding to the open one), the page on the right with a big title. Appearance carries RoarMe's look settings.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Folder, LockState, NewMailSound, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
+import type { Account, Folder, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
 import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
 import { Icon } from './Icon'
 import { RoarMeAccount } from './RoarMe'
+import { RulesPage } from './Rules'
+import { TemplatesPage } from './Templates'
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
 const MAC = window.roarmail.platform === 'darwin'
 
 // The pages, in five groups (Alex, 21 Oct 2026: "tidy, in categories"), like the Mac's System Settings
-type Page = 'accounts' | 'signatures' | 'roarme' | 'general' | 'reading' | 'composing' | 'notify' | 'search'
+export type Page = 'accounts' | 'signatures' | 'roarme' | 'general' | 'reading' | 'composing' | 'rules' | 'templates' | 'notify' | 'search'
   | 'theme' | 'list' | 'fonts' | 'privacy' | 'updates' | 'keys' | 'expert'
 const GROUPS: [Key, [Page, string][]][] = [
   ['grp_accounts', [['accounts', 'inbox'], ['signatures', 'compose'], ['roarme', 'roar']]],
-  ['grp_mail', [['general', 'gear'], ['reading', 'unread'], ['composing', 'sent'], ['notify', 'bell'], ['search', 'search']]],
+  ['grp_mail', [['general', 'gear'], ['reading', 'unread'], ['composing', 'sent'], ['rules', 'funnel'], ['templates', 'template'], ['notify', 'bell'], ['search', 'search']]],
   ['grp_look', [['theme', 'palette'], ['list', 'all'], ['fonts', 'type']]],
   ['grp_privacy', [['privacy', 'shield']]],
   ['grp_system', [['updates', 'download'], ['keys', 'keyboard'], ['expert', 'sliders']]],
@@ -26,10 +28,12 @@ const title = (p: Page) => t[`pg_${p}` as Key]
 
 type Set = <K extends keyof Settings>(k: K, v: Settings[K], e?: MouseEvent) => void
 
-export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
+export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }: {
   accounts: Account[]; onAddAccount: () => void; onClose: () => void; onLook: (s: Settings) => void
+  /** open at this page (Make a Rule from This Sender opens Rules with the rule started) */
+  start?: { page: Page; rule?: Rule } | null
 }) {
-  const [page, setPage] = useState<Page>('general')
+  const [page, setPage] = useState<Page>(start?.page || 'general')
   const [sigs, setSigs] = useState<Signature[]>([])
   const [prefs, setPrefs] = useState<Settings | null>(null)
   const nav = useLens<HTMLDivElement>(page)
@@ -84,6 +88,8 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook }: {
             {page === 'accounts' && <Accounts accounts={accounts} sigs={sigs} onAdd={onAddAccount} />}
             {page === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
             {page === 'roarme' && <RoarMeAccount />}
+            {page === 'rules' && <RulesPage accounts={accounts} seed={start?.page === 'rules' ? start.rule : null} />}
+            {page === 'templates' && <TemplatesPage />}
             {page === 'keys' && <Shortcuts />}
             {prefs && page === 'general' && <General s={prefs} set={set} />}
             {prefs && page === 'reading' && <Reading s={prefs} set={set} />}

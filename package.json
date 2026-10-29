@@ -1,7 +1,7 @@
 {
   "name": "roarmail",
   "productName": "RoarMail",
-  "version": "0.18.8",
+  "version": "0.19.0",
   "description": "RoarMail: a desktop mail client for Mac and Windows. TheMadlions Lab, Experiment 03.",
   "author": "THEMADLIONS",
   "license": "UNLICENSED",
@@ -12,6 +12,7 @@
     "build:preload": "esbuild src/preload/index.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --outfile=dist/preload.js",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
+    "test": "node --test test/*.test.ts",
     "start": "npm run build && electron .",
     "postinstall": "electron-builder install-app-deps",
     "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never && electron-builder --mac dmg --x64 --publish never",

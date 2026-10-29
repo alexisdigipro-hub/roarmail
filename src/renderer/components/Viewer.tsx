@@ -3,10 +3,10 @@
 // images from the web stay hidden until asked for, so senders cannot track opening.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Address, MessageFull, MessageRow, Settings } from '../../shared/api'
+import type { Account, Address, Invite, InviteAnswer, MessageFull, MessageRow, Settings } from '../../shared/api'
 import { checkLink, isTracker, stripTracking, type LinkWarning } from '../privacy'
 import { FONTS, TEXT_SIZES, fontStack } from '../look'
-import { fullDate, size, t, when, type Key } from '../i18n'
+import { fullDate, lang, size, t, when, type Key } from '../i18n'
 import { Icon } from './Icon'
 import { useSenderIcons } from '../senders'
 
@@ -14,13 +14,15 @@ export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
 export type RoarAction = 'share' | 'task'
 
-export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar }: {
+export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule }: {
   row: MessageRow | null
   accounts: Account[]
   prefs: Settings
   onCompose: (kind: ComposeKind, m: MessageFull) => void
   onAct: (action: RowAction) => void
   onRoar: (action: RoarAction, m: MessageFull) => void
+  /** Make a Rule from This Sender (the message's menu) */
+  onRule: (m: MessageFull) => void
 }) {
   const [items, setItems] = useState<MessageRow[] | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -82,7 +84,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar }: {
           ? <MessageCard key={m.id} id={m.id} accounts={accounts} prefs={prefs} isLast={m === items[items.length - 1]}
               onLoaded={(full) => { if (m === items[items.length - 1]) last.current = full }}
               onFold={items.length > 1 ? () => setOpen((s) => { const n = new Set(s); n.delete(m.id); return n }) : undefined}
-              onCompose={onCompose} />
+              onCompose={onCompose} onRule={onRule} />
           : (
             <button key={m.id} className="folded" onClick={() => setOpen((s) => new Set(s).add(m.id))}>
               <div className="avatar small-av" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
@@ -96,11 +98,15 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar }: {
   )
 }
 
-function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose }: {
+function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose, onRule }: {
   id: string; accounts: Account[]; prefs: Settings; isLast: boolean
   onLoaded: (m: MessageFull) => void; onFold?: () => void; onCompose: (kind: ComposeKind, m: MessageFull) => void
+  onRule: (m: MessageFull) => void
 }) {
   const [m, setM] = useState<MessageFull | null>(null)
+  // the message's menu (the ⋯ button, or a right-click on its header): a rule, print, PDF, .eml
+  const [menu, setMenu] = useState(false)
+  const shown = useRef('')
   const [error, setError] = useState('')
   const [images, setImages] = useState(false)
   const [blocked, setBlocked] = useState(false)
@@ -125,9 +131,20 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
   const acc = accounts.find((a) => a.id === m.accountId)
   const people = (list: Address[]) => list.map((a) => (acc && a.address.toLowerCase() === acc.email.toLowerCase() ? t.me : a.name || a.address)).join(', ')
 
+  const toast = (text: string) => window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: text }))
+  const pick = async (what: 'rule' | 'print' | 'pdf' | 'eml') => {
+    setMenu(false)
+    try {
+      if (what === 'rule') onRule(m)
+      else if (what === 'print') await window.roarmail.printMessage(printPage(m, shown.current))
+      else if (what === 'pdf') { const p = await window.roarmail.saveMessagePdf(printPage(m, shown.current), m.subject || t.noSubject); if (p) toast(`${t.savedTo} ${p.split(/[\\/]/).slice(-2, -1)[0] || ''}`) }
+      else { const p = await window.roarmail.saveMessageEml(m.id); if (p) toast(`${t.savedTo} ${p.split(/[\\/]/).slice(-2, -1)[0] || ''}`) }
+    } catch (e) { toast(clean(e)) }
+  }
+
   return (
     <article className={`card ${isLast ? 'last' : ''}`}>
-      <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }}>
+      <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }} onContextMenu={(e) => { e.preventDefault(); setMenu(true) }}>
         {(() => { const pic = accounts.find((a) => a.email.toLowerCase() === m.fromEmail)?.avatar || senderPic(m.fromEmail); return (
           <div className={`avatar ${pic ? 'pic' : ''}`} style={{ background: pic ? '#fff' : tint(m.fromEmail) }}>{pic ? <img src={pic} alt="" /> : initials(m.fromName || m.fromEmail)}</div>) })()}
         <div className="who">
@@ -143,9 +160,21 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
               if (!blocked && !confirm(`${t.blockQ}\n\n${m.fromEmail}`)) return
               window.roarmail.blockSender(m.fromEmail, !blocked); setBlocked(!blocked); setNote(blocked ? '' : t.blockedNote)
             }}><Icon name="block" size={16} /></button>
+          <span className="msg-menu-wrap">
+            <button className={`tool small ${menu ? 'on' : ''}`} title={t.mm_more} onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
+            {menu && (
+              <div className="attach-menu msg-menu" onMouseLeave={() => setMenu(false)}>
+                <button onClick={() => pick('rule')}><Icon name="funnel" size={16} /><span><b>{t.ru_fromSender}</b><small>{m.fromEmail}</small></span></button>
+                <button onClick={() => pick('print')}><Icon name="print" size={16} /><span><b>{t.mm_print}</b></span></button>
+                <button onClick={() => pick('pdf')}><Icon name="download" size={16} /><span><b>{t.mm_pdf}</b></span></button>
+                <button onClick={() => pick('eml')}><Icon name="drafts" size={16} /><span><b>{t.mm_eml}</b></span></button>
+              </div>
+            )}
+          </span>
         </div>
       </header>
 
+      {m.invite && <InviteCard m={m} invite={m.invite} />}
       <SecurityBanner m={m} />
       {(m.listUnsubscribe || note) && (
         <div className="row unsub-row">
@@ -158,7 +187,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose 
         </div>
       )}
 
-      <Body m={m} images={images && !prefs.privacyMode} prefs={prefs} renderBanner={(blocked) => blocked && prefs.privacyMode ? (
+      <Body m={m} images={images && !prefs.privacyMode} prefs={prefs} shown={shown} renderBanner={(blocked) => blocked && prefs.privacyMode ? (
         <div className="banner"><Icon name="shield" size={16} /> <span>{t.privacyModeOn}</span></div>
       ) : blocked && !images ? (
         <div className="banner"><Icon name="image" size={16} /> <span>{t.images}</span>
@@ -202,7 +231,7 @@ function SecurityBanner({ m }: { m: MessageFull }) {
 }
 
 // the message body in a sandboxed frame: no scripts, links open in the browser, remote images on request
-function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: boolean; prefs: Settings; renderBanner: (blocked: boolean) => ReactNode }) {
+function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; images: boolean; prefs: Settings; renderBanner: (blocked: boolean) => ReactNode; shown?: { current: string } }) {
   const frame = useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = useState(120)
   const [hover, setHover] = useState('')
@@ -252,6 +281,8 @@ function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: bool
       ${prefs.plainMono ? `pre.plain{font-family:${mono};font-size:.92em}` : ''}${quotes}table{max-width:100%}</style>`
     return { html: css + clean, blocked, trackers }
   }, [m, images, prefs.detectLinks, prefs.blockTrackers, prefs.textSize, prefs.messageFont, prefs.monoFont, prefs.plainMono, prefs.quoteColors, prefs.quote1, prefs.quote2, prefs.quote3])
+  // what Print and Save as PDF put on paper: the body exactly as shown here
+  if (shown) shown.current = html
 
   useEffect(() => {
     const f = frame.current
@@ -315,6 +346,83 @@ function Body({ m, images, prefs, renderBanner }: { m: MessageFull; images: bool
 }
 
 const clean = (e: any) => String(e?.message || e).replace(/^.*Error:\s*/, '')
+
+/** Print / Save as PDF: the shown body with the message's header on top (from, to, cc, date, subject) */
+function printPage(m: MessageFull, body: string) {
+  const line = (k: string, v: string) => (v ? `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>` : '')
+  const people = (l: Address[]) => l.map((a) => (a.name ? `${a.name} <${a.address}>` : a.address)).join(', ')
+  const head = `<div class="rm-print-head"><table>${line(t.from, m.fromName ? `${m.fromName} <${m.fromEmail}>` : m.fromEmail)}${line(t.to, people(m.to))}`
+    + `${line(t.cc, people(m.cc))}${line(t.so_date, fullDate(m.date))}${line(t.subject, m.subject || t.noSubject)}</table></div>`
+  const css = `<style>@page{margin:14mm}.rm-print-head{font:12.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:#1a1a1a;padding:0 0 12px;margin:0 0 14px;border-bottom:1px solid #ccc}
+    .rm-print-head table{border-collapse:collapse}.rm-print-head th{text-align:right;color:#666;font-weight:600;padding:2px 12px 2px 0;vertical-align:top;white-space:nowrap}.rm-print-head td{padding:2px 0}</style>`
+  const page = /<body[^>]*>/i.test(body) ? body.replace(/<body[^>]*>/i, (b) => b + head) : head + body
+  return `<!doctype html><meta charset="utf-8"><title>${escapeHtml(m.subject || t.noSubject)}</title>${css}${page}`
+}
+
+const LOC = lang === 'el' ? 'el-GR' : undefined
+/** when an invitation is, in this computer's zone (an all-day event: its days, as written) */
+function inviteWhen(v: Invite): string {
+  if (v.allDay) {
+    const day = (ms: number) => new Date(ms).toLocaleDateString(LOC, { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    const last = v.end && v.end - v.start > 864e5 ? v.end - 864e5 : null
+    return `${day(v.start)}${last ? ` - ${day(last)}` : ''} · ${t.inv_allDay}`
+  }
+  const date = (ms: number) => new Date(ms).toLocaleDateString(LOC, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const time = (ms: number) => new Date(ms).toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit' })
+  if (!v.end) return `${date(v.start)} · ${time(v.start)}`
+  const sameDay = new Date(v.start).toDateString() === new Date(v.end - 1).toDateString()
+  return sameDay ? `${date(v.start)} · ${time(v.start)} - ${time(v.end)}` : `${date(v.start)} ${time(v.start)} - ${date(v.end)} ${time(v.end)}`
+}
+
+/** the invite card at the top of a message: what, when, where, who; Accept / Maybe / Decline and Add to Calendar */
+function InviteCard({ m, invite }: { m: MessageFull; invite: Invite }) {
+  const [answer, setAnswer] = useState<InviteAnswer | null>(invite.answer)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const [error, setError] = useState('')
+  const cancelled = invite.method === 'CANCEL'
+  const asks = invite.method === 'REQUEST'
+  const who = invite.organizer ? invite.organizer.name || invite.organizer.address : ''
+  const reply = async (a: InviteAnswer) => {
+    setBusy(true); setError(''); setNote('')
+    try { await window.roarmail.answerInvite(m.id, a); setAnswer(a); setNote(`${t.inv_sent} ${invite.organizer?.address || ''}`) }
+    catch (e) { const c = clean(e); setError(c === 'no-organizer' ? t.inv_noOrganizer : c) }
+    setBusy(false)
+  }
+  const choices: [InviteAnswer, Key][] = [['accepted', 'inv_accept'], ['tentative', 'inv_maybe'], ['declined', 'inv_decline']]
+  return (
+    <div className={`invite ${cancelled ? 'cancelled' : ''}`}>
+      <div className="invite-day" aria-hidden="true">
+        <small>{new Date(invite.start).toLocaleDateString(LOC, { month: 'short', ...(invite.allDay ? { timeZone: 'UTC' } : {}) })}</small>
+        <b>{new Date(invite.start).toLocaleDateString(LOC, { day: 'numeric', ...(invite.allDay ? { timeZone: 'UTC' } : {}) })}</b>
+      </div>
+      <div className="invite-info">
+        <div className="row">
+          <span className={`chip invite-chip ${cancelled ? 'off' : ''}`}><i className="chip-dot" />{cancelled ? t.inv_cancelled : t.inv_invite}</span>
+          {answer && !cancelled && <span className="muted small">{t[`inv_${answer}` as Key]}</span>}
+        </div>
+        <b className="invite-title">{invite.title || t.noSubject}</b>
+        <span className="small">{inviteWhen(invite)}</span>
+        {invite.location && <span className="muted small">{invite.location}</span>}
+        {who && <span className="muted small">{t.inv_by}: {who}</span>}
+        {cancelled && <span className="muted small">{t.inv_cancelledNote}</span>}
+        <div className="row invite-actions">
+          {asks && (
+            <div className="seg">
+              {choices.map(([a, label]) => (
+                <button key={a} className={answer === a ? 'on' : ''} disabled={busy || !invite.organizer} onClick={() => reply(a)}>{t[label]}</button>
+              ))}
+            </div>
+          )}
+          <button className="pill small" onClick={() => window.roarmail.inviteToCalendar(m.id).catch((e) => setError(clean(e)))}>
+            <Icon name="calendar" size={14} /> {cancelled || !asks ? t.inv_open : t.inv_add}</button>
+        </div>
+        {note && <span className="small ok-text">{note}</span>}
+        {error && <span className="small error">{error}</span>}
+      </div>
+    </div>
+  )
+}
 // Settings > Advanced > Detect in messages: web links, email addresses and phone numbers in plain text
 const DETECT = /(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]]|www\.[^\s<>"]+[^\s<>".,;:!?)\]]|[\w.+-]+@[\w-]+\.[\w.-]*[a-z]{2,}|\+?\d[\d ()-]{7,}\d)/gi
 function linkify(line: string): string {

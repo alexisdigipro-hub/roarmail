@@ -319,6 +319,7 @@ app.whenReady().then(() => {
       ...(f.role === 'trash' || f.role === 'spam' ? [{ label: l.empty, enabled: f.total > 0, click: pick('empty') }] : []),
       { type: 'separator' },
       { label: l.sync, click: pick('sync') },
+      { label: l.rules, click: pick('rules') },
       { type: 'separator' },
       { label: l.delete, enabled: !fixed, click: pick('delete') },
     ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
@@ -355,6 +356,57 @@ app.whenReady().then(() => {
   handle('mail:pickFolder', async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : r.filePaths[0] || null
+  })
+  // Settings > Rules and Settings > Templates
+  handle('mail:rules', () => mail.rules())
+  handle('mail:saveRule', (_e, rule) => mail.saveRule(rule))
+  handle('mail:deleteRule', (_e, id) => mail.deleteRule(String(id)))
+  handle('mail:orderRules', (_e, ids) => mail.orderRules(ids))
+  handle('mail:runRules', (_e, folderId) => mail.runRules(String(folderId)))
+  handle('mail:templates', () => mail.templates())
+  handle('mail:saveTemplate', (_e, tpl) => mail.saveTemplate(tpl))
+  handle('mail:deleteTemplate', (_e, id) => mail.deleteTemplate(String(id)))
+  // calendar invitations: the answer goes to the organizer; Add to Calendar opens the .ics in the system's calendar app
+  handle('mail:answerInvite', (_e, id, answer) => mail.answerInvite(String(id), answer))
+  handle('mail:inviteToCalendar', async (_e, id) => {
+    const text = await mail.calendarOf(String(id))
+    if (!text) throw new Error('no-invite')
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-')), 'invite.ics')
+    fs.writeFileSync(file, text)
+    const err = await shell.openPath(file)
+    if (err) throw new Error(err)
+  })
+  // Print and Save as PDF: the message as the reader shows it (the window has cleaned it and put its header on top), in
+  // a hidden window of its own that runs no script and goes nowhere
+  const fileName = (s: string, fallback: string) => String(s || '').replace(/[/\\:*?"<>|\r\n\t]/g, '_').trim().slice(0, 120) || fallback
+  const printable = async (html: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-print-'))
+    const file = path.join(dir, 'message.html')
+    fs.writeFileSync(file, String(html || ''))
+    const w = new BrowserWindow({ show: false, width: 820, height: 1100, webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false } })
+    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    w.webContents.on('will-navigate', (e) => e.preventDefault())
+    await w.loadFile(file)
+    return { w, done: () => { if (!w.isDestroyed()) w.destroy(); fs.rmSync(dir, { recursive: true, force: true }) } }
+  }
+  handle('mail:printMessage', async (_e, html: string) => {
+    const p = await printable(html)
+    try { await new Promise<void>((resolve) => p.w.webContents.print({ printBackground: true }, () => resolve())) } finally { p.done() }
+  })
+  handle('mail:saveMessagePdf', async (_e, html: string, name: string) => {
+    const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('downloads'), `${fileName(name, 'Message')}.pdf`), filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+    if (r.canceled || !r.filePath) return null
+    const p = await printable(html)
+    try { fs.writeFileSync(r.filePath, await p.w.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })) } finally { p.done() }
+    return r.filePath
+  })
+  // Save as .eml: the message exactly as the server has it
+  handle('mail:saveMessageEml', async (_e, id: string) => {
+    const m = await mail.rawSource(String(id))
+    const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('downloads'), `${fileName(m.subject, 'Message')}.eml`), filters: [{ name: 'Email', extensions: ['eml'] }] })
+    if (r.canceled || !r.filePath) return null
+    fs.writeFileSync(r.filePath, m.source)
+    return r.filePath
   })
   handle('mail:signatures', () => mail.signatures())
   handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))

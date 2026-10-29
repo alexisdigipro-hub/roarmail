@@ -634,3 +634,56 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .composer-head { position: relative; z-index: 30; }
 .attach-wrap { position: relative; }
 .attach-menu { right: 0; z-index: 60; background: color-mix(in srgb, var(--panel) 97%, transparent); box-shadow: 0 18px 50px rgba(0, 0, 0, .28), inset 0 0 0 1px var(--edge-2); }
+
+/* Settings > Rules (Oct 2026): each rule a soft tile with its switch, what it does, and round tools */
+.rule-list { display: flex; flex-direction: column; gap: 8px; }
+.rule-tile { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--r); background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); animation: rm-item-in .35s var(--ease) both; }
+.rule-tile.off .rule-text { opacity: .5; }
+.rule-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; color: var(--text); }
+.rule-text b { font-weight: 600; font-size: 14px; }
+.rule-text small { font-size: 12px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.rule-tools { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: color-mix(in srgb, var(--panel-3) 60%, transparent); box-shadow: inset 0 0 0 1px var(--edge); }
+.rule-tools .tool { border-radius: 50%; }
+.rule-tools .tool:disabled { opacity: .3; cursor: default; }
+.rule-tools .tool.danger:hover { color: var(--danger); }
+.rule-edit { display: flex; flex-direction: column; gap: 8px; }
+.rule-edit .rule-head { gap: 12px; margin-top: 8px; }
+.rule-edit .rule-head b { min-width: 44px; }
+.rule-edit .rule-line { gap: 8px; }
+.rule-edit .rule-line select { flex: none; width: 230px; }
+.rule-edit .rule-line select.grow { flex: 1; width: auto; }
+.rule-edit .rule-line input { min-width: 0; }
+.rule-edit > .link { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; }
+
+/* the composer's Templates menu, under its button at the end of the format bar */
+.tpl-wrap { position: relative; display: inline-flex; }
+.fmt-bar .fmt.on { background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+.tpl-menu { top: 34px; right: 0; width: 300px; max-height: 60vh; overflow-y: auto; }
+.tpl-menu hr { width: 100%; border: 0; border-top: 1px solid var(--edge); margin: 4px 0; }
+.sheet .tpl-menu label.tpl-project { flex-direction: row; align-items: center; gap: 8px; margin: 2px 4px 6px; }
+.sheet .tpl-menu input { height: 30px; padding: 0 12px; border-radius: 999px; font-size: 13px; flex: 1; min-width: 0; }
+.tpl-save { display: flex; gap: 6px; align-items: center; padding: 4px; }
+.tpl-empty { margin: 4px 10px; }
+
+/* a message's menu (⋯ in its header): Make a Rule, Print, Save as PDF, Save as .eml */
+.msg-menu-wrap { position: relative; display: inline-flex; }
+.msg-menu { top: 34px; right: 0; width: 280px; z-index: 40; }
+
+/* the invite card at the top of a message: the day as a tile, what and when, the answers as a glass segment */
+.invite { display: flex; gap: 14px; padding: 14px 16px; margin-bottom: 14px; border-radius: var(--r); background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); animation: rm-drop-in .35s var(--ease) both; }
+.invite-day { flex: none; width: 58px; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 14px;
+  background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+.invite-day small { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-2); }
+.invite-day b { font-size: 24px; font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.invite-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.invite-info .row { gap: 8px; align-items: center; }
+.invite-title { font-size: 16px; font-weight: 600; }
+.invite-chip { height: 22px; padding: 0 9px; font-size: 11.5px; color: var(--accent-2); }
+.chip-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.invite-chip.off { color: var(--danger); }
+.invite.cancelled .invite-title { text-decoration: line-through; opacity: .7; }
+.invite.cancelled .invite-day { background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--edge); }
+.invite.cancelled .invite-day small { color: var(--muted); }
+.invite-actions { margin-top: 8px; flex-wrap: wrap; }
+.invite-actions .seg > button:disabled { opacity: .5; cursor: default; }
+.invite-actions .pill { display: inline-flex; align-items: center; gap: 6px; }
