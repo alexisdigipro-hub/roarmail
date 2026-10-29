@@ -45,6 +45,8 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   serverFolders: call('serverFolders') as MailApi['serverFolders'],
   pickAvatar: call('pickAvatar') as MailApi['pickAvatar'],
   pickImage: call('pickImage') as MailApi['pickImage'],
+  exportSetup: call('exportSetup') as MailApi['exportSetup'],
+  importSetup: call('importSetup') as MailApi['importSetup'],
   setAvatar: call('setAvatar') as MailApi['setAvatar'],
   emojiPanel: call('emojiPanel') as MailApi['emojiPanel'],
   senderIcons: call('senderIcons') as MailApi['senderIcons'],

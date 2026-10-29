@@ -711,3 +711,9 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 /* Delete in the filter bar when several messages are picked */
 .tool.danger-tool { color: var(--danger); }
 .tool.danger-tool:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+/* Move to another computer (MoveSetup) */
+.move-setup { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.move-form { display: flex; flex-direction: column; gap: 8px; }
+.move-form p { margin: 0; }
+.set-row.block { display: block; }

@@ -4,8 +4,10 @@ import { useState } from 'react'
 import type { ServerConfig, Tls } from '../../shared/api'
 import { t, type Key } from '../i18n'
 import { Icon } from './Icon'
+import { MoveSetup } from './MoveSetup'
 
 export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone: () => void; onCancel: () => void }) {
+  const [moving, setMoving] = useState(false)
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [pass, setPass] = useState('')
@@ -59,6 +61,9 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
         <div className="brand"><b>ROAR</b><i>MAIL</i></div>
         <h1>{first ? t.welcome : t.addAccount}</h1>
         <p className="muted">{t.welcomeSub}</p>
+        {/* a new computer: everything from the old one in one go (Settings > General > Move to another computer there) */}
+        {first && <button type="button" className="link" onClick={() => setMoving((v) => !v)}><Icon name="down" size={14} /> {t.mv_fromOld}</button>}
+        {first && moving && <div className="panel"><MoveSetup only="import" onImported={() => setTimeout(() => location.reload(), 1200)} /></div>}
 
         <label>{t.email}<input type="email" autoFocus value={email} disabled={!!cfg} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></label>
         <label>{t.name}<input value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePh} /></label>

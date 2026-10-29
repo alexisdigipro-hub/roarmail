@@ -396,6 +396,10 @@ export interface MailApi {
   serverFolders(accountId: string): Promise<{ path: string; name: string }[]>
   /** asks for an image, makes it a round-ready square and keeps it as the account's picture; false = cancelled */
   pickAvatar(accountId: string): Promise<boolean>
+  /** Move to another computer: saves the whole setup to a file sealed with this passphrase; the file's path, or null if cancelled */
+  exportSetup(passphrase: string): Promise<string | null>
+  /** opens such a file with its passphrase and puts everything in it here; what came, or null if cancelled */
+  importSetup(passphrase: string): Promise<{ accounts: number; signatures: number; templates: number; rules: number } | null>
   /** asks for an image file and gives it back as a PNG data URL (at most 1200 px), for the crop window; null = cancelled */
   pickImage(): Promise<string | null>
   /** keeps a picture made in the crop window as the account's picture (made again into a small square PNG) */

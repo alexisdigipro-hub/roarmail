@@ -192,6 +192,8 @@ export function createDemo(): MailApi & { update: any } {
     searchOnline: async (q, a) => api.search(q, a),
     pickAvatar: async () => false,
     pickImage: async () => null,
+    exportSetup: async () => null,
+    importSetup: async () => null,
     setAvatar: async () => {},
     emojiPanel: async () => {},
     folderMenu: async () => null,

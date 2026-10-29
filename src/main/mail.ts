@@ -86,6 +86,8 @@ const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 const ON = 'f.account_id in (select id from accounts where enabled = 1)'
 
 type Row = Record<string, any>
+/** what Move to another computer carries (exportSetup / importSetup), before index.ts encrypts it */
+export interface SetupBundle { format: 'roarmail-setup'; version: number; at: number; tables: Record<string, Row[]> }
 type MoveKind = 'archive' | 'trash' | 'move' | 'delete'
 
 const ROLE_BY_USE: Record<string, FolderRole> = {
@@ -350,6 +352,74 @@ export class MailService {
   removeAlias(id: string) {
     this.db.prepare('delete from identities where id = ? and is_default = 0').run(id)
     this.emit({ type: 'accounts' })
+  }
+
+  /**
+   * Move to another computer (Alex, 29 Oct: "everything as on my laptop, on the desktop too"): every account with its
+   * password or Microsoft sign-in, aliases, folders (names, colours, hidden), signatures, templates, rules, smart
+   * folders, every setting and the contacts (blocked, VIP, pictures allowed). The mail itself is not in it: it comes
+   * again from the servers. index.ts encrypts this with the person's own passphrase before it touches a file.
+   */
+  exportSetup(): SetupBundle {
+    const all = (t: string) => this.db.prepare(`select * from ${t}`).all() as Row[]
+    const accounts = all('accounts').map((r) => ({ ...r, secret: r.secret ? open(r.secret) : '' }))
+    const folders = (this.db.prepare('select id, account_id, path, name, delimiter, role, special, color, hidden from folders').all() as Row[])
+    return {
+      format: 'roarmail-setup', version: 1, at: now(),
+      tables: { accounts, identities: all('identities'), folders, signatures: all('signatures'), templates: all('templates'), rules: all('rules'),
+        smart_folders: all('smart_folders'), settings: all('settings'), contacts: all('contacts') },
+    }
+  }
+
+  /** puts a bundle from exportSetup back; an account that is already here (same address) is updated, not doubled */
+  importSetup(b: SetupBundle): { accounts: number; signatures: number; templates: number; rules: number } {
+    if (b?.format !== 'roarmail-setup' || !b.tables) throw new Error('not-a-setup')
+    const cols = (t: string) => new Set((this.db.prepare(`pragma table_info(${t})`).all() as Row[]).map((c) => c.name as string))
+    const put = (t: string, r: Row, verb = 'insert or replace') => {
+      const have = cols(t), keys = Object.keys(r).filter((k) => have.has(k))
+      if (keys.length) this.db.prepare(`${verb} into ${t} (${keys.join(',')}) values (${keys.map(() => '?').join(',')})`).run(...keys.map((k) => r[k]))
+    }
+    const T = b.tables, ids = new Map<string, string>(), fresh: string[] = []
+    this.db.transaction(() => {
+      for (const s of T.signatures || []) put('signatures', s)
+      for (const x of T.templates || []) put('templates', x)
+      for (const x of T.rules || []) put('rules', x)
+      for (const x of T.smart_folders || []) put('smart_folders', x)
+      // a downloads folder that this computer does not have is left as it is here
+      for (const x of T.settings || []) { if (x.key === 'downloadsFolder' && x.value && !fs.existsSync(String(x.value))) continue; put('settings', x) }
+      for (const a of T.accounts || []) {
+        const here = this.db.prepare('select id from accounts where lower(email) = lower(?)').get(a.email) as Row | undefined
+        const id = here?.id || ((this.db.prepare('select 1 from accounts where id = ?').get(a.id)) ? uuid() : a.id)
+        ids.set(a.id, id)
+        const row: Row = { ...a, id, secret: a.secret ? seal(String(a.secret)) : null, updated_at: now() }
+        if (here) {
+          const { id: _i, created_at: _c, ...rest } = row
+          const have = cols('accounts'), keys = Object.keys(rest).filter((k) => have.has(k))
+          this.db.prepare(`update accounts set ${keys.map((k) => `${k} = ?`).join(', ')} where id = ?`).run(...keys.map((k) => (rest as Row)[k]), id)
+        } else { put('accounts', row, 'insert'); fresh.push(id) }
+      }
+      for (const x of T.identities || []) {
+        const acc = ids.get(x.account_id); if (!acc) continue
+        if (this.db.prepare('select 1 from identities where account_id = ? and lower(email) = lower(?)').get(acc, x.email)) continue
+        put('identities', { ...x, id: this.db.prepare('select 1 from identities where id = ?').get(x.id) ? uuid() : x.id, account_id: acc })
+      }
+      // folders keep their names, colours and hidden state; the next sync fills in the rest from the server
+      for (const f of T.folders || []) {
+        const acc = ids.get(f.account_id); if (!acc) continue
+        this.db.prepare(`insert into folders (id, account_id, path, name, delimiter, role, special, color, hidden) values (?,?,?,?,?,?,?,?,?)
+          on conflict(account_id, path) do update set color = excluded.color, hidden = excluded.hidden, name = excluded.name, role = coalesce(folders.role, excluded.role)`)
+          .run(uuid(), acc, f.path, f.name, f.delimiter ?? null, f.role ?? null, f.special ?? null, f.color ?? null, f.hidden ? 1 : 0)
+      }
+      for (const c of T.contacts || []) {
+        this.db.prepare(`insert into contacts (email, name, last_used, use_count, vip, blocked, images_allowed) values (?,?,?,?,?,?,?)
+          on conflict(email) do update set name = coalesce(contacts.name, excluded.name), use_count = max(contacts.use_count, excluded.use_count),
+          vip = max(contacts.vip, excluded.vip), blocked = max(contacts.blocked, excluded.blocked), images_allowed = max(contacts.images_allowed, excluded.images_allowed)`)
+          .run(c.email, c.name ?? null, c.last_used ?? null, c.use_count || 0, c.vip ? 1 : 0, c.blocked ? 1 : 0, c.images_allowed ? 1 : 0)
+      }
+    })()
+    for (const id of ids.values()) { this.stopAccount(id); this.state.delete(id); if ((this.db.prepare('select enabled from accounts where id = ?').get(id) as Row)?.enabled) this.startAccount(id) }
+    this.emit({ type: 'accounts' })
+    return { accounts: ids.size, signatures: (T.signatures || []).length, templates: (T.templates || []).length, rules: (T.rules || []).length }
   }
 
   /** the account's picture, from an image file (index.ts has made it a small square PNG) */

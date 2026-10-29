@@ -1,6 +1,7 @@
 // RoarMail's main process: the window, the mail engine and the IPC door the screens use.
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, systemPreferences, Tray } from 'electron'
 import fs from 'fs'
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
 import os from 'os'
 import path from 'path'
 import { openStore } from './store'
@@ -375,6 +376,34 @@ app.whenReady().then(() => {
     const img = nativeImage.createFromDataURL(dataUrl)
     if (img.isEmpty()) throw new Error('not-an-image')
     mail.setAvatar(String(id), img.resize({ width: 160, height: 160, quality: 'best' }).toDataURL())
+  })
+  // Move to another computer: the setup in one file, sealed with the person's passphrase (scrypt + AES-256-GCM), since
+  // it carries the mail passwords; without the passphrase the file is noise
+  const KDF = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
+  handle('mail:exportSetup', async (_e, pass: string) => {
+    if (typeof pass !== 'string' || pass.length < 6) throw new Error('short-pass')
+    const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('desktop'), `RoarMail setup ${new Date().toISOString().slice(0, 10)}.roarmail`), filters: [{ name: 'RoarMail setup', extensions: ['roarmail'] }] })
+    if (r.canceled || !r.filePath) return null
+    const salt = randomBytes(16), iv = randomBytes(12), key = scryptSync(pass, salt, 32, KDF)
+    const c = createCipheriv('aes-256-gcm', key, iv)
+    const data = Buffer.concat([c.update(JSON.stringify(mail.exportSetup()), 'utf8'), c.final()])
+    fs.writeFileSync(r.filePath, JSON.stringify({ format: 'roarmail-setup-sealed', version: 1, kdf: 'scrypt', salt: salt.toString('base64'), iv: iv.toString('base64'), tag: c.getAuthTag().toString('base64'), data: data.toString('base64') }))
+    return r.filePath
+  })
+  handle('mail:importSetup', async (_e, pass: string) => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: 'RoarMail setup', extensions: ['roarmail'] }] })
+    if (r.canceled || !r.filePaths[0]) return null
+    let box: any
+    try { box = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8')) } catch { throw new Error('not-a-setup') }
+    if (box?.format !== 'roarmail-setup-sealed') throw new Error('not-a-setup')
+    let json: string
+    try {
+      const key = scryptSync(String(pass), Buffer.from(box.salt, 'base64'), 32, KDF)
+      const d = createDecipheriv('aes-256-gcm', key, Buffer.from(box.iv, 'base64'))
+      d.setAuthTag(Buffer.from(box.tag, 'base64'))
+      json = Buffer.concat([d.update(Buffer.from(box.data, 'base64')), d.final()]).toString('utf8')
+    } catch { throw new Error('bad-pass') }
+    return mail.importSetup(JSON.parse(json))
   })
   // Settings > General > Default mail app: mailto: links open RoarMail (the packaged app declares mailto, see package.json)
   handle('mail:isDefaultMail', () => app.isDefaultProtocolClient('mailto'))

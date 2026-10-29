@@ -7,6 +7,7 @@ import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
 import { Icon } from './Icon'
+import { MoveSetup } from './MoveSetup'
 import { RoarMeAccount } from './RoarMe'
 import { RulesPage } from './Rules'
 import { TemplatesPage } from './Templates'
@@ -171,6 +172,7 @@ function General({ s, set }: { s: Settings; set: Set }) {
         </Line>
       </Group>
       <Notify s={s} set={set} />
+      <Group title={t.mv_title} note={t.mv_note}><div className="set-row block"><MoveSetup /></div></Group>
     </div>
   )
 }
