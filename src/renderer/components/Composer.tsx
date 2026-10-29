@@ -190,7 +190,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     const done: RoarTransferFile[] = []
     for (const f of list) {
       setUp((u) => ({ ...u, [f]: 0 }))
-      try { done.push(await window.roarmail.roarmeTransfer(f, rtDays)); onEach?.(f) } finally { setUp((u) => { const rest = { ...u }; delete rest[f]; return rest }) }
+      try { done.push(await window.roarmail.roarmeTransfer(f, roarReady ? rtDays : 1)); onEach?.(f) } finally { setUp((u) => { const rest = { ...u }; delete rest[f]; return rest }) }
     }
     if (done.length) {
       placeCard(transferCard(await window.roarmail.roarmeTransferBundle(done, { title: subject.trim(), password: rtPw, notify: rtNotify })))
@@ -285,8 +285,8 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   }
 
   // the RoarTransfer button (as in RoarMe): files go up at once and one link for them lands in the message
+  // without a RoarMe account it is FastTransfer (29 Oct 2026): 24 hours, up to 1 GB, one download, 3 a day
   async function transferNow() {
-    if (!roarReady) { setError(t.rt_needSignIn); return }
     const picked = await window.roarmail.pickFiles()
     if (!picked.length) return
     setError('')
@@ -345,7 +345,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
                     <Icon name="clip" size={16} /><span><b>{t.attach}</b><small>{t.at_attachHint}</small></span>
                   </button>
                   <button className="rt" onClick={() => { setAttachMenu(false); transferNow() }}>
-                    <Icon name="roarUp" size={16} /><span><b>RoarTransfer</b><small>{roarReady ? t.at_rtHint : t.rt_needSignIn}</small></span>
+                    <Icon name="roarUp" size={16} /><span><b>{roarReady ? 'RoarTransfer' : 'FastTransfer'}</b><small>{roarReady ? t.at_rtHint : t.at_fastHint}</small></span>
                   </button>
                 </div>
               )}
@@ -485,6 +485,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             <label><input type="checkbox" checked={rtNotify} disabled={rt.length > 0} onChange={(e) => setRtNotify(e.target.checked)} /> {t.rt_notify}</label>
           </div>
         )}
+        {!roarReady && rt.length > 0 && <p className="muted small hint-big">{t.at_fastNote}</p>}
         {!roarReady && roar && files.some((f) => sizes[f] > LINK_AT) && <p className="muted small hint-big">{t.rt_big}</p>}
         {error && <p className="error">{error}</p>}
         <div className="composer-foot">

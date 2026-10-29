@@ -193,14 +193,16 @@ export class RoarMe {
     }
   }
 
-  /** a call to RoarTransfer's bridge to Cloudflare R2 (RoarMe's Edge Function roartransfer-r2), signed in */
+  /** a call to RoarTransfer's bridge to Cloudflare R2 (RoarMe's Edge Function roartransfer-r2); signed out it is
+   * FastTransfer, as on roartransfer.com without an account (29 Oct 2026): the bridge keeps its limits */
   private async r2(body: Record<string, unknown>) {
     const { data } = await this.sb.auth.getSession()
-    if (!data.session) throw new Error('roarme-signed-out')
-    const r = await fetch(R2_FN, { method: 'POST', headers: { apikey: KEY, Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const headers: Record<string, string> = { apikey: KEY, 'Content-Type': 'application/json' }
+    if (data.session) headers.Authorization = `Bearer ${data.session.access_token}`
+    const r = await fetch(R2_FN, { method: 'POST', headers, body: JSON.stringify(body) })
     let d: any = {}
     try { d = await r.json() } catch { /* not JSON */ }
-    if (!r.ok) throw Object.assign(new Error(d.error === 'signed-out' ? 'roarme-signed-out' : d.error || `RoarTransfer (${r.status})`), { fatal: r.status < 500 })
+    if (!r.ok) throw Object.assign(new Error(d.error === 'signed-out' ? 'roarme-signed-out' : d.daily ? 'roarme-fast-daily' : d.error || `RoarTransfer (${r.status})`), { fatal: r.status < 500 })
     return d
   }
 
@@ -209,6 +211,11 @@ export class RoarMe {
    * Gives the file's token; transferBundle then makes ONE link for all the email's files. progress gets 0..1. */
   async transfer(file: string, progress: (p: number) => void, stop: { stopped?: boolean } = {}, days = 3): Promise<RoarTransferFile> {
     const size = fs.statSync(file).size
+    // FastTransfer (no RoarMe account): 24 hours, up to 1 GB, one download, 3 a day
+    if (!(await this.sb.auth.getSession()).data.session) {
+      days = 1
+      if (size > GB) throw new Error('roarme-too-big-fast')
+    }
     if (size > (days === 1 ? 5 : 3) * GB) throw new Error('roarme-too-big')
     const name = path.basename(file)
     const type = MIME[path.extname(name).slice(1).toLowerCase()] || 'application/octet-stream'
@@ -273,6 +280,8 @@ export class RoarMe {
   async transferBundle(files: RoarTransferFile[], opts: { title?: string; password?: string; notify?: boolean } = {}): Promise<RoarTransferLink> {
     const size = files.reduce((a, f) => a + f.size, 0)
     const name = files.length === 1 ? files[0].name : `${files.length} files`
+    // FastTransfer has no account to send the "downloaded" email to
+    if (!(await this.sb.auth.getSession()).data.session) opts = { ...opts, notify: false }
     try {
       const b = await this.r2({ action: 'bundle', tokens: files.map((f) => f.token), title: opts.title || '', message: '', recipients: [], password: opts.password || '', notify: !!opts.notify })
       return { url: TRANSFER_PAGE + b.token, name, size, expires: b.expires, files, locked: !!opts.password }
