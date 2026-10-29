@@ -10,6 +10,7 @@ import { Composer, type ComposeSeed } from './components/Composer'
 import { MovePicker } from './components/MovePicker'
 import { SettingsSheet, type Page } from './components/SettingsSheet'
 import { ContactsSheet } from './components/Contacts'
+import { FilesSheet } from './components/Files'
 import { blankRule } from './components/Rules'
 import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
@@ -55,6 +56,7 @@ export default function App() {
   const [workOpen, setWorkOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
   const [contactsAt, setContactsAt] = useState<string | null>(null) // open on this address ('' = the list)
+  const [filesOpen, setFilesOpen] = useState(false)
   const [accDrag, setAccDrag] = useState('')
   const [accDrop, setAccDrop] = useState('')
   // the folders shown or hidden, ticked in place (Alex, 29 Oct: "the folders I want, and hide the rest")
@@ -150,6 +152,9 @@ export default function App() {
   const list = results ?? rows
   const senderPic = useSenderIcons(list.slice(0, 150).map((r) => r.fromEmail), prefs.senderPictures && prefs.listAvatars)
   const [editUnified, setEditUnified] = useState(false)
+  // All accounts' folders in the order dragged in Edit (Alex, 29 Oct: "reorder in edit")
+  const [uDrag, setUDrag] = useState('')
+  const [uDrop, setUDrop] = useState('')
   // a folder's right-click menu asks here for a name or a colour
   const [folderAsk, setFolderAsk] = useState<{ kind: 'new' | 'sub' | 'rename' | 'custom'; folder: Folder } | null>(null)
   const chosen = list.filter((r) => selected.includes(keyOf(r)))
@@ -559,6 +564,7 @@ export default function App() {
           <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
           <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
           <button className={`acc tool-btn ${contactsAt !== null ? 'on-tool' : ''}`} title={t.ct_title} onClick={() => setContactsAt('')}><Icon name="person" size={18} /></button>
+          <button className={`acc tool-btn ${filesOpen ? 'on-tool' : ''}`} title={t.fi_title} onClick={() => setFilesOpen(true)}><Icon name="clip" size={18} /></button>
           <button className={`acc tool-btn ${statsOpen ? 'on-tool' : ''}`} title={t.st_title} onClick={() => setStatsOpen(true)}><Icon name="chart" size={18} /></button>
           <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
           <button className={`acc tool-btn ${railWide ? 'on-tool' : ''}`} title={railWide ? t.railIcons : t.railNames} onClick={toggleRail}><Icon name="sidebar" size={18} /></button>
@@ -575,8 +581,25 @@ export default function App() {
             <button className={`link small ${editUnified ? 'on' : ''}`} onClick={() => setEditUnified((v) => !v)}>{editUnified ? t.done : t.edit}</button>
           </div>
           <div className="folder-list list-lens lens" ref={folderLens}>
-          {folders.filter((f) => editUnified || f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)).map((f) => editUnified ? (
-            <label key={f.id} className={`folder pick ${f.role === 'inbox' ? 'fixed' : ''}`}>
+          {(() => {
+            const order = (prefs.unifiedOrder || '').split(',').filter(Boolean)
+            const at = (f: Folder) => { const i = order.indexOf(f.role!); return i < 0 ? 100 + folders.indexOf(f) : i }
+            return [...folders].sort((a, b) => at(a) - at(b))
+          })().filter((f) => editUnified || f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)).map((f, _i, shown) => editUnified ? (
+            <label key={f.id} className={`folder pick ${f.role === 'inbox' ? 'fixed' : ''} ${uDrop === f.role ? 'acc-drop' : ''} ${uDrag === f.role ? 'acc-dragging' : ''}`}
+              draggable onDragStart={(e) => { setUDrag(f.role!); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-roarmail-unified', f.role!) }}
+              onDragOver={(e) => { if (uDrag) { e.preventDefault(); setUDrop(f.role!) } }} onDragLeave={() => setUDrop((x) => (x === f.role ? '' : x))}
+              onDragEnd={() => { setUDrag(''); setUDrop('') }}
+              onDrop={(e) => {
+                if (!uDrag || uDrag === f.role) return
+                e.preventDefault()
+                const ids: string[] = shown.map((x) => x.role as string).filter((r) => r !== uDrag)
+                const from = shown.findIndex((x) => x.role === uDrag), to = shown.findIndex((x) => x.role === f.role)
+                ids.splice(ids.indexOf(f.role!) + (from < to ? 1 : 0), 0, uDrag)
+                const v = ids.join(',')
+                api.setSetting('unifiedOrder', v); setPrefs((p) => ({ ...p, unifiedOrder: v })); setUDrag(''); setUDrop('')
+              }}>
+              <span className="grip" aria-hidden="true">⋮⋮</span>
               <input type="checkbox" disabled={f.role === 'inbox'} checked={f.role === 'inbox' || prefs.unifiedShown.split(',').includes(f.role!)}
                 onChange={(e) => {
                   const now = new Set(prefs.unifiedShown.split(',').filter(Boolean))
@@ -744,7 +767,7 @@ export default function App() {
         <div className="rows" key={`${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`}>
           {list.map((r) => (
             <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
-              prefs={prefs} onClick={(e) => click(r, e)} onMenu={(e) => rowMenu(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
+              prefs={prefs} onClick={(e) => click(r, e)} onMenu={(e) => rowMenu(r, e)} onBlock={async () => { await api.blockSender(r.fromEmail, true); act([r], 'trash') }} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
               onPick={() => { const k = keyOf(r); setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k) }}
               onDrag={(e) => startDrag(r, e)} onDragEnd={() => { dragging.current = null; setDropOn('') }}
               onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
@@ -812,6 +835,9 @@ export default function App() {
       {contactsAt !== null && <ContactsSheet start={contactsAt || undefined} pictures={prefs.senderPictures} onClose={() => setContactsAt(null)}
         onWrite={(to) => { setContactsAt(null); setCompose({ kind: 'new', to }) }}
         onAllMail={(person) => { setContactsAt(null); setScope({ accountId: 'all', person }) }} />}
+      {filesOpen && <FilesSheet accounts={accounts} onClose={() => setFilesOpen(false)}
+        onPerson={(person) => { setFilesOpen(false); setScope({ accountId: 'all', person }) }}
+        onCard={(email) => { setFilesOpen(false); setContactsAt(email) }} />}
       {statsOpen && <StatsSheet accounts={accounts} onClose={() => setStatsOpen(false)}
         onOpen={(accountId, sender) => { setStatsOpen(false); setScope({ accountId, role: 'inbox', person: sender }) }} />}
       {settingsOpen && <SettingsSheet accounts={accounts} start={settingsAt} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); setSettingsAt(null); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}
@@ -832,9 +858,9 @@ export default function App() {
 }
 
 /** one conversation in the list: hover buttons, and a two-finger swipe on the trackpad */
-function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
+function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onBlock, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
   r: MessageRow; pic: string | null; on: boolean; multi: boolean; acc?: Account; prefs: Settings
-  onClick: (e: MouseEvent) => void; onMenu: (e: MouseEvent) => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
+  onClick: (e: MouseEvent) => void; onMenu: (e: MouseEvent) => void; onBlock: () => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
   onDrag: (e: DragEvent) => void; onDragEnd: () => void; onSwipe: (side: 'left' | 'right') => void
 }) {
   const [dx, setDx] = useState(0)
@@ -892,9 +918,9 @@ function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onAct, onSnooze, 
         <div className="quick" onClick={(e) => e.stopPropagation()}>
           <button title={r.seen ? t.markUnread : t.markRead} onClick={() => onAct(r.seen ? 'unseen' : 'seen')}><Icon name="dot" size={15} filled={!r.seen} /></button>
           <button title={r.flagged ? t.unflag : t.flag} onClick={() => onAct(r.flagged ? 'unflag' : 'flag')}><Icon name="star" size={15} filled={r.flagged} /></button>
-          <button title={t.snoozeIt} onClick={() => onSnooze()}><Icon name="clock" size={15} /></button>
           <button title={t.moveTo} onClick={() => onMove()}><Icon name="folder" size={15} /></button>
-          <button title={t.archiveIt} onClick={() => onAct('archive')}><Icon name="archive" size={15} /></button>
+          {/* Block sender in place of Archive and Snooze (Alex, 29 Oct): blocks, and the message goes to the Trash */}
+          {r.fromEmail && <button title={t.blockSender} onClick={() => onBlock()}><Icon name="block" size={15} /></button>}
           <button title={t.trashIt} onClick={() => onAct('trash')}><Icon name="trash" size={15} /></button>
         </div>
       </div>

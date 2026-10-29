@@ -386,6 +386,7 @@ app.whenReady().then(() => {
   handle('mail:contactList', (_e, q: string, group: string) => mail.contactList(String(q || ''), String(group || '')))
   handle('mail:contactCard', (_e, email: string) => mail.contactCard(String(email)))
   handle('mail:contactDomains', () => mail.contactDomains())
+  handle('mail:files', (_e, q: string, kind: string, sort: string, acc: string) => mail.files(String(q || ''), String(kind || ''), sort === 'size' ? 'size' : 'date', String(acc || 'all')))
   handle('mail:saveContact', (_e, email: string, patch) => mail.saveContact(String(email), patch || {}))
   handle('mail:importContacts', async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: 'Contacts', extensions: ['vcf', 'csv'] }] })

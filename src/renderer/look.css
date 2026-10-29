@@ -797,7 +797,7 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .pill > .ic { flex: none; }
 
 /* the wide rail's tools: all six in one row, sized to fit whatever the rail's width (Alex, 29 Oct) */
-.rail.wide .rail-tools { display: grid; grid-template-columns: repeat(6, minmax(0, 36px)); justify-content: space-between; gap: 4px; width: 100%; }
+.rail.wide .rail-tools { display: grid; grid-template-columns: repeat(7, minmax(0, 36px)); justify-content: space-between; gap: 4px; width: 100%; }
 .rail.wide .rail-tools .acc { width: 100%; height: auto; aspect-ratio: 1; min-width: 0; }
 
 /* the composer's To / Cc / Bcc: finished addresses as chips, each with its own menu */
@@ -814,3 +814,19 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .date .addr:hover, .date .acc-dot-btn:hover { background: var(--glass-2); color: var(--text); }
 .date { display: inline-flex; align-items: center; gap: 4px; }
 .subject { cursor: context-menu; }
+/* All accounts > Edit: drag a folder by its grip to change the order */
+.folder.pick { cursor: grab; }
+.folder.pick .grip { color: var(--muted); font-size: 11px; letter-spacing: -2px; margin-right: 2px; opacity: .6; }
+.folder.pick.acc-drop { box-shadow: inset 0 -2px 0 var(--accent); }
+.folder.pick.acc-dragging { opacity: .45; }
+
+/* Files (Files.tsx): one row per attachment */
+.sheet.files .ct-head select { height: 38px; width: auto; max-width: 200px; }
+.fi-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.fi-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: var(--r); }
+.fi-row:hover { background: var(--glass); }
+.fi-ico { width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--glass-2); color: var(--muted); }
+.fi-ico.k-pdf { color: #e0413a; } .fi-ico.k-image { color: #2f9bff; } .fi-ico.k-video { color: #b04cff; } .fi-ico.k-audio { color: #f08a24; }
+.fi-ico.k-script { color: var(--accent); } .fi-ico.k-sheet { color: #33c27f; } .fi-ico.k-slides { color: #f5b301; }
+.fi-main { all: unset; cursor: pointer; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fi-meta { flex: none; min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
