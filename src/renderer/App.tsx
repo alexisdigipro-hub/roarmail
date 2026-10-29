@@ -356,6 +356,30 @@ export default function App() {
     } catch (err) { flash({ text: clean(err) }) }
   }
 
+  // a scheduled message's menu (Alex, 29 Oct): send now, another time, edit it, or keep it as a draft
+  const scheduledMenu = async (e: MouseEvent, o: OutboxItem) => {
+    e.preventDefault()
+    const at = (days: number, h: number) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d.getTime() }
+    const monday = (() => { const d = new Date(); const n = ((8 - d.getDay()) % 7) || 7; return at(n, 9) })()
+    const id = await api.popMenu([
+      { id: 'now', label: t.sendNow },
+      null,
+      { id: `at:${Date.now() + 3600e3}`, label: t.sc_hour },
+      { id: `at:${at(0, 18)}`, label: t.sc_evening, enabled: new Date().getHours() < 17 },
+      { id: `at:${at(1, 9)}`, label: t.sc_tomorrow },
+      { id: `at:${monday}`, label: t.sc_monday },
+      null,
+      { id: 'edit', label: t.edit },
+      { id: 'cancel', label: t.sc_cancel },
+    ])
+    try {
+      if (id === 'now') await api.retrySend(o.id)
+      else if (id?.startsWith('at:')) { await api.rescheduleSend(o.id, Number(id.slice(3))); flash({ text: `${t.scheduled}: ${short(Number(id.slice(3)))}` }) }
+      else if (id === 'edit') { const d = await api.cancelSend(o.id); if (d) setCompose({ kind: 'draft', draft: d }) }
+      else if (id === 'cancel') { await api.cancelSend(o.id); flash({ text: t.sc_cancelled }) }
+    } catch (err) { flash({ text: clean(err) }) }
+  }
+
   const openMove = useCallback((targets: MessageRow[]) => {
     if (!targets.length) return
     const accountId = targets[0].accountId
@@ -705,10 +729,10 @@ export default function App() {
             </button>
           )}
           {showScheduled && later.map((o) => (
-            <div key={o.id} className="outbox-bar">
+            <div key={o.id} className="outbox-bar" onContextMenu={(e) => scheduledMenu(e, o)}>
               <span className="grow ellipsis"><b className="plain">{short(o.sendAt)}</b> · {o.subject || t.noSubject}</span>
               <button className="pill small" onClick={() => api.retrySend(o.id)}>{t.sendNow}</button>
-              <button className="pill small ghost" onClick={async () => { const d = await api.cancelSend(o.id); if (d) setCompose({ kind: 'draft', draft: d }) }}>{t.edit}</button>
+              <button className="tool small" title={t.mm_more} onClick={(e) => scheduledMenu(e, o)}><Icon name="more" size={15} /></button>
             </div>
           ))}
         </div>

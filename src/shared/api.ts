@@ -491,6 +491,7 @@ export interface MailApi {
   send(draft: Draft, opts?: { at?: number; remindDays?: number }): Promise<string>
   cancelSend(outboxId: string): Promise<Draft | null>
   retrySend(outboxId: string): Promise<void>
+  rescheduleSend(outboxId: string, at: number): Promise<void>
   outbox(): Promise<OutboxItem[]>
   saveDraft(draft: Draft, toServer: boolean): Promise<string>
   discardDraft(id: string): Promise<void>

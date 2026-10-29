@@ -33,6 +33,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   undo: call('undo') as MailApi['undo'],
   cancelSend: call('cancelSend') as MailApi['cancelSend'],
   retrySend: call('retrySend') as MailApi['retrySend'],
+  rescheduleSend: call('rescheduleSend') as MailApi['rescheduleSend'],
   outbox: call('outbox') as MailApi['outbox'],
   saveDraft: call('saveDraft') as MailApi['saveDraft'],
   discardDraft: call('discardDraft') as MailApi['discardDraft'],

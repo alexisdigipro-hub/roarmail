@@ -292,6 +292,7 @@ app.whenReady().then(() => {
   handle('mail:send', (_e, d, opts) => mail.send(d, opts))
   handle('mail:cancelSend', (_e, id) => mail.cancelSend(id))
   handle('mail:retrySend', (_e, id) => mail.retrySend(id))
+  handle('mail:rescheduleSend', (_e, id: string, at: number) => mail.rescheduleSend(String(id), Number(at)))
   handle('mail:outbox', () => mail.outbox())
   handle('mail:saveDraft', (_e, d, toServer) => mail.saveDraft(d, toServer))
   handle('mail:discardDraft', (_e, id) => mail.discardDraft(id))

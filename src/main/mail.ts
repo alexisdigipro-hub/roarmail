@@ -1925,6 +1925,12 @@ export class MailService {
     return r ? this.draftOf(r) : null
   }
 
+  /** a scheduled message goes out at another time (the Scheduled list's menu, Alex 29 Oct) */
+  rescheduleSend(outboxId: string, at: number) {
+    this.db.prepare(`update outbox set send_at = ?, scheduled = 1 where id = ? and status = 'queued'`).run(Math.max(now() + 30e3, Number(at) || 0), outboxId)
+    this.emit({ type: 'outbox' })
+  }
+
   retrySend(outboxId: string) {
     this.db.prepare(`update outbox set status = 'queued', send_at = ?, last_error = null, scheduled = 0 where id = ?`).run(now(), outboxId)
     this.emit({ type: 'outbox' })

@@ -308,6 +308,7 @@ export function createDemo(): MailApi & { update: any } {
     },
     cancelSend: async (id) => { const i = outbox.findIndex((o) => o.id === id); if (i < 0) return null; const [o] = outbox.splice(i, 1); emit({ type: 'outbox' }); return o.draft },
     retrySend: async (id) => { const o = outbox.find((x) => x.id === id); if (o) deliver(o) },
+    rescheduleSend: async () => {},
     outbox: async () => outbox.map(({ draft, ...o }) => o),
     saveDraft: async (d, toServer) => {
       const id = d.id || uid()
