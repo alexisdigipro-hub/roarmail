@@ -20,7 +20,7 @@ import { seal, open } from './vault'
 import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './microsoft'
 import type {
   Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
-  Security, ServerConfig, Settings, Signature, SnoozedItem,
+  MailStats, Security, ServerConfig, Settings, Signature, SnoozedItem,
 } from '../shared/api'
 
 // senders at these are people, not companies: their picture is their Gravatar
@@ -774,6 +774,53 @@ export class MailService {
   }
 
   /** every message in the folder read, here at once and on the server */
+  /**
+   * Statistics (29 Oct 2026): how full each mailbox is on the server (IMAP QUOTA, when the server tells), and from
+   * what is downloaded: messages, unread, size, messages with attachments, the folders, the senders and the
+   * biggest messages; for one account or every account, plus what RoarMail keeps on this computer
+   */
+  async stats(accountId: string): Promise<MailStats> {
+    const accs = (this.db.prepare('select id, email, description, display_name, color from accounts where enabled = 1 order by sort').all() as Row[])
+      .filter((a) => accountId === 'all' || a.id === accountId)
+    const ids = accs.map((a) => a.id)
+    const inIds = `(${ids.map(() => '?').join(',') || "''"})`
+    const quota = async (id: string) => {
+      try {
+        const q: any = await Promise.race([
+          this.run(id, (c) => (c as any).getQuota('INBOX')),
+          new Promise((resolve) => setTimeout(() => resolve(null), 8e3)),
+        ])
+        const s = q?.storage
+        return s && Number(s.limit) > 0 ? { used: Number(s.used ?? s.usage) || 0, limit: Number(s.limit) } : null
+      } catch { return null }
+    }
+    const accounts = await Promise.all(accs.map(async (a) => {
+      const t = this.db.prepare(`select count(*) n, coalesce(sum(1 - seen), 0) unread, coalesce(sum(size), 0) bytes,
+        coalesce(sum(has_attachments), 0) att, coalesce(sum(case when has_attachments = 1 then size else 0 end), 0) attBytes
+        from messages where account_id = ? and pending_op is null`).get(a.id) as Row
+      const folders = (this.db.prepare(`select f.name, f.role, f.total, count(m.id) n, coalesce(sum(m.size), 0) bytes from folders f
+        left join message_folders mf on mf.folder_id = f.id left join messages m on m.id = mf.message_id and m.pending_op is null
+        where f.account_id = ? and f.hidden = 0 group by f.id order by bytes desc`).all(a.id) as Row[])
+        .map((f) => ({ name: f.name as string, role: (f.role || null) as FolderRole | null, count: f.n as number, onServer: (f.total || 0) as number, bytes: f.bytes as number }))
+      return {
+        id: a.id as string, email: a.email as string, name: (a.description || a.display_name || '') as string, color: a.color as string,
+        quota: await quota(a.id), messages: t.n as number, unread: t.unread as number, bytes: t.bytes as number,
+        withAttachments: t.att as number, attachmentBytes: t.attBytes as number, folders,
+      }
+    }))
+    const senders = (this.db.prepare(`select from_email email, max(from_name) name, count(*) n, coalesce(sum(size), 0) bytes,
+      coalesce(sum(has_attachments), 0) att from messages where account_id in ${inIds} and pending_op is null and from_email <> ''
+      group by from_email order by bytes desc limit 200`).all(...ids) as Row[])
+      .map((s) => ({ email: s.email as string, name: (s.name || '') as string, count: s.n as number, bytes: s.bytes as number, withAttachments: s.att as number }))
+    const biggest = (this.db.prepare(`select id, account_id, subject, from_name, from_email, size, date, has_attachments from messages
+      where account_id in ${inIds} and pending_op is null and size is not null order by size desc limit 15`).all(...ids) as Row[])
+      .map((m) => ({ id: m.id as string, accountId: m.account_id as string, subject: (m.subject || '') as string, from: (m.from_name || m.from_email || '') as string,
+        bytes: m.size as number, date: m.date as number, attachments: !!m.has_attachments }))
+    let cache = 0
+    try { for (const f of fs.readdirSync(mailDir())) cache += fs.statSync(path.join(mailDir(), f)).size } catch { /* nothing kept yet */ }
+    return { accounts, senders, biggest, cache }
+  }
+
   /**
    * Empty Trash / Empty Junk (29 Oct 2026): everything in it deleted for good, on the server first; one account's
    * folder, or with a role alone the Trash (or Junk) of every account (the unified folder)

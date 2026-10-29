@@ -13,6 +13,7 @@ import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
 import { short } from './when'
 import { Splitter, useWidths } from './components/Splitter'
+import { StatsSheet } from './components/Stats'
 import { actionSound, playNewMail, setActionSounds } from './sounds'
 import { useSenderIcons } from './senders'
 
@@ -48,6 +49,7 @@ export default function App() {
   const [showScheduled, setShowScheduled] = useState(false)
   const [roar, setRoar] = useState<{ kind: 'share' | 'task'; m: MessageFull } | null>(null)
   const [workOpen, setWorkOpen] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [railWide, setRailWide] = useState(() => { try { return localStorage.getItem('roarmail.railwide') === '1' } catch { return false } })
   const toggleRail = () => setRailWide((v) => { try { localStorage.setItem('roarmail.railwide', v ? '0' : '1') } catch { /* this run only */ } return !v })
   const [toast, setToast] = useState<Toast | null>(null)
@@ -411,6 +413,7 @@ export default function App() {
         <div className="rail-tools">
           <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
           <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
+          <button className={`acc tool-btn ${statsOpen ? 'on-tool' : ''}`} title={t.st_title} onClick={() => setStatsOpen(true)}><Icon name="chart" size={18} /></button>
           <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
           <button className={`acc tool-btn ${railWide ? 'on-tool' : ''}`} title={railWide ? t.railIcons : t.railNames} onClick={toggleRail}><Icon name="sidebar" size={18} /></button>
         </div>
@@ -624,6 +627,8 @@ export default function App() {
       )}
       {folderAsk && <FolderSheet ask={folderAsk} onClose={() => setFolderAsk(null)} onDone={(text) => { setFolderAsk(null); if (text) flash({ text, ms: 3000 }) }} />}
       {adding && <AddAccount first={false} onDone={() => { setAdding(false); loadAccounts() }} onCancel={() => setAdding(false)} />}
+      {statsOpen && <StatsSheet accounts={accounts} onClose={() => setStatsOpen(false)}
+        onOpen={(accountId, sender) => { setStatsOpen(false); setScope({ accountId, role: 'inbox', person: sender }) }} />}
       {settingsOpen && <SettingsSheet accounts={accounts} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}
       {moving && (
         <MovePicker accountId={moving.accountId} exclude={moving.exclude} onClose={() => setMoving(null)}

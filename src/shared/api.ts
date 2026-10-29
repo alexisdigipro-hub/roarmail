@@ -74,6 +74,20 @@ export interface Folder {
 /** what a folder's right-click menu asks for (the window then asks for a name, a colour or a yes) */
 export type FolderMenuChoice = 'new' | 'sub' | 'rename' | 'custom' | 'hide' | 'read' | 'empty' | 'sync' | 'delete' | 'nocolor' | `c:${string}`
 
+/** Statistics (29 Oct 2026); sizes in bytes, from what is downloaded except quota (the server's own count) */
+export interface MailStats {
+  accounts: {
+    id: string; email: string; name: string; color: string
+    quota: { used: number; limit: number } | null
+    messages: number; unread: number; bytes: number; withAttachments: number; attachmentBytes: number
+    folders: { name: string; role: FolderRole | null; count: number; onServer: number; bytes: number }[]
+  }[]
+  senders: { email: string; name: string; count: number; bytes: number; withAttachments: number }[]
+  biggest: { id: string; accountId: string; subject: string; from: string; bytes: number; date: number; attachments: boolean }[]
+  /** what RoarMail keeps on this computer (downloaded messages) */
+  cache: number
+}
+
 export interface Address { name?: string; address: string }
 
 /** a row of the list: a whole conversation (its newest message), or a single message in search */
@@ -358,6 +372,8 @@ export interface MailApi {
   emptyFolder(target: { folderId?: string; role?: 'trash' | 'spam' }): Promise<void>
   /** every message of every folder of the account ('all' = every account) downloaded now; how many came */
   syncEverything(accountId: string): Promise<number>
+  /** Statistics: mailbox fullness on the server, messages, senders, attachments, the biggest messages */
+  stats(accountId: string): Promise<MailStats>
   /** every message of the folder, not only the recent ones the first sync takes */
   syncFolderAll(folderId: string): Promise<number>
   /** the unified folders (All Inboxes, All Sent, All Trash…): every switched-on account's folder of that role together */

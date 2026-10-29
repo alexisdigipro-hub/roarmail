@@ -297,6 +297,7 @@ app.whenReady().then(() => {
   handle('mail:hideFolder', (_e, id, hidden) => mail.hideFolder(id, !!hidden))
   handle('mail:hiddenFolders', (_e, accountId) => mail.folders(accountId, true))
   handle('mail:markFolderRead', (_e, id) => mail.markFolderRead(id))
+  handle('mail:stats', (_e, accountId) => mail.stats(String(accountId || 'all')))
   handle('mail:emptyFolder', (_e, target) => mail.emptyFolder(target || {}))
   handle('mail:syncFolderAll', (_e, id) => mail.syncFolderAll(id))
   handle('mail:syncEverything', (_e, accountId) => mail.syncEverything(String(accountId || 'all')))

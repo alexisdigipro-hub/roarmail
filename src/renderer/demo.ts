@@ -188,6 +188,9 @@ export function createDemo(): MailApi & { update: any } {
     hideFolder: async () => {},
     hiddenFolders: async () => [],
     syncEverything: async () => 0,
+    stats: async () => ({ accounts: accounts.map((a) => ({ id: a.id, email: a.email, name: a.displayName, color: a.color, quota: { used: 1.2e9, limit: 15e9 },
+      messages: msgs.filter((m) => m.accountId === a.id).length, unread: msgs.filter((m) => m.accountId === a.id && !m.seen).length, bytes: 0, withAttachments: 0, attachmentBytes: 0, folders: [] })),
+      senders: [], biggest: [], cache: 0 }),
     emptyFolder: async ({ folderId, role }) => {
       const hit = (m: DemoMsg) => folderId ? m.folderId === folderId : folders.some((f) => f.id === m.folderId && f.role === role)
       for (let i = msgs.length - 1; i >= 0; i--) if (hit(msgs[i])) msgs.splice(i, 1)
