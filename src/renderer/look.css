@@ -337,6 +337,11 @@ small.block { display: block; margin-top: 2px; font-size: 12px; }
 .update-panel { display: flex; flex-direction: column; gap: 10px; }
 .update-panel .brand { font-size: 18px; letter-spacing: .12em; }
 .update-panel p { margin: 0; }
+.update-line { display: flex; align-items: center; gap: 16px; }
+.update-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.update-what .row { align-items: center; gap: 10px; }
+.update-ver { font-size: 12px; font-weight: 600; color: var(--muted); padding: 2px 9px; border-radius: 999px; background: var(--glass-2); }
+.update-btn { flex: none; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .update-bar { height: 6px; border-radius: 6px; background: var(--glass-2); overflow: hidden; }
 .update-bar i { display: block; height: 100%; background: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); transition: width .3s; }
 

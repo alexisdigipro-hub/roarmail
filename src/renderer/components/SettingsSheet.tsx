@@ -637,20 +637,19 @@ function About({ s, set, replace }: { s: Settings; set: Set; replace: (s: Settin
     : u.checkedAt ? `${t.up_latest} · ${t.up_checked} ${since}` : ''
   return (
     <div className="stack">
+      {/* one line (Alex, 29 Oct: "set up a bit wrong"): the name and version with what the updater says, the button at the end */}
       <div className="panel update-panel">
-        <div className="row">
-          <div className="brand"><b>ROAR</b><i>MAIL</i></div>
-          <span className="grow" />
-          <b className="muted">{u?.current ? `${t.up_version} ${u.current}` : ''}</b>
-        </div>
-        {u?.status === 'downloading' && <div className="update-bar"><i style={{ width: `${u.progress}%` }} /></div>}
-        <p className={`small ${u?.status === 'error' ? 'error' : u?.status === 'ready' ? 'ok-text' : 'muted'}`}>{line}</p>
-        <div className="row end">
+        <div className="update-line">
+          <div className="update-what">
+            <div className="row"><div className="brand"><b>ROAR</b><i>MAIL</i></div>{u?.current && <span className="update-ver">{u.current}</span>}</div>
+            <p className={`small ${u?.status === 'error' ? 'error' : u?.status === 'ready' ? 'ok-text' : 'muted'}`}>{line}</p>
+          </div>
           {u?.status === 'ready'
-            ? <button className="pill primary" onClick={() => api.install()}>{t.up_restart}</button>
-            : <button className="pill" disabled={!api || u?.status === 'checking' || u?.status === 'downloading'} onClick={() => api.check()}>
+            ? <button className="pill small primary update-btn" onClick={() => api.install()}>{t.up_restart}</button>
+            : <button className="pill small update-btn" disabled={!api || u?.status === 'checking' || u?.status === 'downloading'} onClick={() => api.check()}>
                 <Icon name="refresh" size={14} /> {t.up_check}</button>}
         </div>
+        {u?.status === 'downloading' && <div className="update-bar"><i style={{ width: `${u.progress}%` }} /></div>}
       </div>
       <Group note={t.up_how}>
         <Toggle label={t.up_auto} hint={t.up_autoHint} on={s.autoUpdate} set={(v) => set('autoUpdate', v)} />
