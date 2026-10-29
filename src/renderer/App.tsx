@@ -213,7 +213,6 @@ export default function App() {
   }, [inDrafts])
 
   const click = (r: MessageRow, e: MouseEvent) => {
-    const k = keyOf(r)
     if (e.metaKey || e.ctrlKey) {
       setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k)
     } else if (e.shiftKey && anchor) {
@@ -288,6 +287,40 @@ export default function App() {
       else if (pick === 'delete' && confirm(`${t.fm_deleteQ}\n\n${f.name}`)) {
         await api.deleteFolder(f.id)
         if (scope.folderId === f.id) setScope({ accountId: f.accountId, role: 'inbox' })
+      }
+    } catch (err) { flash({ text: clean(err) }) }
+  }
+
+  // a message's right-click menu (Alex, 29 Oct: "right click on the mail and Block sender"): on the selection when
+  // the row is in it, else on that row; the sender's choices (block, a rule) are always the clicked row's
+  const rowMenu = async (r: MessageRow, e: MouseEvent) => {
+    e.preventDefault()
+    const targets = selected.includes(keyOf(r)) ? chosen : [r]
+    const blocked = (await api.blockedSenders().catch(() => [] as string[])).includes(r.fromEmail.toLowerCase())
+    const allSeen = targets.every((x) => x.seen), allFlag = targets.every((x) => x.flagged)
+    const pick = await api.popMenu([
+      { id: 'seen', label: allSeen ? t.markUnread : t.markRead },
+      { id: 'flag', label: allFlag ? t.unflag : t.flag },
+      null,
+      { id: 'archive', label: t.archiveIt },
+      { id: 'move', label: t.moveTo },
+      { id: 'snooze', label: t.snoozeIt },
+      { id: 'trash', label: t.trashIt },
+      null,
+      { id: 'block', label: blocked ? t.unblockSender : t.blockSender, enabled: !!r.fromEmail },
+      { id: 'rule', label: t.ru_fromSender, enabled: !!r.fromEmail },
+    ])
+    if (!pick) return
+    try {
+      if (pick === 'seen') act(targets, allSeen ? 'unseen' : 'seen')
+      else if (pick === 'flag') act(targets, allFlag ? 'unflag' : 'flag')
+      else if (pick === 'archive' || pick === 'trash') act(targets, pick)
+      else if (pick === 'move') openMove(targets)
+      else if (pick === 'snooze') openSnooze(targets)
+      else if (pick === 'block') { await api.blockSender(r.fromEmail, !blocked); flash({ text: blocked ? `${t.unblock}: ${r.fromEmail}` : t.blockedNote, ms: 3500 }) }
+      else if (pick === 'rule') {
+        setSettingsAt({ page: 'rules', rule: blankRule({ name: r.fromName || r.fromEmail, conditions: [{ field: 'from', value: r.fromEmail }] }) })
+        setSettingsOpen(true)
       }
     } catch (err) { flash({ text: clean(err) }) }
   }
@@ -647,7 +680,7 @@ export default function App() {
         <div className="rows" key={`${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`}>
           {list.map((r) => (
             <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
-              prefs={prefs} onClick={(e) => click(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
+              prefs={prefs} onClick={(e) => click(r, e)} onMenu={(e) => rowMenu(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
               onPick={() => { const k = keyOf(r); setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k) }}
               onDrag={(e) => startDrag(r, e)} onDragEnd={() => { dragging.current = null; setDropOn('') }}
               onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
@@ -724,9 +757,9 @@ export default function App() {
 }
 
 /** one conversation in the list: hover buttons, and a two-finger swipe on the trackpad */
-function Row({ r, pic, on, multi, acc, prefs, onClick, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
+function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
   r: MessageRow; pic: string | null; on: boolean; multi: boolean; acc?: Account; prefs: Settings
-  onClick: (e: MouseEvent) => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
+  onClick: (e: MouseEvent) => void; onMenu: (e: MouseEvent) => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
   onDrag: (e: DragEvent) => void; onDragEnd: () => void; onSwipe: (side: 'left' | 'right') => void
 }) {
   const [dx, setDx] = useState(0)
@@ -759,7 +792,7 @@ function Row({ r, pic, on, multi, acc, prefs, onClick, onAct, onSnooze, onMove, 
           <Icon name={side === 'archive' ? 'archive' : side === 'trash' ? 'trash' : side === 'flag' ? 'star' : 'dot'} size={18} />
         </div>
       )}
-      <div className={`msg ${on ? 'on' : ''} ${r.seen ? '' : 'unread'}`} style={dx ? { transform: `translateX(${dx}px)` } : undefined} onClick={onClick}>
+      <div className={`msg ${on ? 'on' : ''} ${r.seen ? '' : 'unread'}`} style={dx ? { transform: `translateX(${dx}px)` } : undefined} onClick={onClick} onContextMenu={onMenu}>
         {/* the picture is also the row's checkbox: a click there adds it to the selection (or takes it out) */}
         <div className={`pick-wrap ${on && multi ? 'picked' : ''} ${prefs.listAvatars ? '' : 'bare'}`} title={t.pickRow}
           onClick={(e) => { e.stopPropagation(); onPick() }}>

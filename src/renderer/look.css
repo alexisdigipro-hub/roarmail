@@ -687,3 +687,9 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .invite-actions { margin-top: 8px; flex-wrap: wrap; }
 .invite-actions .seg > button:disabled { opacity: .5; cursor: default; }
 .invite-actions .pill { display: inline-flex; align-items: center; gap: 6px; }
+
+/* the hover names of icons (tips.ts) */
+.tip { position: fixed; z-index: 1000; max-width: 260px; padding: 5px 10px; border-radius: 9px; pointer-events: none;
+  background: var(--float); color: var(--text); font-size: 12px; line-height: 1.35; font-weight: 500;
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--edge-2); opacity: 0; transform: translateY(2px); transition: opacity .12s, transform .12s; }
+.tip.show { opacity: 1; transform: none; }

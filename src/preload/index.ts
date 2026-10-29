@@ -48,6 +48,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   senderIcons: call('senderIcons') as MailApi['senderIcons'],
   unifiedFolders: call('unifiedFolders') as MailApi['unifiedFolders'],
   folderMenu: call('folderMenu') as MailApi['folderMenu'],
+  popMenu: call('popMenu') as MailApi['popMenu'],
   createFolder: call('createFolder') as MailApi['createFolder'],
   renameFolder: call('renameFolder') as MailApi['renameFolder'],
   deleteFolder: call('deleteFolder') as MailApi['deleteFolder'],
