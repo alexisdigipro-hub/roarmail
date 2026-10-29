@@ -94,7 +94,7 @@ export function ShareSheet({ message, onClose, onDone }: { message: MessageFull;
   return (
     <div className="sheet-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
       <div className="sheet roarme-sheet">
-        <div className="row"><Icon name="roar" size={20} /><h3 className="grow">{t.rm_share}</h3><button className="tool" onClick={onClose}><Icon name="close" /></button></div>
+        <div className="row"><Icon name="roar" size={20} /><h3 className="grow">{t.rm_share}</h3><button className="tool" title={t.done} onClick={onClose}><Icon name="close" /></button></div>
         <div className="mail-chip"><b>{message.subject || t.noSubject}</b><span className="muted small">{message.fromName || message.fromEmail}</span></div>
         {!ready ? <RoarMeAccount compact /> : (
           <>
@@ -153,7 +153,7 @@ export function TaskSheet({ message, onClose, onDone }: { message: MessageFull; 
   return (
     <div className="sheet-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
       <div className="sheet roarme-sheet">
-        <div className="row"><Icon name="tasks" size={20} /><h3 className="grow">{t.rm_task}</h3><button className="tool" onClick={onClose}><Icon name="close" /></button></div>
+        <div className="row"><Icon name="tasks" size={20} /><h3 className="grow">{t.rm_task}</h3><button className="tool" title={t.done} onClick={onClose}><Icon name="close" /></button></div>
         {!ready ? <RoarMeAccount compact /> : (
           <>
             <label>{t.rm_taskTitle}<input autoFocus value={title} maxLength={300} onChange={(e) => setTitle(e.target.value)} /></label>
@@ -200,7 +200,7 @@ export function WorkPanel({ onClose }: { onClose: () => void }) {
     <aside className="work-panel">
       <div className="row work-head"><b className="roar-wm small"><span>ROAR</span>ME</b><span className="grow">{t.rm_work}</span>
         <button className="tool small" title={t.refresh} onClick={load}><Icon name="refresh" size={15} /></button>
-        <button className="tool small" onClick={onClose}><Icon name="close" size={15} /></button></div>
+        <button className="tool small" title={t.done} onClick={onClose}><Icon name="close" size={15} /></button></div>
       {!status ? <div className="spinner" /> : !ready ? <RoarMeAccount compact /> : !work ? (error ? <p className="error">{error}</p> : <div className="spinner" />) : (
         <div className="work-body">
           <h4>{t.rm_tasks} <span className="muted">{work.tasks.length}</span></h4>

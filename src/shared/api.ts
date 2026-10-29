@@ -263,6 +263,8 @@ export interface Settings {
   downloadsFolder: string
   /** sending again later when the outgoing server cannot be reached */
   retrySending: boolean
+  /** pictures from the web in messages: shown at once (Alex, 29 Oct), or hidden until Show */
+  remoteImages: boolean
   /** search also looks in Trash and Junk */
   searchTrash: boolean
   searchJunk: boolean
@@ -398,6 +400,8 @@ export interface MailApi {
   senderIcons(emails: string[]): Promise<Record<string, string | null>>
   /** the system's emoji picker, typing into the focused field (Mac and Windows) */
   emojiPanel(): Promise<void>
+  /** a message's right-click menu (the Mac's own): null is a line between groups; resolves with the picked id, or null */
+  popMenu(items: ({ id: string; label: string; enabled?: boolean } | null)[]): Promise<string | null>
   /** a folder's right-click menu (the Mac's own); resolves with what was picked, or null */
   folderMenu(folderId: string, labels: Record<string, string>): Promise<FolderMenuChoice | null>
   createFolder(accountId: string, parentId: string | null, name: string): Promise<void>

@@ -324,6 +324,12 @@ app.whenReady().then(() => {
       { label: l.delete, enabled: !fixed, click: pick('delete') },
     ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
+  handle('mail:popMenu', (_e, items: ({ id: string; label: string; enabled?: boolean } | null)[]) => new Promise((resolve) => {
+    if (!win) return resolve(null)
+    let picked: string | null = null
+    Menu.buildFromTemplate(items.map((x) => x ? { label: String(x.label), enabled: x.enabled !== false, click: () => { picked = String(x.id) } } : { type: 'separator' as const }))
+      .popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
+  }))
   handle('mail:createFolder', (_e, accountId, parentId, name) => mail.createFolder(accountId, parentId, name))
   handle('mail:renameFolder', (_e, id, name) => mail.renameFolder(id, name))
   handle('mail:deleteFolder', (_e, id) => mail.deleteFolder(id))

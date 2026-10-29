@@ -118,7 +118,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     let timer: ReturnType<typeof setTimeout> | undefined
     window.roarmail.message(id).then((x) => {
       if (!live) return
-      setM(x); setImages(x.imagesAllowed); setBlocked(x.senderBlocked); onLoaded(x)
+      setM(x); setImages(x.imagesAllowed || prefs.remoteImages); setBlocked(x.senderBlocked); onLoaded(x)
       // Settings > General > Mark as read: after a few seconds open (on opening is done by the engine; never = by hand)
       if (!x.seen && prefs.markRead === 'delay') timer = setTimeout(() => { if (live) window.roarmail.act([x.id], 'seen') }, 2500)
     }).catch((e) => { if (live) setError(clean(e)) })

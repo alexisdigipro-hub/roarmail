@@ -14,17 +14,15 @@ import { TemplatesPage } from './Templates'
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
 const MAC = window.roarmail.platform === 'darwin'
 
-// The pages, in five groups (Alex, 21 Oct 2026: "tidy, in categories"), like the Mac's System Settings
-export type Page = 'accounts' | 'signatures' | 'roarme' | 'general' | 'reading' | 'composing' | 'rules' | 'templates' | 'notify' | 'search'
-  | 'theme' | 'list' | 'fonts' | 'privacy' | 'updates' | 'keys' | 'expert'
-const GROUPS: [Key, [Page, string][]][] = [
-  ['grp_accounts', [['accounts', 'inbox'], ['signatures', 'compose'], ['roarme', 'roar']]],
-  ['grp_mail', [['general', 'gear'], ['reading', 'unread'], ['composing', 'sent'], ['rules', 'funnel'], ['templates', 'template'], ['notify', 'bell'], ['search', 'search']]],
-  ['grp_look', [['theme', 'palette'], ['list', 'all'], ['fonts', 'type']]],
-  ['grp_privacy', [['privacy', 'shield']]],
-  ['grp_system', [['updates', 'download'], ['keys', 'keyboard'], ['expert', 'sliders']]],
+// Eight pages in one list (Alex, 29 Oct: "too many and a bit confusing, tidy them"; it was 17 in five groups).
+// Everything is still there: what belonged together now shares a page, and nothing shows in two places.
+export type Page = 'general' | 'mail' | 'writing' | 'rules' | 'look' | 'accounts' | 'privacy' | 'about'
+const PAGES: [Page, string][] = [
+  ['general', 'gear'], ['mail', 'unread'], ['writing', 'compose'], ['rules', 'funnel'],
+  ['look', 'palette'], ['accounts', 'inbox'], ['privacy', 'shield'], ['about', 'info'],
 ]
 const title = (p: Page) => t[`pg_${p}` as Key]
+const title2 = (p: string) => t[`pg_${p}` as Key]
 
 type Set = <K extends keyof Settings>(k: K, v: Settings[K], e?: MouseEvent) => void
 
@@ -54,10 +52,9 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
   const value = (p: Page) => {
     if (!prefs) return ''
     if (p === 'accounts') return String(accounts.length)
-    if (p === 'theme') return prefs.theme === 'pumba' ? 'Pumba' : 'Simba'
-    if (p === 'signatures') return sigs.length ? String(sigs.length) : ''
+    if (p === 'look') return prefs.theme === 'pumba' ? 'Pumba' : 'Simba'
     if (p === 'privacy') return prefs.privacyMode ? t.on : prefs.lock ? t.appLockShort : ''
-    if (p === 'updates') return upd?.status === 'ready' ? t.up_readyShort : upd?.current || ''
+    if (p === 'about') return upd?.status === 'ready' ? t.up_readyShort : upd?.current || ''
     return ''
   }
 
@@ -67,16 +64,13 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
         <nav className="set-side">
           <div className="set-brand"><b>ROAR</b><i>MAIL</i></div>
           <div className="set-list list-lens lens" ref={nav}>
-            {GROUPS.flatMap(([g, pages]) => [
-              <div key={g} className="set-group-title">{t[g]}</div>,
-              ...pages.map(([k, icon]) => (
-                <button key={k} className={`set-nav ${page === k ? 'on' : ''}`} onClick={() => setPage(k)}>
-                  <Icon name={icon} size={16} />
-                  <span className="grow ellipsis">{title(k)}</span>
-                  <span className="set-val">{value(k)}</span>
-                </button>
-              )),
-            ])}
+            {PAGES.map(([k, icon]) => (
+              <button key={k} className={`set-nav ${page === k ? 'on' : ''}`} onClick={() => setPage(k)}>
+                <Icon name={icon} size={16} />
+                <span className="grow ellipsis">{title(k)}</span>
+                <span className="set-val">{value(k)}</span>
+              </button>
+            ))}
           </div>
         </nav>
         <section className="set-page" key={page}>
@@ -86,22 +80,17 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
           </div>
           <div className="settings-body">
             {page === 'accounts' && <Accounts accounts={accounts} sigs={sigs} onAdd={onAddAccount} />}
-            {page === 'signatures' && <Signatures sigs={sigs} reload={loadSigs} />}
-            {page === 'roarme' && <RoarMeAccount />}
+            {page === 'writing' && <Tabs tabs={[['signatures', title2('signatures')], ['templates', title2('templates')]]}>
+              {(k) => k === 'signatures' ? <Signatures sigs={sigs} reload={loadSigs} /> : <TemplatesPage />}
+            </Tabs>}
             {page === 'rules' && <RulesPage accounts={accounts} seed={start?.page === 'rules' ? start.rule : null} />}
-            {page === 'templates' && <TemplatesPage />}
-            {page === 'keys' && <Shortcuts />}
             {prefs && page === 'general' && <General s={prefs} set={set} />}
-            {prefs && page === 'reading' && <Reading s={prefs} set={set} />}
-            {prefs && page === 'composing' && <Composing s={prefs} set={set} />}
-            {prefs && page === 'notify' && <Notify s={prefs} set={set} />}
-            {prefs && page === 'search' && <Search s={prefs} set={set} />}
-            {prefs && page === 'theme' && <Theme s={prefs} set={set} />}
-            {prefs && page === 'list' && <ListPage s={prefs} set={set} />}
-            {prefs && page === 'fonts' && <Fonts s={prefs} set={set} />}
+            {prefs && page === 'mail' && <Mail s={prefs} set={set} />}
+            {prefs && page === 'look' && <Tabs tabs={[['theme', title2('theme')], ['list', title2('list')], ['fonts', title2('fonts')]]}>
+              {(k) => k === 'theme' ? <Theme s={prefs} set={set} /> : k === 'list' ? <ListPage s={prefs} set={set} /> : <Fonts s={prefs} set={set} />}
+            </Tabs>}
             {prefs && page === 'privacy' && <Privacy s={prefs} set={set} />}
-            {prefs && page === 'updates' && <Updates s={prefs} set={set} />}
-            {prefs && page === 'expert' && <Advanced replace={replace} />}
+            {prefs && page === 'about' && <About s={prefs} set={set} replace={replace} />}
           </div>
         </section>
       </div>
@@ -138,7 +127,21 @@ function Choice<V extends string | number>({ value, options, onChange }: { value
   )
 }
 
-/** Mail > General: the app itself on this computer */
+/** a page in parts (Appearance, Signatures and templates): the parts as a segmented control, one shown */
+function Tabs({ tabs, children }: { tabs: [string, string][]; children: (k: string) => ReactNode }) {
+  const [on, setOn] = useState(tabs[0][0])
+  const seg = useLens<HTMLDivElement>(on)
+  return (
+    <div className="stack">
+      <div className="seg lens set-tabs" ref={seg}>
+        {tabs.map(([k, label]) => <button key={k} className={on === k ? 'on' : ''} onClick={() => setOn(k)}>{label}</button>)}
+      </div>
+      {children(on)}
+    </div>
+  )
+}
+
+/** General: the app on this computer, the inboxes, and what tells you about new mail */
 function General({ s, set }: { s: Settings; set: Set }) {
   const [isDefault, setIsDefault] = useState<boolean | null>(null)
   useEffect(() => { window.roarmail.isDefaultMail().then(setIsDefault).catch(() => {}) }, [])
@@ -167,12 +170,13 @@ function General({ s, set }: { s: Settings; set: Set }) {
             options={[[1, t.g_every1], [5, t.g_every5], [15, t.g_every15], [30, t.g_every30], [60, t.g_every60], [0, t.g_manually]]} />
         </Line>
       </Group>
+      <Notify s={s} set={set} />
     </div>
   )
 }
 
-/** Mail > Reading: what happens while reading and acting on mail */
-function Reading({ s, set }: { s: Settings; set: Set }) {
+/** Mail: reading, sending, swipes, attachments and search, one page */
+function Mail({ s, set }: { s: Settings; set: Set }) {
   const swipes: [SwipeAction, string][] = (['archive', 'trash', 'snooze', 'flag', 'seen', 'none'] as SwipeAction[]).map((w) => [w, t[`sw_${w}` as Key]])
   const folderName = s.downloadsFolder.split(/[\\/]/).filter(Boolean).pop() || ''
   return (
@@ -183,6 +187,12 @@ function Reading({ s, set }: { s: Settings; set: Set }) {
         </Line>
         <Toggle label={t.ad_detect} hint={t.ad_detectHint} on={s.detectLinks} set={(v) => set('detectLinks', v)} />
         {MAC && <Toggle label={t.g_linksBg} hint={t.g_linksBgHint} on={s.linksInBackground} set={(v) => set('linksInBackground', v)} />}
+      </Group>
+      <Group title={t.sec_sending}>
+        <Line label={t.undoSend}>
+          <Choice value={s.undoSendSeconds} onChange={(v) => set('undoSendSeconds', v)} options={[0, 5, 10, 20, 30].map((n) => [n, n ? `${n} ${t.seconds}` : t.off])} />
+        </Line>
+        <Toggle label={t.g_retry} hint={t.g_retryHint} on={s.retrySending} set={(v) => set('retrySending', v)} />
       </Group>
       <Group title={t.sec_swipe} note={t.sec_swipeNote}>
         <Line label={t.swipeLeft}><Choice value={s.swipeLeft} onChange={(v) => set('swipeLeft', v)} options={swipes} /></Line>
@@ -195,21 +205,7 @@ function Reading({ s, set }: { s: Settings; set: Set }) {
           {s.downloadsFolder && <button className="pill small ghost" onClick={() => set('downloadsFolder', '')}>{t.g_askEachTime}</button>}
         </Line>
       </Group>
-    </div>
-  )
-}
-
-/** Mail > Composing: sending */
-function Composing({ s, set }: { s: Settings; set: Set }) {
-  return (
-    <div className="stack">
-      <Group title={t.sec_sending}>
-        <Line label={t.undoSend}>
-          <Choice value={s.undoSendSeconds} onChange={(v) => set('undoSendSeconds', v)} options={[0, 5, 10, 20, 30].map((n) => [n, n ? `${n} ${t.seconds}` : t.off])} />
-        </Line>
-        <Toggle label={t.g_retry} hint={t.g_retryHint} on={s.retrySending} set={(v) => set('retrySending', v)} />
-      </Group>
-      <p className="muted small set-note">{t.sec_composeNote}</p>
+      <Search s={s} set={set} />
     </div>
   )
 }
@@ -217,7 +213,7 @@ function Composing({ s, set }: { s: Settings; set: Set }) {
 /** Mail > Notifications: what tells you about new mail */
 function Notify({ s, set }: { s: Settings; set: Set }) {
   return (
-    <div className="stack">
+    <>
       <Group title={t.sec_notifications}>
         <Line label={t.g_notify}>
           <Choice value={s.notifyFor} onChange={(v) => set('notifyFor', v)} options={[['inbox', t.g_notifyInbox], ['known', t.g_notifyKnown], ['none', t.g_notifyNone]]} />
@@ -241,24 +237,20 @@ function Notify({ s, set }: { s: Settings; set: Set }) {
         </Line>
         <Toggle label={t.ap_accBadges} hint={t.ap_accBadgesHint} on={s.accountBadges} set={(v) => set('accountBadges', v)} />
       </Group>
-    </div>
+    </>
   )
 }
 
 /** Mail > Search */
 function Search({ s, set }: { s: Settings; set: Set }) {
   return (
-    <div className="stack">
-      <Group title={t.sec_searchWhere}>
-        <Toggle label={t.ad_searchSpam} on={s.searchJunk} set={(v) => set('searchJunk', v)} />
-        <Toggle label={t.ad_searchTrash} on={s.searchTrash} set={(v) => set('searchTrash', v)} />
-        <Toggle label={t.ad_online} hint={t.ad_onlineHint} on={s.onlineSearch} set={(v) => set('onlineSearch', v)} />
-      </Group>
-      <Group title={t.sec_searchHow} note={t.ad_accentsNote}>
-        <Toggle label={t.ad_conversations} hint={t.ad_conversationsHint} on={s.searchConversations} set={(v) => set('searchConversations', v)} />
-        <Toggle label={t.ad_exact} hint={t.ad_exactHint} on={s.exactSearch} set={(v) => set('exactSearch', v)} />
-      </Group>
-    </div>
+    <Group title={t.pg_search} note={t.ad_accentsNote}>
+      <Toggle label={t.ad_searchSpam} on={s.searchJunk} set={(v) => set('searchJunk', v)} />
+      <Toggle label={t.ad_searchTrash} on={s.searchTrash} set={(v) => set('searchTrash', v)} />
+      <Toggle label={t.ad_online} hint={t.ad_onlineHint} on={s.onlineSearch} set={(v) => set('onlineSearch', v)} />
+      <Toggle label={t.ad_conversations} hint={t.ad_conversationsHint} on={s.searchConversations} set={(v) => set('searchConversations', v)} />
+      <Toggle label={t.ad_exact} hint={t.ad_exactHint} on={s.exactSearch} set={(v) => set('exactSearch', v)} />
+    </Group>
   )
 }
 
@@ -314,9 +306,6 @@ function Theme({ s, set }: { s: Settings; set: Set }) {
         </Line>
         <Line label={<>{t.corners} <b className="muted">{s.radius}px</b></>}>
           <input type="range" min={4} max={16} step={2} value={s.radius} onChange={(e) => set('radius', Number(e.target.value))} />
-        </Line>
-        <Line label={<>{t.textSize} <b className="muted">{TEXT_SIZES[s.textSize]}px</b></>}>
-          <input type="range" min={0} max={4} step={1} value={s.textSize} onChange={(e) => set('textSize', Number(e.target.value))} />
         </Line>
       </Group>
       <Group title={t.ap_feel}>
@@ -399,6 +388,8 @@ function Accounts({ sigs, onAdd }: { accounts: Account[]; sigs: Signature[]; onA
         <button className="acct-chip add" onClick={onAdd} title={t.addAccount}><Icon name="plus" size={14} /></button>
       </div>
       {a && <AccountDetail key={a.id} a={a} sigs={sigs} />}
+      <h4 className="set-sub">RoarMe</h4>
+      <RoarMeAccount />
     </div>
   )
 }
@@ -631,8 +622,8 @@ function useUpdate() {
   return u
 }
 
-/** System > Updates: this version, a Check now button, what the updater is doing, and updating by itself */
-function Updates({ s, set }: { s: Settings; set: Set }) {
+/** About RoarMail: this version and its updates, the shortcuts, the resets, the legal pages */
+function About({ s, set, replace }: { s: Settings; set: Set; replace: (s: Settings) => void }) {
   const u = useUpdate()
   const api = (window.roarmail as any).update
   const since = u?.checkedAt ? when(u.checkedAt) : ''
@@ -664,6 +655,8 @@ function Updates({ s, set }: { s: Settings; set: Set }) {
       <Group note={t.up_how}>
         <Toggle label={t.up_auto} hint={t.up_autoHint} on={s.autoUpdate} set={(v) => set('autoUpdate', v)} />
       </Group>
+      <Group title={t.pg_keys}><Shortcuts /></Group>
+      <Advanced replace={replace} />
       {/* Privacy Policy and Terms (Alex, 25 Oct): on the company site, opened in the browser */}
       <div className="row legal-links">
         {([['privacy', t.lg_privacy], ['terms', t.lg_terms]] as const).map(([at, label]) => (
@@ -678,7 +671,7 @@ function Advanced({ replace }: { replace: (s: Settings) => void }) {
   const [note, setNote] = useState('')
   const mb = (n: number) => (n > 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`)
   return (
-    <div className="stack">
+    <>
       <Group title={t.ad_reset}>
         <Line label={t.ad_clearCache} hint={t.ad_clearCacheHint}>
           <button className="pill small" onClick={async () => setNote(`${t.ad_freed} ${mb(await window.roarmail.clearCache())}`)}>{t.ad_clear}</button>
@@ -692,7 +685,7 @@ function Advanced({ replace }: { replace: (s: Settings) => void }) {
         </Line>
       </Group>
       {note && <p className="small ok-text">{note}</p>}
-    </div>
+    </>
   )
 }
 
@@ -785,6 +778,7 @@ function Privacy({ s, set }: { s: Settings; set: Set }) {
         <Toggle label={t.ad_privacy} hint={t.ad_privacyHint} on={s.privacyMode} set={(v) => set('privacyMode', v)} />
       </Group>
       <Group title={t.sec_trackers}>
+        <Toggle label={t.pv_images} hint={t.pv_imagesHint} on={s.remoteImages && !s.privacyMode} disabled={s.privacyMode} set={(v) => set('remoteImages', v)} />
         <Toggle label={t.blockTrackersShort} hint={t.blockTrackers} on={s.blockTrackers || s.privacyMode} disabled={s.privacyMode} set={(v) => set('blockTrackers', v)} />
         <Toggle label={t.stripTrackingShort} hint={t.stripTracking} on={s.stripTracking || s.privacyMode} disabled={s.privacyMode} set={(v) => set('stripTracking', v)} />
       </Group>
