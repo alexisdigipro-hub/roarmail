@@ -48,6 +48,8 @@ export default function App() {
   const [showScheduled, setShowScheduled] = useState(false)
   const [roar, setRoar] = useState<{ kind: 'share' | 'task'; m: MessageFull } | null>(null)
   const [workOpen, setWorkOpen] = useState(false)
+  const [railWide, setRailWide] = useState(() => { try { return localStorage.getItem('roarmail.railwide') === '1' } catch { return false } })
+  const toggleRail = () => setRailWide((v) => { try { localStorage.setItem('roarmail.railwide', v ? '0' : '1') } catch { /* this run only */ } return !v })
   const [toast, setToast] = useState<Toast | null>(null)
   const [outbox, setOutbox] = useState<OutboxItem[]>([])
   const [prefs, setPrefs] = useState<Settings>({ ...LOOK_DEFAULTS, ...GENERAL_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false })
@@ -362,26 +364,40 @@ export default function App() {
 
   return (
     <div className={`app ${intro ? 'intro' : ''}`} style={{ ['--w-folders' as any]: `${widths.folders}px`, ['--w-list' as any]: `${widths.list}px` }}>
-      <nav className="rail">
+      {/* the rail opens wide to show each account's name and address next to its picture (29 Oct 2026) */}
+      <nav className={`rail ${railWide ? 'wide' : ''}`}>
         <div className="drag" />
         {prefs.unifiedInbox && (
-          <button className={`acc all ${scope.accountId === 'all' ? 'on' : ''}`} title={t.allInboxes} onClick={() => setScope({ accountId: 'all', role: 'inbox' })}>
-            <Icon name="inbox" size={20} />
+          <button className="acc-line" title={t.allInboxes} onClick={() => setScope({ accountId: 'all', role: 'inbox' })}>
+            <span className={`acc all ${scope.accountId === 'all' ? 'on' : ''}`}><Icon name="inbox" size={20} /></span>
+            <span className="acc-label"><b>{t.allInboxes}</b></span>
           </button>
         )}
         {accounts.map((a) => (
-          <button key={a.id} className={`acc ${scope.accountId === a.id ? 'on' : ''} ${a.state}`} style={{ ['--c' as any]: a.color }}
+          <button key={a.id} className={`acc-line ${scope.accountId === a.id ? 'on' : ''}`}
             title={`${a.email}${a.state !== 'online' ? ` · ${t[a.state as Key] || a.state}` : ''}`}
             onClick={() => setScope({ accountId: a.id, role: 'inbox' })}>
-            {a.avatar ? <img className="acc-img" src={a.avatar} alt="" /> : initials(a.description || a.displayName || a.email)}
-            {prefs.accountBadges && a.unread > 0 && <span className="acc-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
+            <span className={`acc ${scope.accountId === a.id ? 'on' : ''} ${a.state}`} style={{ ['--c' as any]: a.color }}>
+              {a.avatar ? <img className="acc-img" src={a.avatar} alt="" /> : initials(a.description || a.displayName || a.email)}
+              {prefs.accountBadges && a.unread > 0 && <span className="acc-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
+            </span>
+            <span className="acc-label">
+              <b>{a.description || a.displayName || a.email.split('@')[0]}</b>
+              <small>{a.email}</small>
+            </span>
           </button>
         ))}
-        <button className="acc add" title={t.addAccount} onClick={() => setAdding(true)}><Icon name="plus" size={18} /></button>
+        <button className="acc-line" title={t.addAccount} onClick={() => setAdding(true)}>
+          <span className="acc add"><Icon name="plus" size={18} /></span>
+          <span className="acc-label muted">{t.addAccount}</span>
+        </button>
         <span className="grow" />
-        <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
-        <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
-        <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
+        <div className="rail-tools">
+          <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
+          <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
+          <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
+          <button className={`acc tool-btn ${railWide ? 'on-tool' : ''}`} title={railWide ? t.railIcons : t.railNames} onClick={toggleRail}><Icon name="sidebar" size={18} /></button>
+        </div>
       </nav>
 
       {scope.accountId === 'all' && (
