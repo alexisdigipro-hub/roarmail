@@ -1,6 +1,6 @@
 // Contacts (Alex, 29 Oct 2026): everyone you mail with, found as you type; their card fills itself from the
 // signatures in their mail, and what you type on it stays. The list on the left, the card on the right.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Contact, ContactFull, ContactGroup, ContactPatch } from '../../shared/api'
 import { t, when, type Key } from '../i18n'
 import { useSenderIcons } from '../senders'
@@ -90,9 +90,9 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged }: {
       <div className="row wrap ct-acts">
         <button className="pill small primary" onClick={() => onWrite(email)}><Icon name="compose" size={14} /> {t.ct_write}</button>
         <button className="pill small" onClick={() => onAllMail(email)}><Icon name="target" size={14} /> {t.ct_allMail}</button>
-        {c.phone && <button className="pill small" title={t.ct_copyPhone} onClick={() => navigator.clipboard.writeText(c.phone)}><Icon name="chat" size={14} /> {c.phone}</button>}
+        {c.phone && <button className="pill small" title={t.ct_copyPhone} onClick={() => navigator.clipboard.writeText(c.phone)}><Icon name="phone" size={14} /> {c.phone}</button>}
         <button className={`pill small ${c.vip ? 'on-vip' : ''}`} onClick={() => save({ vip: !c.vip })}><Icon name="star" size={14} filled={c.vip} /> VIP</button>
-        <button className={`pill small ghost ${c.blocked ? 'danger' : ''}`} onClick={async () => { await window.roarmail.blockSender(email, !c.blocked); setC({ ...c, blocked: !c.blocked }); onChanged() }}>
+        <button className="pill small danger-text" onClick={async () => { await window.roarmail.blockSender(email, !c.blocked); setC({ ...c, blocked: !c.blocked }); onChanged() }}>
           <Icon name="block" size={14} /> {c.blocked ? t.unblockSender : t.blockSender}</button>
       </div>
       <div className="ct-tags">
@@ -134,7 +134,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged }: {
 
 /** the little card over a sender's name in a message: who they are, at a glance */
 export function SenderHover({ email, name, pictures, onOpen, onWrite, children }: {
-  email: string; name: string; pictures: boolean; onOpen?: (e: string) => void; onWrite?: (e: string) => void; children: React.ReactNode
+  email: string; name: string; pictures: boolean; onOpen?: (e: string) => void; onWrite?: (e: string) => void; children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const [c, setC] = useState<ContactFull | null>(null)
