@@ -760,3 +760,22 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .ct-row .avatar, .hover-card .avatar { width: 36px; height: 36px; min-width: 36px; flex: none; font-size: 13px; }
 .ct-card .avatar.big-av { width: 64px; height: 64px; min-width: 64px; }
 .ct-row .avatar img, .hover-card .avatar img, .ct-card .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Contacts, tidied (Alex, 29 Oct: "the buttons are a bit anyhow"): every button one size with its icon beside the
+   word, the search one round field, the card's fields close together */
+.sheet.contacts .pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; height: 32px; padding: 0 14px; font-size: 13px; }
+.sheet.contacts .pill .ic { width: 14px; height: 14px; }
+.sheet.contacts label.ct-search { flex-direction: row; align-items: center; gap: 8px; margin: 0; height: 38px; padding: 0 14px; font-size: 14px; color: var(--muted); }
+.sheet.contacts label.ct-search input { height: 100%; padding: 0; border: 0; background: none; box-shadow: none; color: var(--text); font-size: 14px; }
+.sheet.contacts .ct-head { gap: 12px; }
+.sheet.contacts .ct-head .tool { flex: none; }
+.ct-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ct-acts .pill.danger-text { color: var(--danger); background: transparent; }
+.ct-acts .pill.danger-text:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.sheet.contacts label.ct-field { margin: 0; gap: 4px; font-size: 12px; }
+.sheet.contacts .ct-field input, .sheet.contacts .ct-field textarea { height: 36px; min-height: 36px; padding: 0 12px; font-size: 13.5px; color: var(--text); }
+.sheet.contacts .ct-field textarea { height: auto; min-height: 72px; padding: 9px 12px; }
+.ct-fields { gap: 10px 12px; }
+.ct-card { gap: 14px; }
+.ct-card > .muted.small { margin: -4px 0 0; }
+.chip-tag { height: 30px; padding: 0 14px; }

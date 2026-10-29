@@ -90,9 +90,9 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged }: {
       <div className="row wrap ct-acts">
         <button className="pill small primary" onClick={() => onWrite(email)}><Icon name="compose" size={14} /> {t.ct_write}</button>
         <button className="pill small" onClick={() => onAllMail(email)}><Icon name="target" size={14} /> {t.ct_allMail}</button>
-        {c.phone && <button className="pill small" title={t.ct_copyPhone} onClick={() => navigator.clipboard.writeText(c.phone)}><Icon name="chat" size={14} /> {c.phone}</button>}
+        {c.phone && <button className="pill small" title={t.ct_copyPhone} onClick={() => navigator.clipboard.writeText(c.phone)}><Icon name="phone" size={14} /> {c.phone}</button>}
         <button className={`pill small ${c.vip ? 'on-vip' : ''}`} onClick={() => save({ vip: !c.vip })}><Icon name="star" size={14} filled={c.vip} /> VIP</button>
-        <button className={`pill small ghost ${c.blocked ? 'danger' : ''}`} onClick={async () => { await window.roarmail.blockSender(email, !c.blocked); setC({ ...c, blocked: !c.blocked }); onChanged() }}>
+        <button className="pill small danger-text" onClick={async () => { await window.roarmail.blockSender(email, !c.blocked); setC({ ...c, blocked: !c.blocked }); onChanged() }}>
           <Icon name="block" size={14} /> {c.blocked ? t.unblockSender : t.blockSender}</button>
       </div>
       <div className="ct-tags">
