@@ -17,13 +17,16 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
   const [kind, setKind] = useState<FileKind | ''>('')
   const [sort, setSort] = useState<'date' | 'size'>('date')
   const [acc, setAcc] = useState('all')
-  const [res, setRes] = useState<{ files: MailFile[]; counts: Record<string, number> } | null>(null)
+  const [res, setRes] = useState<{ files: MailFile[]; counts: Record<string, number>; indexing?: boolean } | null>(null)
+  const [tick, setTick] = useState(0)
   const seg = useLens<HTMLDivElement>(kind || 'all')
   useEffect(() => {
     let live = true
     const h = setTimeout(() => window.roarmail.files(q, kind, sort, acc).then((r) => { if (live) setRes(r) }).catch(() => { if (live) setRes({ files: [], counts: {} }) }), q ? 160 : 0)
     return () => { live = false; clearTimeout(h) }
-  }, [q, kind, sort, acc])
+  }, [q, kind, sort, acc, tick])
+  // older mail is listed in the background: look again every few seconds until it is done
+  useEffect(() => { if (!res?.indexing) return undefined; const h = setTimeout(() => setTick((n) => n + 1), 4000); return () => clearTimeout(h) }, [res])
   const total = res ? Object.values(res.counts).reduce((a, b) => a + b, 0) : 0
   const accOf = (id: string) => accounts.find((a) => a.id === id)
 
@@ -65,6 +68,7 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
             <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{t[`fk_${k}` as Key]} <span className="muted">{res!.counts[k]}</span></button>
           ))}
         </div>
+        {res?.indexing && <p className="muted small fi-indexing"><span className="spinner small" /> {t.fi_indexing}</p>}
         <div className="fi-list">
           {!res ? <div className="stats-wait"><div className="spinner" /></div>
             : !res.files.length ? <p className="muted ct-empty">{q || kind ? t.fi_none : t.fi_empty}</p>

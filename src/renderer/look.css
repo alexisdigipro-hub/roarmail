@@ -830,3 +830,5 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .fi-ico.k-script { color: var(--accent); } .fi-ico.k-sheet { color: #33c27f; } .fi-ico.k-slides { color: #f5b301; }
 .fi-main { all: unset; cursor: pointer; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .fi-meta { flex: none; min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+.fi-indexing { display: flex; align-items: center; gap: 8px; margin: 0; }
+.spinner.small { width: 14px; height: 14px; border-width: 2px; }
