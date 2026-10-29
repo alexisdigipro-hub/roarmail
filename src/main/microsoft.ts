@@ -11,7 +11,7 @@ import { net, shell } from 'electron'
  * organizational directory and personal Microsoft accounts", platform "Mobile and desktop applications" with the
  * redirect URI http://localhost, public client flows on. The id is not a secret.
  */
-const BUILT_IN = ''
+const BUILT_IN = '1449effc-2b8b-443b-9523-e2f84dd6b677'
 export const MS_CLIENT_ID = process.env.ROARMAIL_MS_CLIENT_ID || BUILT_IN
 
 const AUTH = 'https://login.microsoftonline.com/common/oauth2/v2.0'
@@ -59,7 +59,8 @@ export async function signIn(loginHint?: string): Promise<MsTokens> {
   const server = http.createServer()
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const port = (server.address() as { port: number }).port
-  const redirect = `http://localhost:${port}/`
+  // exactly as registered in Entra (http://localhost, any port, no path)
+  const redirect = `http://localhost:${port}`
   try {
     const code = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('ms_timeout')), 5 * 60e3)
