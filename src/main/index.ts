@@ -38,6 +38,9 @@ function handle(channel: string, fn: (e: Electron.IpcMainInvokeEvent, ...args: a
 const emit = (e: MailEvent) => { win?.webContents.send('mail:event', e) }
 
 function show() {
+  // the Dock or a second launch can ask before Electron is ready ("Cannot create BrowserWindow before app is
+  // ready", 0.19.5): then the window that whenReady opens is the answer
+  if (!app.isReady()) return
   if (!win) return createWindow()
   if (win.isMinimized()) win.restore()
   win.show(); win.focus()
