@@ -10,6 +10,7 @@ import { Composer, type ComposeSeed } from './components/Composer'
 import { MovePicker } from './components/MovePicker'
 import { SettingsSheet, type Page } from './components/SettingsSheet'
 import { ContactsSheet } from './components/Contacts'
+import { FilesSheet } from './components/Files'
 import { blankRule } from './components/Rules'
 import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
@@ -55,6 +56,7 @@ export default function App() {
   const [workOpen, setWorkOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
   const [contactsAt, setContactsAt] = useState<string | null>(null) // open on this address ('' = the list)
+  const [filesOpen, setFilesOpen] = useState(false)
   const [accDrag, setAccDrag] = useState('')
   const [accDrop, setAccDrop] = useState('')
   // the folders shown or hidden, ticked in place (Alex, 29 Oct: "the folders I want, and hide the rest")
@@ -562,6 +564,7 @@ export default function App() {
           <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
           <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
           <button className={`acc tool-btn ${contactsAt !== null ? 'on-tool' : ''}`} title={t.ct_title} onClick={() => setContactsAt('')}><Icon name="person" size={18} /></button>
+          <button className={`acc tool-btn ${filesOpen ? 'on-tool' : ''}`} title={t.fi_title} onClick={() => setFilesOpen(true)}><Icon name="clip" size={18} /></button>
           <button className={`acc tool-btn ${statsOpen ? 'on-tool' : ''}`} title={t.st_title} onClick={() => setStatsOpen(true)}><Icon name="chart" size={18} /></button>
           <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
           <button className={`acc tool-btn ${railWide ? 'on-tool' : ''}`} title={railWide ? t.railIcons : t.railNames} onClick={toggleRail}><Icon name="sidebar" size={18} /></button>
@@ -832,6 +835,9 @@ export default function App() {
       {contactsAt !== null && <ContactsSheet start={contactsAt || undefined} pictures={prefs.senderPictures} onClose={() => setContactsAt(null)}
         onWrite={(to) => { setContactsAt(null); setCompose({ kind: 'new', to }) }}
         onAllMail={(person) => { setContactsAt(null); setScope({ accountId: 'all', person }) }} />}
+      {filesOpen && <FilesSheet accounts={accounts} onClose={() => setFilesOpen(false)}
+        onPerson={(person) => { setFilesOpen(false); setScope({ accountId: 'all', person }) }}
+        onCard={(email) => { setFilesOpen(false); setContactsAt(email) }} />}
       {statsOpen && <StatsSheet accounts={accounts} onClose={() => setStatsOpen(false)}
         onOpen={(accountId, sender) => { setStatsOpen(false); setScope({ accountId, role: 'inbox', person: sender }) }} />}
       {settingsOpen && <SettingsSheet accounts={accounts} start={settingsAt} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); setSettingsAt(null); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}

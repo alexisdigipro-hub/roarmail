@@ -22,7 +22,7 @@ import { cleanRule, plan } from './rules'
 import { readSignature, type CardFields } from './contacts'
 import { attendeeFor, buildReply, readInvite } from './ics'
 import type {
-  Account, AccountPatch, Action, Address, Contact, ContactFull, ContactPatch, Draft, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
+  Account, AccountPatch, Action, Address, Contact, ContactFull, ContactPatch, Draft, MailFile, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   MailStats, Rule, Security, ServerConfig, Settings, Signature, SnoozedItem, Template,
 } from '../shared/api'
 
@@ -100,6 +100,21 @@ const mailDir = () => path.join(app.getPath('userData'), 'mail')
 const emlPath = (id: string) => path.join(mailDir(), `${id}.eml`)
 
 /** a list row from a grouped query (conversation) or a plain message row */
+/** what kind of file an attachment is, by its name first and its type second */
+function fileKind(name: string, mime: string): MailFile['kind'] {
+  const e = (name.split('.').pop() || '').toLowerCase()
+  if (e === 'pdf' || mime === 'application/pdf') return 'pdf'
+  if (/^(fdx|fountain|celtx|highland|fadein|wdz)$/.test(e)) return 'script'
+  if (/^(jpe?g|png|gif|heic|heif|webp|tiff?|bmp|svg|psd|raw|cr2|cr3|nef|arw|dng)$/.test(e) || mime.startsWith('image/')) return 'image'
+  if (/^(mov|mp4|m4v|avi|mkv|webm|mxf|prores|r3d|braw)$/.test(e) || mime.startsWith('video/')) return 'video'
+  if (/^(mp3|wav|aiff?|m4a|aac|flac|ogg)$/.test(e) || mime.startsWith('audio/')) return 'audio'
+  if (/^(xlsx?|csv|numbers|ods)$/.test(e)) return 'sheet'
+  if (/^(pptx?|key|odp)$/.test(e)) return 'slides'
+  if (/^(docx?|pages|rtf|txt|odt|md)$/.test(e)) return 'doc'
+  if (/^(zip|rar|7z|tar|gz|tgz|dmg)$/.test(e)) return 'archive'
+  return 'other'
+}
+
 const contactOf = (r: Row): Contact => ({
   email: r.email, name: r.name || '', phone: r.phone || '', company: r.company || '', title: r.title || '', website: r.website || '',
   notes: r.notes || '', groups: String(r.groups || '').split(',').filter(Boolean), vip: !!r.vip, blocked: !!r.blocked, count: r.n || 0, last: r.last || 0,
@@ -1537,6 +1552,24 @@ export class MailService {
           and c.email not like '%notification%' and c.email not like 'mailer-daemon%' and c.email not like '%bounce%')
       order by c.vip desc, (c.use_count > 0) desc, last desc limit 400`).all({ q, group }) as Row[]
     return rows.filter((r) => !own.has(r.email)).map(contactOf)
+  }
+
+  /** Files: every real attachment (not pictures inside the text), in every enabled account */
+  files(query: string, kind: string, sort: 'date' | 'size', accountId: string): { files: MailFile[]; counts: Record<string, number> } {
+    const q = `%${fold(query.trim().toLowerCase())}%`
+    const rows = this.db.prepare(`select a.id, a.filename, a.size, a.mime, m.date, m.from_name, m.from_email, m.subject, m.account_id, m.id as mid
+      from attachments a join messages m on m.id = a.message_id
+      where a.inline = 0 and a.filename is not null and m.pending_op is null
+        and m.account_id in (select id from accounts where enabled = 1) ${accountId !== 'all' ? 'and m.account_id = @acc' : ''}
+        and (fold(a.filename) like @q or fold(coalesce(m.from_name, '')) like @q or fold(coalesce(m.from_email, '')) like @q or fold(m.subject) like @q)
+      order by m.date desc limit 5000`).all({ q, acc: accountId }) as Row[]
+    const all = rows.map((r): MailFile => ({ id: r.id, filename: r.filename, size: r.size || 0, mime: r.mime || '', kind: fileKind(r.filename, r.mime || ''),
+      date: r.date, fromName: r.from_name || '', fromEmail: r.from_email || '', subject: r.subject || '', accountId: r.account_id, messageId: r.mid }))
+    const counts: Record<string, number> = {}
+    for (const f of all) counts[f.kind] = (counts[f.kind] || 0) + 1
+    const pick = kind ? all.filter((f) => f.kind === kind) : all
+    if (sort === 'size') pick.sort((a, b) => b.size - a.size)
+    return { files: pick.slice(0, 800), counts }
   }
 
   /** the companies in the address book: every address ending that is not a free mail service, with how many people */

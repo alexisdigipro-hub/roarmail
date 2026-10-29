@@ -137,6 +137,12 @@ export interface ContactFull extends Contact {
   recent: MessageRow[]
   files: { id: string; filename: string; size: number; mime: string; date: number }[]
 }
+/** Files (29 Oct 2026): every attachment in every account, with the message it came in */
+export type FileKind = 'pdf' | 'image' | 'video' | 'audio' | 'doc' | 'sheet' | 'slides' | 'script' | 'archive' | 'other'
+export interface MailFile {
+  id: string; filename: string; size: number; mime: string; kind: FileKind
+  date: number; fromName: string; fromEmail: string; subject: string; accountId: string; messageId: string
+}
 export type ContactPatch = Partial<Pick<Contact, 'name' | 'phone' | 'company' | 'title' | 'website' | 'notes' | 'groups' | 'vip'>>
 
 /** a row of the list: a whole conversation (its newest message), or a single message in search */
@@ -416,6 +422,8 @@ export interface MailApi {
   contactList(query: string, group?: ContactGroup | ''): Promise<Contact[]>
   /** one person's card with their latest mail and files; a signature not read yet is read first */
   contactCard(email: string): Promise<ContactFull | null>
+  /** Files: attachments of every account, newest first (or biggest); a search on file name, sender or subject */
+  files(query: string, kind: FileKind | '', sort: 'date' | 'size', accountId: string): Promise<{ files: MailFile[]; counts: Record<string, number> }>
   /** the companies (address endings that are not free mail services) and how many people at each */
   contactDomains(): Promise<{ domain: string; count: number }[]>
   saveContact(email: string, patch: ContactPatch): Promise<void>

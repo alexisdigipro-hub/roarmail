@@ -50,6 +50,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   contactList: call('contactList') as MailApi['contactList'],
   contactCard: call('contactCard') as MailApi['contactCard'],
   contactDomains: call('contactDomains') as MailApi['contactDomains'],
+  files: call('files') as MailApi['files'],
   saveContact: call('saveContact') as MailApi['saveContact'],
   importContacts: call('importContacts') as MailApi['importContacts'],
   importSetup: call('importSetup') as MailApi['importSetup'],
