@@ -590,7 +590,7 @@ export default function App() {
               onDrop={(e) => {
                 if (!uDrag || uDrag === f.role) return
                 e.preventDefault()
-                const ids = shown.map((x) => x.role!).filter((r) => r !== uDrag)
+                const ids: string[] = shown.map((x) => x.role as string).filter((r) => r !== uDrag)
                 const from = shown.findIndex((x) => x.role === uDrag), to = shown.findIndex((x) => x.role === f.role)
                 ids.splice(ids.indexOf(f.role!) + (from < to ? 1 : 0), 0, uDrag)
                 const v = ids.join(',')
