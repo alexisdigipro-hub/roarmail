@@ -819,25 +819,34 @@ export class MailService {
   }
 
   /** the folder and everything in it go from the server (the window asks first) */
-  async deleteFolder(folderId: string) {
+  async deleteFolder(folderId: string): Promise<'deleted' | 'hidden'> {
     const f = this.folderRow(folderId)
-    if (f.role === 'inbox') return
+    if (f.role === 'inbox') return 'hidden'
     // the server says no ("Command failed") to deleting the folder that is open on the connection (Dovecot) and to a
     // folder with folders inside: the open one is closed first, the ones inside go first, deepest first (29 Oct 2026)
     const kids = f.delimiter ? (this.db.prepare('select id, path from folders where account_id = ?').all(f.account_id) as Row[])
       .filter((k) => k.path.startsWith(f.path + f.delimiter)).sort((a, b) => b.path.length - a.path.length) : []
+    // some folders the server keeps for itself and never lets go (Outlook / Exchange "Sync Issues" and the ones inside,
+    // Alex 29 Oct: "DELETE failed"): what the server refuses is hidden instead, and the person is told so
+    const refused: string[] = []
     await this.run(f.account_id, async (c) => {
       for (const p of [...kids.map((k) => k.path as string), f.path]) {
         if ((c.mailbox as any)?.path === p) await c.mailboxClose()
-        try { await c.mailboxDelete(p) } catch (e: any) { throw new Error(e?.responseText || e?.message || String(e)) }
+        try { await c.mailboxDelete(p) } catch { refused.push(p) }
       }
     })
+    if (refused.length) {
+      for (const k of [...kids, f]) this.db.prepare('update folders set hidden = 1 where id = ?').run(k.id)
+      this.emit({ type: 'folders', accountId: f.account_id })
+      return 'hidden'
+    }
     for (const k of [...kids, f]) {
       this.dropFolderMessages(k.id)
       this.db.prepare('delete from folders where id = ?').run(k.id)
     }
     await this.syncFolders(f.account_id)
     this.emit({ type: 'messages', accountId: f.account_id })
+    return 'deleted'
   }
 
   folderAccount(folderId: string): string | null {
@@ -1514,7 +1523,11 @@ export class MailService {
   contactList(query: string, group: string): Contact[] {
     const own = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e))
     const q = `%${fold(query.trim().toLowerCase())}%`
+    // a group, an address ending ("@madlions.com": everyone at one company), people you write to, or the last 30 days
     const where = group === 'vip' ? 'and c.vip = 1' : group === 'blocked' ? 'and c.blocked = 1'
+      : group === 'written' ? 'and c.use_count > 0 and c.blocked = 0'
+      : group === 'recent' ? `and c.blocked = 0 and last > ${Date.now() - 30 * 864e5}`
+      : group.startsWith('@') ? `and c.blocked = 0 and c.email like '%' || @group`
       : group ? `and instr(',' || c.groups || ',', ',' || @group || ',') > 0` : 'and c.blocked = 0'
     const rows = this.db.prepare(`select c.*, (select count(*) from messages m where m.from_email = c.email) as n,
         max(coalesce(c.last_used, 0), coalesce((select max(date) from messages m where m.from_email = c.email), 0)) as last
@@ -1524,6 +1537,20 @@ export class MailService {
           and c.email not like '%notification%' and c.email not like 'mailer-daemon%' and c.email not like '%bounce%')
       order by c.vip desc, (c.use_count > 0) desc, last desc limit 400`).all({ q, group }) as Row[]
     return rows.filter((r) => !own.has(r.email)).map(contactOf)
+  }
+
+  /** the companies in the address book: every address ending that is not a free mail service, with how many people */
+  contactDomains(): { domain: string; count: number }[] {
+    const own = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e))
+    const counts = new Map<string, number>()
+    for (const r of this.db.prepare(`select email from contacts where blocked = 0 and (use_count > 0 or vip = 1 or groups != '' or edited != ''
+        or (select count(*) from messages m where m.from_email = contacts.email) > 0)`).all() as Row[]) {
+      if (own.has(r.email) || /no-?reply|notification|mailer-daemon|bounce/i.test(r.email)) continue
+      const d = String(r.email).split('@')[1]
+      if (!d || PERSONAL.has(d)) continue
+      counts.set(d, (counts.get(d) || 0) + 1)
+    }
+    return [...counts].map(([domain, count]) => ({ domain, count })).sort((a, b) => b.count - a.count || a.domain.localeCompare(b.domain)).slice(0, 60)
   }
 
   contactCard(email: string): ContactFull | null {
@@ -1896,6 +1923,12 @@ export class MailService {
     this.db.prepare('delete from outbox where id = ?').run(outboxId)
     this.emit({ type: 'outbox' })
     return r ? this.draftOf(r) : null
+  }
+
+  /** a scheduled message goes out at another time (the Scheduled list's menu, Alex 29 Oct) */
+  rescheduleSend(outboxId: string, at: number) {
+    this.db.prepare(`update outbox set send_at = ?, scheduled = 1 where id = ? and status = 'queued'`).run(Math.max(now() + 30e3, Number(at) || 0), outboxId)
+    this.emit({ type: 'outbox' })
   }
 
   retrySend(outboxId: string) {

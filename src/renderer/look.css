@@ -785,3 +785,32 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .head .addr:hover, .head .addr-name:hover { background: var(--glass-2); color: var(--text); }
 .head .addr:focus-visible { outline: 2px solid var(--accent); }
 .head .addr-name { cursor: pointer; border-radius: 6px; padding: 0 2px; margin: 0 -2px; }
+
+/* Contacts: the companies, one chip per address ending, in a row that scrolls sideways */
+.ct-domains { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.ct-domains .chip-tag { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.ct-dlabel { flex: none; margin-right: 4px; }
+.ct-id .link.small { font-size: inherit; padding: 0; }
+
+/* every pill button, everywhere: its icon beside the word, never above it (Alex, 29 Oct: "buttons") */
+.pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; vertical-align: middle; }
+.pill > .ic { flex: none; }
+
+/* the wide rail's tools: all six in one row, sized to fit whatever the rail's width (Alex, 29 Oct) */
+.rail.wide .rail-tools { display: grid; grid-template-columns: repeat(6, minmax(0, 36px)); justify-content: space-between; gap: 4px; width: 100%; }
+.rail.wide .rail-tools .acc { width: 100%; height: auto; aspect-ratio: 1; min-width: 0; }
+
+/* the composer's To / Cc / Bcc: finished addresses as chips, each with its own menu */
+.recip .rchips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.recip .rchips input { flex: 1; min-width: 120px; }
+.rchip { height: 24px; padding: 0 10px; border-radius: 999px; font-size: 13px; color: var(--text); background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--edge-2); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rchip:hover { background: color-mix(in srgb, var(--accent) 14%, var(--glass-2)); }
+.rchip.bad { color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent); }
+.date .addr, .date .acc-dot-btn { all: unset; cursor: pointer; border-radius: 6px; padding: 0 3px; }
+.date .addr:hover, .date .acc-dot-btn:hover { background: var(--glass-2); color: var(--text); }
+.date { display: inline-flex; align-items: center; gap: 4px; }
+.subject { cursor: context-menu; }
+.date .addr, .date .acc-dot-btn { all: unset; cursor: pointer; border-radius: 6px; padding: 0 3px; }
+.date .addr:hover, .date .acc-dot-btn:hover { background: var(--glass-2); color: var(--text); }
+.date { display: inline-flex; align-items: center; gap: 4px; }
+.subject { cursor: context-menu; }

@@ -1,6 +1,6 @@
 // Writing a message: new, reply, reply all, forward, or a draft picked up again. Saved as a draft while
 // writing; closing offers to keep it in Drafts. Cmd/Ctrl+Enter sends, Esc closes.
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as RMouseEvent, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import type { Account, Address, Draft, MessageFull, RoarTransferFile, RoarTransferLink, Signature } from '../../shared/api'
 import { fullDate, size, t } from '../i18n'
@@ -98,6 +98,11 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const [cc, setCc] = useState(init.cc)
   const [bcc, setBcc] = useState(init.bcc)
   const [showCc, setShowCc] = useState(!!(init.cc || init.bcc))
+  // a recipient's menu: Move to Cc / Bcc / To
+  const moveChip = (chip: string, f: 'to' | 'cc' | 'bcc') => {
+    const add = (v: string) => (v.trim() && !/[,;]\s*$/.test(v) ? `${v.trim()}, ` : v) + chip + ', '
+    if (f === 'to') setTo(add); else { setShowCc(true); if (f === 'cc') setCc(add); else setBcc(add) }
+  }
   const [subject, setSubject] = useState(init.subject)
   const [files, setFiles] = useState<string[]>(seed.draft?.attachments || [])
   const [busy, setBusy] = useState(false)
@@ -403,10 +408,10 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             )}
           </div>
         )}
-        <Recipients label={t.to} value={to} onChange={setTo} autoFocus={seed.kind === 'new' && !init.to}
+        <Recipients label={t.to} field="to" value={to} onChange={setTo} onMove={moveChip} autoFocus={seed.kind === 'new' && !init.to}
           extra={!showCc && <button className="link small" onClick={() => setShowCc(true)}>{t.cc} / {t.bcc}</button>} />
-        {showCc && <Recipients label={t.cc} value={cc} onChange={setCc} />}
-        {showCc && <Recipients label={t.bcc} value={bcc} onChange={setBcc} />}
+        {showCc && <Recipients label={t.cc} field="cc" value={cc} onChange={setCc} onMove={moveChip} />}
+        {showCc && <Recipients label={t.bcc} field="bcc" value={bcc} onChange={setBcc} onMove={moveChip} />}
         <div className="field"><span>{t.subject}</span><input value={subject} onChange={(e) => setSubject(e.target.value)} />
           <select className={`priority ${priority}`} title={t.rm_priority} value={priority} onChange={(e) => { setPriority(e.target.value as Draft['priority']); dirty.current = true }}>
             <option value="normal">{t.pr_normal}</option><option value="high">! {t.pr_high}</option><option value="low">↓ {t.pr_low}</option>
@@ -552,10 +557,30 @@ export function Composer({ seed, accounts, onClose, onSent }: {
 }
 
 // a recipients field with suggestions from people already written to or heard from
-function Recipients({ label, value, onChange, autoFocus, extra }: { label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; extra?: ReactNode }) {
+type Field = 'to' | 'cc' | 'bcc'
+const isAddr = (x: string) => /[^\s@<]+@[^\s@>]+\.[^\s@>]+/.test(x)
+const addrOf = (x: string) => (x.match(/<([^>]+)>/)?.[1] || x).trim().toLowerCase()
+const nameOf = (x: string) => x.replace(/<[^>]*>/, '').replace(/"/g, '').trim()
+
+/**
+ * To / Cc / Bcc: every finished address is a chip with its own menu (Alex, 29 Oct: menus wherever you click), the
+ * field keeps only what is being typed. The value stays one "a, b, c" string, as the rest of the composer reads it.
+ */
+function Recipients({ label, field, value, onChange, onMove, autoFocus, extra }: {
+  label: string; field: Field; value: string; onChange: (v: string) => void
+  onMove?: (chip: string, to: Field) => void; autoFocus?: boolean; extra?: ReactNode
+}) {
   const [hits, setHits] = useState<Address[]>([])
   const [pick, setPick] = useState(0)
-  const last = value.split(',').pop()!.trim()
+  const [focus, setFocus] = useState(!!autoFocus)
+  const input = useRef<HTMLInputElement>(null)
+  const parts = value.split(/[,;]/).map((x) => x.trim())
+  const closed = /[,;]\s*$/.test(value)
+  const tail = closed ? '' : parts[parts.length - 1] || ''
+  const typing = focus || !isAddr(tail) ? tail : ''
+  const chips = (closed || !typing ? parts : parts.slice(0, -1)).filter(Boolean)
+  const join = (list: string[], rest = '') => (list.length ? list.join(', ') + ', ' : '') + rest
+  const last = typing
 
   useEffect(() => {
     if (last.length < 2) { setHits([]); return }
@@ -564,23 +589,46 @@ function Recipients({ label, value, onChange, autoFocus, extra }: { label: strin
     return () => { live = false }
   }, [last])
 
-  const choose = (a: Address) => {
-    const parts = value.split(',').slice(0, -1).map((x) => x.trim()).filter(Boolean)
-    onChange([...parts, fmt(a)].join(', ') + ', ')
-    setHits([])
+  const choose = (a: Address) => { onChange(join([...chips, fmt(a)])); setHits([]); input.current?.focus() }
+  const drop = (c: string) => onChange(join(chips.filter((x) => x !== c), typing))
+  const menu = async (e: RMouseEvent, c: string) => {
+    e.preventDefault()
+    const others = (['to', 'cc', 'bcc'] as Field[]).filter((f) => f !== field)
+    const id = await window.roarmail.popMenu([
+      { id: 'copy', label: t.ad_copyAddress },
+      { id: 'edit', label: t.rc_edit },
+      null,
+      ...others.map((f) => ({ id: `move:${f}`, label: `${t.rc_moveTo} ${t[f]}` })),
+      null,
+      { id: 'remove', label: t.rc_remove },
+    ])
+    if (id === 'copy') navigator.clipboard.writeText(addrOf(c))
+    else if (id === 'edit') { onChange(join(chips.filter((x) => x !== c), c)); setTimeout(() => input.current?.focus(), 0) }
+    else if (id === 'remove') drop(c)
+    else if (id?.startsWith('move:') && onMove) { drop(c); onMove(c, id.slice(5) as Field) }
   }
 
   return (
-    <div className="field recip">
+    <div className="field recip" onClick={() => input.current?.focus()}>
       <span>{label}</span>
-      <input value={value} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)}
-        onBlur={() => setTimeout(() => setHits([]), 150)}
-        onKeyDown={(e) => {
-          if (!hits.length) return
-          if (e.key === 'ArrowDown') { e.preventDefault(); setPick((pick + 1) % hits.length) }
-          if (e.key === 'ArrowUp') { e.preventDefault(); setPick((pick - 1 + hits.length) % hits.length) }
-          if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(hits[pick]) }
-        }} />
+      <div className="rchips">
+        {chips.map((c) => (
+          <button type="button" key={c} className={`rchip ${isAddr(c) ? '' : 'bad'}`} title={addrOf(c)} onClick={(e) => { e.stopPropagation(); menu(e, c) }} onContextMenu={(e) => menu(e, c)}>
+            {nameOf(c) || addrOf(c)}
+          </button>
+        ))}
+        <input ref={input} value={typing} autoFocus={autoFocus}
+          onFocus={() => setFocus(true)}
+          onChange={(e) => { const v = e.target.value; if (/[,;]$/.test(v) && v.slice(0, -1).trim()) onChange(join([...chips, v.slice(0, -1).trim()])); else onChange(join(chips, v)) }}
+          onBlur={() => { setFocus(false); setTimeout(() => setHits([]), 150); if (isAddr(typing)) onChange(join([...chips, typing.trim()])) }}
+          onKeyDown={(e) => {
+            if (e.key === 'Backspace' && !typing && chips.length) { e.preventDefault(); onChange(join(chips.slice(0, -1))); return }
+            if (!hits.length) { if (e.key === 'Enter' && isAddr(typing)) { e.preventDefault(); onChange(join([...chips, typing.trim()])) } return }
+            if (e.key === 'ArrowDown') { e.preventDefault(); setPick((pick + 1) % hits.length) }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setPick((pick - 1 + hits.length) % hits.length) }
+            if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(hits[pick]) }
+          }} />
+      </div>
       {extra}
       {hits.length > 0 && (
         <ul className="suggest">

@@ -288,7 +288,8 @@ export default function App() {
       else if (pick === 'rules') { const n = await api.runRules(f.id); flash({ text: `${t.fm_rulesDone} ${n}`, ms: 3500 }) }
       else if (pick === 'sync') { flash({ text: t.fm_syncing, ms: 2500 }); const n = await api.syncFolderAll(f.id); flash({ text: `${t.fm_synced} ${n}`, ms: 3500 }) }
       else if (pick === 'delete' && confirm(`${t.fm_deleteQ}\n\n${f.name}`)) {
-        await api.deleteFolder(f.id)
+        const r = await api.deleteFolder(f.id)
+        if (r === 'hidden') flash({ text: t.fm_keptHidden, ms: 6000 })
         if (scope.folderId === f.id) setScope({ accountId: f.accountId, role: 'inbox' })
       }
     } catch (err) { flash({ text: clean(err) }) }
@@ -299,6 +300,13 @@ export default function App() {
   const rowMenu = async (r: MessageRow, e: MouseEvent) => {
     e.preventDefault()
     const targets = selected.includes(keyOf(r)) ? chosen : [r]
+    // a draft (Alex, 29 Oct): open it to go on writing, or delete it
+    if (inDrafts) {
+      const id = await api.popMenu([{ id: 'open', label: t.dr_open }, null, { id: 'trash', label: t.dr_delete }])
+      if (id === 'open') openRow(r)
+      else if (id === 'trash') act(targets, 'trash')
+      return
+    }
     const blocked = (await api.blockedSenders().catch(() => [] as string[])).includes(r.fromEmail.toLowerCase())
     const allSeen = targets.every((x) => x.seen), allFlag = targets.every((x) => x.flagged)
     const pick = await api.popMenu([
@@ -345,6 +353,30 @@ export default function App() {
       if (pick === 'check') await api.refresh(a.id)
       else if (pick === 'read' && inbox) await api.markFolderRead(inbox.id)
       else if (pick === 'settings') { setSettingsAt({ page: 'accounts' }); setSettingsOpen(true) }
+    } catch (err) { flash({ text: clean(err) }) }
+  }
+
+  // a scheduled message's menu (Alex, 29 Oct): send now, another time, edit it, or keep it as a draft
+  const scheduledMenu = async (e: MouseEvent, o: OutboxItem) => {
+    e.preventDefault()
+    const at = (days: number, h: number) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d.getTime() }
+    const monday = (() => { const d = new Date(); const n = ((8 - d.getDay()) % 7) || 7; return at(n, 9) })()
+    const id = await api.popMenu([
+      { id: 'now', label: t.sendNow },
+      null,
+      { id: `at:${Date.now() + 3600e3}`, label: t.sc_hour },
+      { id: `at:${at(0, 18)}`, label: t.sc_evening, enabled: new Date().getHours() < 17 },
+      { id: `at:${at(1, 9)}`, label: t.sc_tomorrow },
+      { id: `at:${monday}`, label: t.sc_monday },
+      null,
+      { id: 'edit', label: t.edit },
+      { id: 'cancel', label: t.sc_cancel },
+    ])
+    try {
+      if (id === 'now') await api.retrySend(o.id)
+      else if (id?.startsWith('at:')) { await api.rescheduleSend(o.id, Number(id.slice(3))); flash({ text: `${t.scheduled}: ${short(Number(id.slice(3)))}` }) }
+      else if (id === 'edit') { const d = await api.cancelSend(o.id); if (d) setCompose({ kind: 'draft', draft: d }) }
+      else if (id === 'cancel') { await api.cancelSend(o.id); flash({ text: t.sc_cancelled }) }
     } catch (err) { flash({ text: clean(err) }) }
   }
 
@@ -697,10 +729,10 @@ export default function App() {
             </button>
           )}
           {showScheduled && later.map((o) => (
-            <div key={o.id} className="outbox-bar">
+            <div key={o.id} className="outbox-bar" onContextMenu={(e) => scheduledMenu(e, o)}>
               <span className="grow ellipsis"><b className="plain">{short(o.sendAt)}</b> · {o.subject || t.noSubject}</span>
               <button className="pill small" onClick={() => api.retrySend(o.id)}>{t.sendNow}</button>
-              <button className="pill small ghost" onClick={async () => { const d = await api.cancelSend(o.id); if (d) setCompose({ kind: 'draft', draft: d }) }}>{t.edit}</button>
+              <button className="tool small" title={t.mm_more} onClick={(e) => scheduledMenu(e, o)}><Icon name="more" size={15} /></button>
             </div>
           ))}
         </div>
@@ -760,6 +792,12 @@ export default function App() {
           }}
           onContact={(email) => setContactsAt(email)} onWriteTo={(to) => setCompose({ kind: 'new', to })}
           onAllMail={(person) => setScope({ accountId: 'all', person })}
+          onFind={(w) => {
+            if (w.search) { setSearchOpen(true); setQuery(w.search) }
+            else if (w.day) setScope((s) => ({ ...s, day: w.day }))
+            else if (w.account) setScope({ accountId: w.account, role: 'inbox' })
+            else if (w.ruleSubject) { setSettingsAt({ page: 'rules', rule: blankRule({ name: w.ruleSubject, conditions: [{ field: 'subject', value: w.ruleSubject }] }) }); setSettingsOpen(true) }
+          }}
           onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else if (a === 'snooze') openSnooze([current]); else act([current], a) }} />
       )}
 

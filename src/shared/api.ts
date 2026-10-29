@@ -126,7 +126,7 @@ export interface MailStats {
 export interface Address { name?: string; address: string }
 
 /** Contacts (29 Oct 2026): a person in the address book; built from mail, signatures, imports and what was typed */
-export type ContactGroup = 'vip' | 'team' | 'clients' | 'crew' | 'blocked'
+export type ContactGroup = 'vip' | 'team' | 'clients' | 'crew' | 'blocked' | 'written' | 'recent' | `@${string}`
 export interface Contact {
   email: string; name: string; phone: string; company: string; title: string; website: string; notes: string
   groups: string[]; vip: boolean; blocked: boolean
@@ -414,6 +414,8 @@ export interface MailApi {
   contactList(query: string, group?: ContactGroup | ''): Promise<Contact[]>
   /** one person's card with their latest mail and files; a signature not read yet is read first */
   contactCard(email: string): Promise<ContactFull | null>
+  /** the companies (address endings that are not free mail services) and how many people at each */
+  contactDomains(): Promise<{ domain: string; count: number }[]>
   saveContact(email: string, patch: ContactPatch): Promise<void>
   /** a .vcf or .csv from another address book; how many people came, or null if cancelled */
   importContacts(): Promise<number | null>
@@ -435,7 +437,8 @@ export interface MailApi {
   folderMenu(folderId: string, labels: Record<string, string>): Promise<FolderMenuChoice | null>
   createFolder(accountId: string, parentId: string | null, name: string): Promise<void>
   renameFolder(folderId: string, name: string): Promise<void>
-  deleteFolder(folderId: string): Promise<void>
+  /** 'hidden' when the server will not let the folder go (it is hidden instead) */
+  deleteFolder(folderId: string): Promise<'deleted' | 'hidden'>
   setFolderColor(folderId: string, color: string | null): Promise<void>
   hideFolder(folderId: string, hidden: boolean): Promise<void>
   hiddenFolders(accountId: string): Promise<Folder[]>
@@ -488,6 +491,7 @@ export interface MailApi {
   send(draft: Draft, opts?: { at?: number; remindDays?: number }): Promise<string>
   cancelSend(outboxId: string): Promise<Draft | null>
   retrySend(outboxId: string): Promise<void>
+  rescheduleSend(outboxId: string, at: number): Promise<void>
   outbox(): Promise<OutboxItem[]>
   saveDraft(draft: Draft, toServer: boolean): Promise<string>
   discardDraft(id: string): Promise<void>
