@@ -791,3 +791,7 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .ct-domains .chip-tag { flex: none; display: inline-flex; align-items: center; gap: 6px; }
 .ct-dlabel { flex: none; margin-right: 4px; }
 .ct-id .link.small { font-size: inherit; padding: 0; }
+
+/* every pill button, everywhere: its icon beside the word, never above it (Alex, 29 Oct: "buttons") */
+.pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; vertical-align: middle; }
+.pill > .ic { flex: none; }
