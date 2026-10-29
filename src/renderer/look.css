@@ -481,3 +481,9 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 .list-head .filters { margin-top: 10px; }
 /* Privacy Policy and Terms (Alex, 25 Oct) */
 .legal-links { gap: 8px; flex-wrap: wrap; }
+
+/* the filter capsule over the list runs edge to edge, a little taller, its buttons spread out (29 Oct 2026) */
+.list-head .filters > .grow { display: none; }
+.list-head .filters .pill-group { flex: 1; min-width: 0; justify-content: space-between; padding: 4px 6px; }
+.list-head .filters .pill-group .tool { width: 34px; height: 34px; }
+.list-head .filters .pill-group .tool .ic { width: 17px; height: 17px; }
