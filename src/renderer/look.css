@@ -795,3 +795,6 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 /* every pill button, everywhere: its icon beside the word, never above it (Alex, 29 Oct: "buttons") */
 .pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; vertical-align: middle; }
 .pill > .ic { flex: none; }
+
+/* the wide rail's tools: two even rows of three, nothing left alone on a line (Alex, 29 Oct) */
+.rail.wide .rail-tools { display: grid; grid-template-columns: repeat(3, 36px); justify-content: center; gap: 8px; }
