@@ -72,7 +72,42 @@ export interface Folder {
 }
 
 /** what a folder's right-click menu asks for (the window then asks for a name, a colour or a yes) */
-export type FolderMenuChoice = 'new' | 'sub' | 'rename' | 'custom' | 'hide' | 'read' | 'empty' | 'sync' | 'delete' | 'nocolor' | `c:${string}`
+export type FolderMenuChoice = 'new' | 'sub' | 'rename' | 'custom' | 'hide' | 'read' | 'empty' | 'sync' | 'rules' | 'delete' | 'nocolor' | `c:${string}`
+
+/**
+ * Settings > Rules (Oct 2026): what new mail is checked for, and what is then done with it. A rule runs on mail
+ * arriving in an inbox, top rule first, and by hand on a folder (its right-click menu, Run Rules).
+ */
+export type RuleField = 'from' | 'to' | 'subject' | 'attachment' | 'list'
+/** "contains" for from (name or address), to (To and Cc), subject and list (the List-Id header); attachment needs no value */
+export interface RuleCondition { field: RuleField; value: string }
+/** move goes to a folder of the same account as the message (other accounts' mail is left where it is) */
+export interface RuleAction { kind: 'move' | 'read' | 'flag' | 'archive'; folderId?: string }
+export interface Rule {
+  id: string; name: string; enabled: boolean
+  /** every condition must hold, or any one of them */
+  match: 'all' | 'any'
+  conditions: RuleCondition[]; actions: RuleAction[]
+}
+
+/** Settings > Templates: a saved text to drop into a message; {name} {first} {project} {date} are filled in */
+export interface Template { id: string; name: string; subject: string; html: string }
+
+/** a calendar invitation in a message (a text/calendar part or an .ics file), read by src/main/ics.ts */
+export interface Invite {
+  method: 'REQUEST' | 'CANCEL' | 'REPLY' | 'PUBLISH' | string
+  uid: string
+  title: string
+  /** UTC ms; for an all-day event, midnight UTC of its first day */
+  start: number
+  end: number | null
+  allDay: boolean
+  location: string
+  organizer: Address | null
+  /** how this account answered: on the server's copy, or what was sent from here */
+  answer: InviteAnswer | null
+}
+export type InviteAnswer = 'accepted' | 'tentative' | 'declined'
 
 /** Statistics (29 Oct 2026); sizes in bytes, from what is downloaded except quota (the server's own count) */
 export interface MailStats {
@@ -127,6 +162,8 @@ export interface MessageFull extends MessageRow {
   oneClickUnsubscribe?: boolean
   security: Security
   senderBlocked: boolean
+  /** a calendar invitation (or its cancellation) carried by the message */
+  invite?: Invite | null
 }
 
 /** what the reader warns about: failed sender checks, a display name posing as another address, replies going elsewhere */
@@ -427,6 +464,27 @@ export interface MailApi {
   deleteSignature(id: string): Promise<void>
   settings(): Promise<Settings>
   setSetting<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void>
+  /** Settings > Rules, in their order */
+  rules(): Promise<Rule[]>
+  /** a new rule (no id) goes last */
+  saveRule(rule: Rule): Promise<Rule>
+  deleteRule(id: string): Promise<void>
+  /** the rules in this order (ids) */
+  orderRules(ids: string[]): Promise<void>
+  /** every switched-on rule over the messages of the folder now; how many messages a rule changed */
+  runRules(folderId: string): Promise<number>
+  templates(): Promise<Template[]>
+  saveTemplate(tpl: Template): Promise<Template>
+  deleteTemplate(id: string): Promise<void>
+  /** answers a calendar invitation: an iMIP REPLY to the organizer through the account's outgoing server */
+  answerInvite(messageId: string, answer: InviteAnswer): Promise<void>
+  /** the message's .ics opened with the system's calendar app */
+  inviteToCalendar(messageId: string): Promise<void>
+  /** the message as shown (a full HTML page with its header) to the printer, or to a PDF chosen in a save dialog */
+  printMessage(html: string): Promise<void>
+  saveMessagePdf(html: string, name: string): Promise<string | null>
+  /** the message's raw source as an .eml file, chosen in a save dialog; null = cancelled */
+  saveMessageEml(messageId: string): Promise<string | null>
   roarmeStatus(): Promise<RoarMeStatus>
   roarmeSignIn(email: string, password: string): Promise<RoarMeStatus>
   roarmeVerify(code: string): Promise<RoarMeStatus>

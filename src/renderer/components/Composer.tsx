@@ -9,6 +9,7 @@ import { clean as roarError, useRoarMe } from './RoarMe'
 import type { ComposeKind } from './Viewer'
 import { TimePicker } from './TimePicker'
 import { FONTS } from '../look'
+import { TemplatesMenu, filled, templateValues } from './Templates'
 
 export interface ComposeSeed {
   kind: ComposeKind | 'new' | 'draft'
@@ -112,6 +113,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const [fmtBar, setFmtBar] = useState(() => { try { return localStorage.getItem('roarmail.fmtbar') !== '0' } catch { return true } })
   const [linkAsk, setLinkAsk] = useState<string | null>(null)
   const [attachMenu, setAttachMenu] = useState(false)
+  const [tplMenu, setTplMenu] = useState(false)
   const [states, setStates] = useState<Record<string, boolean>>({})
   // files sent up with the RoarTransfer button; each becomes a link card in the message
   const [rt, setRt] = useState<string[]>([])
@@ -261,6 +263,30 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   const fb = (c: string, title: string, children: ReactNode) => (
     <button className={`fmt ${states[c] ? 'on' : ''}`} title={title} onClick={() => exec(c)}>{children}</button>
   )
+  // Templates: one dropped in where the cursor was, its subject used when there is none yet
+  const pickTemplate = (tpl: Parameters<typeof filled>[0], project: string) => {
+    const f = filled(tpl, templateValues(to, seed.source?.fromName || '', project))
+    setTplMenu(false)
+    if (f.html) exec('insertHTML', f.html)
+    if (f.subject && !subject.trim()) setSubject(f.subject)
+    dirty.current = true
+  }
+  // Save as Template: what is written, without the signature, the quoted mail and RoarTransfer cards
+  const saveTemplate = async (name: string) => {
+    const box = document.createElement('div')
+    box.innerHTML = body.current?.innerHTML || ''
+    box.querySelectorAll(`[${SIG}], blockquote, [data-roarmail-transfer]`).forEach((n) => n.remove())
+    const ps = [...box.querySelectorAll('p')]
+    const fwd = ps.find((p) => p.textContent?.startsWith('----------'))
+    for (let n: ChildNode | null = fwd || null; n;) { const next: ChildNode | null = n.nextSibling; n.remove(); n = next }
+    ps.filter((p) => box.contains(p) && p.textContent?.trim().endsWith(`${t.wrote}:`)).forEach((p) => p.remove())
+    const html = DOMPurify.sanitize(box.innerHTML).replace(/^(\s|<br\s*\/?>)+|(\s|<br\s*\/?>)+$/gi, '')
+    try {
+      await window.roarmail.saveTemplate({ id: '', name, subject: seed.kind === 'new' || seed.kind === 'draft' ? subject.trim() : '', html })
+      setTplMenu(false)
+      window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: t.tp_saved }))
+    } catch (e) { setError(roarError(e)) }
+  }
   const toggleFmt = () => setFmtBar((v) => { try { localStorage.setItem('roarmail.fmtbar', v ? '0' : '1') } catch { /* this run only */ } return !v })
 
   // the corner handle: the window stays centred, so it grows twice as fast as the pointer moves
@@ -428,6 +454,11 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             <span className="sep" />
             <button className="fmt" title={t.fm_undo} onClick={() => exec('undo')}><Icon name="undo" size={15} /></button>
             <button className="fmt" title={t.fm_redo} onClick={() => exec('redo')}><Icon name="redo" size={15} /></button>
+            <span className="sep" />
+            <span className="tpl-wrap">
+              <button className={`fmt ${tplMenu ? 'on' : ''}`} title={t.tp_button} onClick={() => setTplMenu((v) => !v)}><Icon name="template" size={15} /></button>
+              {tplMenu && <TemplatesMenu onPick={pickTemplate} onSave={saveTemplate} onClose={() => setTplMenu(false)} />}
+            </span>
             {linkAsk != null && (
               <form className="link-ask" onSubmit={(e) => {
                 e.preventDefault()

@@ -11,10 +11,11 @@ import schema005 from './schema005.sql'
 import schema006 from './schema006.sql'
 import schema007 from './schema007.sql'
 import schema008 from './schema008.sql'
+import schema009 from './schema009.sql'
 
 export type DB = Database.Database
 
-const MIGRATIONS: string[] = [schema001, schema002, schema003, schema004, schema005, schema006, schema007, schema008]
+const MIGRATIONS: string[] = [schema001, schema002, schema003, schema004, schema005, schema006, schema007, schema008, schema009]
 
 export function openStore(): DB {
   const db = new Database(path.join(app.getPath('userData'), 'roarmail.db'))
@@ -25,11 +26,22 @@ export function openStore(): DB {
   const version = db.pragma('user_version', { simple: true }) as number
   for (let i = version; i < MIGRATIONS.length; i++) {
     db.transaction(() => {
-      db.exec(MIGRATIONS[i])
+      db.exec(guarded(db, MIGRATIONS[i]))
       db.pragma(`user_version = ${i + 1}`)
     })()
   }
   return db
+}
+
+/**
+ * a migration made safe to run on any database: an "alter table … add column" whose column is already there is
+ * left out (0.14.2: migration 008 added folders.color, which the first schema already had, and RoarMail never
+ * opened). Comments go first, so a statement quoted in one is not mistaken for a real one.
+ */
+export function guarded(db: DB, sql: string): string {
+  const has = db.prepare('select 1 from pragma_table_info(?) where name = ?')
+  return sql.replace(/--[^\n]*/g, '').replace(/alter\s+table\s+(\w+)\s+add\s+column\s+(\w+)[^;]*;/gi,
+    (stmt, table: string, col: string) => (has.get(table, col) ? '' : stmt))
 }
 
 export const now = () => Date.now()

@@ -1,14 +1,15 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
-import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, Settings, SwipeAction } from '../shared/api'
+import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, Rule, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
 import { Icon, folderIcon } from './components/Icon'
 import { AddAccount } from './components/AddAccount'
 import { Viewer, initials, tint, type ComposeKind } from './components/Viewer'
 import { Composer, type ComposeSeed } from './components/Composer'
 import { MovePicker } from './components/MovePicker'
-import { SettingsSheet } from './components/SettingsSheet'
+import { SettingsSheet, type Page } from './components/SettingsSheet'
+import { blankRule } from './components/Rules'
 import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
 import { short } from './when'
@@ -43,6 +44,8 @@ export default function App() {
   const [dayPick, setDayPick] = useState('')
   const [adding, setAdding] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Settings opened at a page (Make a Rule from This Sender: Rules, with the rule started)
+  const [settingsAt, setSettingsAt] = useState<{ page: Page; rule?: Rule } | null>(null)
   const [compose, setCompose] = useState<ComposeSeed | null>(null)
   const [moving, setMoving] = useState<{ accountId: string; ids: string[]; exclude?: string } | null>(null)
   const [snoozing, setSnoozing] = useState<string[] | null>(null)
@@ -269,7 +272,7 @@ export default function App() {
   const folderMenu = async (f: Folder, e: MouseEvent) => {
     e.preventDefault()
     const labels = { new: t.fm_new, sub: t.fm_sub, rename: t.fm_rename, red: t.qc_red, orange: t.qc_orange, yellow: t.fc_yellow, green: t.qc_green,
-      blue: t.qc_blue, purple: t.qc_purple, custom: t.fc_custom, nocolor: t.fc_none, hide: t.fm_hide, read: t.fm_read, sync: t.fm_sync, delete: t.fm_delete,
+      blue: t.qc_blue, purple: t.qc_purple, custom: t.fc_custom, nocolor: t.fc_none, hide: t.fm_hide, read: t.fm_read, sync: t.fm_sync, rules: t.fm_rules, delete: t.fm_delete,
       empty: f.role === 'spam' ? t.fm_emptyJunk : t.fm_emptyTrash }
     const pick = await api.folderMenu(f.id, labels)
     if (!pick) return
@@ -280,6 +283,7 @@ export default function App() {
       else if (pick === 'hide') { await api.hideFolder(f.id, true); flash({ text: `${t.fm_hidden}`, ms: 3500 }) }
       else if (pick === 'read') await api.markFolderRead(f.id)
       else if (pick === 'empty') await emptyBin({ folderId: f.id })
+      else if (pick === 'rules') { const n = await api.runRules(f.id); flash({ text: `${t.fm_rulesDone} ${n}`, ms: 3500 }) }
       else if (pick === 'sync') { flash({ text: t.fm_syncing, ms: 2500 }); const n = await api.syncFolderAll(f.id); flash({ text: `${t.fm_synced} ${n}`, ms: 3500 }) }
       else if (pick === 'delete' && confirm(`${t.fm_deleteQ}\n\n${f.name}`)) {
         await api.deleteFolder(f.id)
@@ -685,6 +689,10 @@ export default function App() {
         <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs}
           onCompose={(kind, m) => openCompose(kind, m)}
           onRoar={(kind, m) => setRoar({ kind, m })}
+          onRule={(m) => {
+            setSettingsAt({ page: 'rules', rule: blankRule({ name: m.fromName || m.fromEmail, conditions: [{ field: 'from', value: m.fromEmail }] }) })
+            setSettingsOpen(true)
+          }}
           onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else if (a === 'snooze') openSnooze([current]); else act([current], a) }} />
       )}
 
@@ -698,7 +706,7 @@ export default function App() {
       {adding && <AddAccount first={false} onDone={() => { setAdding(false); loadAccounts() }} onCancel={() => setAdding(false)} />}
       {statsOpen && <StatsSheet accounts={accounts} onClose={() => setStatsOpen(false)}
         onOpen={(accountId, sender) => { setStatsOpen(false); setScope({ accountId, role: 'inbox', person: sender }) }} />}
-      {settingsOpen && <SettingsSheet accounts={accounts} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}
+      {settingsOpen && <SettingsSheet accounts={accounts} start={settingsAt} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); setSettingsAt(null); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}
       {moving && (
         <MovePicker accountId={moving.accountId} exclude={moving.exclude} onClose={() => setMoving(null)}
           onPick={(fid) => { const targets = list.filter((r) => moving.ids.includes(keyOf(r))); setMoving(null); act(targets, 'move', fid) }} />

@@ -62,6 +62,12 @@ const P: Record<string, string> = {
   redo: 'M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3',
   marker: 'M15 4l5 5-9 9H6v-5zM4 21h16',
   sidebar: 'M4 5h16v14H4zM9.5 5v14M6 8.5h1.5M6 11.5h1.5',
+  // a funnel (Settings > Rules), a page of lines (Templates), a printer
+  funnel: 'M4 5h16l-6 7.5V19l-4-2v-4.5z',
+  template: 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5',
+  print: 'M7 9V4h10v5M7 17H4v-8h16v8h-3M7 14h10v6H7z',
+  up: 'M12 19V5M6 11l6-6 6 6',
+  down: 'M12 5v14M6 13l6 6 6-6',
   tasks: 'M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2',
   // a cog: eight teeth round a ring, the hole in the middle
   gear: 'M10.3 3h3.4l.5 2.4 1.6.9 2.3-.8 1.7 2.9-1.8 1.6v1.9l1.8 1.6-1.7 2.9-2.3-.8-1.6.9-.5 2.4h-3.4l-.5-2.4-1.6-.9-2.3.8-1.7-2.9 1.8-1.6v-1.9L4.2 8.4l1.7-2.9 2.3.8 1.6-.9zM12 9.2a2.8 2.8 0 1 0 0 5.6a2.8 2.8 0 1 0 0-5.6',

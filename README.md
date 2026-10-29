@@ -12,9 +12,11 @@ A desktop mail client for Mac and Windows, in the THEMADLIONS look. TheMadlions 
 - `src/preload` the desktop implementation of `MailApi`
 - `src/shared/api.ts` `MailApi`, the only door between the screens and mail (a Hub version can implement it later)
 - `src/renderer` the screens (React)
+- `src/main/rules.ts`, `src/main/ics.ts`, `src/renderer/templates.ts` plain functions (rules, calendar invitations and their iMIP replies, template placeholders), tested in `test/`
+- `src/main/schema*.sql` the database steps, run in order by `store.ts`; an `add column` whose column is already there is skipped
 - `docs`: the feature list and architecture are kept outside the repo
 
 ## Build
 
-`npm install`, then `npm start` to run, `npm run dist:mac` / `npm run dist:win` for installers.
+`npm install`, then `npm start` to run, `npm test` for the tests of the plain parts (rules, calendar invitations, templates; Node 22's own test runner), `npm run dist:mac` / `npm run dist:win` for installers.
 Releases: bump `version` in package.json, push, then push a tag `desktop-vX.Y.Z`.

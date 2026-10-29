@@ -18,9 +18,11 @@ import type { DB } from './store'
 import { fold, now, uuid } from './store'
 import { seal, open } from './vault'
 import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './microsoft'
+import { cleanRule, plan } from './rules'
+import { attendeeFor, buildReply, readInvite } from './ics'
 import type {
-  Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
-  MailStats, Security, ServerConfig, Settings, Signature, SnoozedItem,
+  Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
+  MailStats, Rule, Security, ServerConfig, Settings, Signature, SnoozedItem, Template,
 } from '../shared/api'
 
 // senders at these are people, not companies: their picture is their Gravatar
@@ -123,6 +125,9 @@ const cleanText = (s: string) => s.replace(/\[(?:image:[^\]]*|https?:[^\]\s]*|ci
 const snippetOf = (text: string) => cleanText(text).replace(/\s+/g, ' ').trim().slice(0, 220)
 const msgIds = (s: string | null | undefined) => (s ? s.match(/<[^>]+>/g) || [] : [])
 const fmtAddr = (a: Address) => (a.name ? `${a.name.replace(/[",]/g, '')} <${a.address}>` : a.address)
+const json = (s: string | null | undefined, fallback: any = []) => { try { return JSON.parse(s || '') } catch { return fallback } }
+/** a calendar invitation's part: a text/calendar alternative, or an .ics file */
+const isCalendar = (a: { contentType?: string; filename?: string }) => /^(text\/calendar|application\/ics)$/i.test(a.contentType || '') || /\.ics$/i.test(a.filename || '')
 
 function hasAttachment(node: any): boolean {
   if (!node) return false
@@ -558,7 +563,7 @@ export class MailService {
     })
     if (!missing.length) return 0
     let added = 0
-    const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+    const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe', 'list-id'] }
     if (this.accountRow(accountId).provider === 'gmail') query.threadId = true
     for (let i = 0; i < missing.length; i += 200) {
       if (!this.exists(accountId) || (!byHand && this.state.get(accountId)?.state !== 'online')) return added
@@ -867,7 +872,7 @@ export class MailService {
           const all = ((await c.search({ all: true }, { uid: true })) || []) as number[]
           const have = new Set((this.db.prepare('select uid from message_folders where folder_id = ?').all(folderId) as Row[]).map((r) => r.uid))
           const missing = all.filter((u) => !have.has(u))
-          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe', 'list-id'] }
           if (gmail) query.threadId = true
           for (let i = 0; i < missing.length; i += 200) {
             const batch: Row[] = []
@@ -929,6 +934,8 @@ export class MailService {
     const acc = this.accountRow(accountId)
     const gmail = acc.provider === 'gmail'
     const fresh: MessageRow[] = []
+    // new mail in an inbox (not the first download of the folder): what Settings > Rules look at
+    const arrived: string[] = []
     await this.run(accountId, async (c) => {
       const lock = await c.getMailboxLock(folder.path)
       try {
@@ -971,14 +978,17 @@ export class MailService {
         }
 
         if (range) {
-          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe', 'list-id'] }
           if (gmail) query.threadId = true
           const batch: Row[] = []
           for await (const m of c.fetch(range, query as any, { uid: true })) {
             if (max != null && m.uid <= max) continue
             batch.push(m as any)
           }
-          for (const r of this.storeFetched(accountId, folderId, batch)) if (announce && !r.seen) fresh.push(r)
+          for (const r of this.storeFetched(accountId, folderId, batch)) {
+            if (announce && !r.seen) fresh.push(r)
+            if (max != null) arrived.push(r.id)
+          }
         }
         this.db.prepare('update folders set uidvalidity = ?, uidnext = ?, total = ? where id = ?').run(uidValidity, mb.uidNext || null, mb.exists || 0, folderId)
         this.recount(folderId)
@@ -998,6 +1008,11 @@ export class MailService {
         for (let i = fresh.length - 1; i >= 0; i--) if (gone.has(fresh[i].id)) fresh.splice(i, 1)
         this.act([...gone], 'trash').catch(() => {})
       }
+      // Settings > Rules on what just arrived; mail a rule moved or marked read does not notify
+      if (arrived.length) {
+        const handled = this.applyRules(arrived).quiet
+        for (let i = fresh.length - 1; i >= 0; i--) if (handled.has(fresh[i].id)) fresh.splice(i, 1)
+      }
     }
     if (fresh.length) {
       const tid = this.db.prepare('select thread_id from messages where id = ?')
@@ -1009,9 +1024,9 @@ export class MailService {
   private storeFetched(accountId: string, folderId: string, batch: Row[]): MessageRow[] {
     const out: MessageRow[] = []
     const ins = this.db.prepare(`insert into messages (id, account_id, message_id, in_reply_to, refs, gm_thrid, from_name, from_email, to_json, cc_json,
-      reply_to, subject, snippet, date, seen, flagged, answered, has_attachments, size, list_unsubscribe, created_at)
+      reply_to, subject, snippet, date, seen, flagged, answered, has_attachments, size, list_unsubscribe, list_id, created_at)
       values (@id, @account_id, @message_id, @in_reply_to, @refs, @gm_thrid, @from_name, @from_email, @to_json, @cc_json,
-      @reply_to, @subject, '', @date, @seen, @flagged, @answered, @has_attachments, @size, @list_unsubscribe, @created_at)`)
+      @reply_to, @subject, '', @date, @seen, @flagged, @answered, @has_attachments, @size, @list_unsubscribe, @list_id, @created_at)`)
     const link = this.db.prepare('insert or ignore into message_folders (message_id, folder_id, uid) values (?,?,?)')
     // the background download and a sync started by hand can fetch the same message: it is kept once
     const have = this.db.prepare('select 1 from message_folders where folder_id = ? and uid = ?')
@@ -1032,7 +1047,7 @@ export class MailService {
           subject: env.subject || '', date: new Date(env.date || m.internalDate || now()).getTime(),
           seen: m.flags?.has('\\Seen') ? 1 : 0, flagged: m.flags?.has('\\Flagged') ? 1 : 0, answered: m.flags?.has('\\Answered') ? 1 : 0,
           has_attachments: hasAttachment(m.bodyStructure) ? 1 : 0, size: m.size || null,
-          list_unsubscribe: header('list-unsubscribe') || null, created_at: now(),
+          list_unsubscribe: header('list-unsubscribe') || null, list_id: header('list-id') || null, created_at: now(),
         }
         ins.run(row)
         link.run(row.id, folderId, m.uid)
@@ -1212,7 +1227,9 @@ export class MailService {
       references: refs || undefined,
       html: typeof mail.html === 'string' ? mail.html : undefined, text: mail.text || undefined,
       attachments: mail.attachments
-        .map((a, i) => ({ id: `${id}:${i}`, filename: a.filename || 'attachment', mime: a.contentType, size: a.size, inline: !!(a.related || (a.contentDisposition === 'inline' && a.cid)) }))
+        .map((a, i) => ({ id: `${id}:${i}`, filename: a.filename || 'attachment', mime: a.contentType, size: a.size,
+          // the text/calendar alternative of an invitation is the invite card, not a file
+          inline: !!(a.related || (a.contentDisposition === 'inline' && a.cid)) || (isCalendar(a) && !a.filename) }))
         .filter((a) => !a.inline),
       inlineImages: {},
       imagesAllowed: !!contact?.images_allowed && !this.settings().privacyMode,
@@ -1220,7 +1237,83 @@ export class MailService {
       oneClickUnsubscribe: /one-click/i.test(String(mail.headers.get('list-unsubscribe-post') || '')),
       security: securityOf(mail, row.from_email || ''),
       senderBlocked: !!contact?.blocked,
+      invite: this.inviteOf(row.account_id, mail),
     }
+  }
+
+  // ---------- calendar invitations ----------
+
+  /** the account's own addresses (its email and aliases), for finding "me" among an invitation's attendees */
+  private myAddresses(accountId: string): string[] {
+    const r = this.accountRow(accountId)
+    const aliases = (this.db.prepare('select email from identities where account_id = ?').all(accountId) as Row[]).map((x) => String(x.email))
+    return [...new Set([r.email, ...aliases].map((x) => String(x).toLowerCase()))]
+  }
+
+  private calendarText(mail: ParsedMail): string | null {
+    const parts = mail.attachments.filter(isCalendar)
+    // the alternative (it carries METHOD) before an attached file
+    const a = parts.find((x) => !x.filename) || parts[0]
+    return a ? a.content.toString('utf8') : null
+  }
+
+  private inviteOf(accountId: string, mail: ParsedMail): Invite | null {
+    const text = this.calendarText(mail)
+    if (!text) return null
+    try {
+      const inv = readInvite(text, this.myAddresses(accountId))
+      if (!inv) return null
+      const local = inv.uid ? this.db.prepare('select answer from invite_answers where uid = ?').get(inv.uid) as Row | undefined : undefined
+      return { ...inv, answer: (local?.answer as InviteAnswer) || inv.answer }
+    } catch { return null }
+  }
+
+  /** the invitation's iCalendar text, for opening it in the system's calendar app */
+  async calendarOf(id: string): Promise<string | null> {
+    const { mail } = await this.parsed(id)
+    return this.calendarText(mail)
+  }
+
+  /**
+   * Accept / Maybe / Decline: an iMIP REPLY (METHOD:REPLY with this attendee's PARTSTAT) to the organizer, sent at
+   * once through the account's outgoing server, as Apple Mail and Outlook do; the answer is kept for the card
+   */
+  async answerInvite(id: string, answer: InviteAnswer) {
+    if (!['accepted', 'tentative', 'declined'].includes(answer)) throw new Error('answer')
+    const { row, mail } = await this.parsed(id)
+    const text = this.calendarText(mail)
+    const mine = this.myAddresses(row.account_id)
+    const inv = text ? readInvite(text, mine) : null
+    if (!text || !inv) throw new Error('no-invite')
+    if (!inv.organizer?.address) throw new Error('no-organizer')
+    const r = this.accountRow(row.account_id)
+    const address = attendeeFor(text, mine)
+    const alias = this.db.prepare('select name from identities where account_id = ? and lower(email) = lower(?)').get(row.account_id, address) as Row | undefined
+    const name = alias?.name || r.display_name || ''
+    const word = answer === 'accepted' ? 'Accepted' : answer === 'tentative' ? 'Tentative' : 'Declined'
+    const verb = answer === 'accepted' ? 'has accepted' : answer === 'tentative' ? 'might attend' : 'has declined'
+    const composer = new MailComposer({
+      from: name ? { name, address } : address, to: inv.organizer.address, subject: `${word}: ${inv.title}`,
+      text: `${name || address} ${verb}: ${inv.title}`,
+      icalEvent: { method: 'REPLY', content: buildReply(text, { name, address }, answer) },
+      inReplyTo: mail.messageId || undefined, references: mail.messageId || undefined,
+      messageId: `<${uuid()}@${r.email.split('@')[1] || 'roarmail.local'}>`, date: new Date(),
+      headers: { 'X-Mailer': `RoarMail ${app.getVersion()}` },
+    })
+    const raw = await composer.compile().build()
+    const t = smtpTransport(this.cfgOf(r), await this.cred(r))
+    try { await t.sendMail({ envelope: composer.compile().getEnvelope(), raw }) } catch (e) { throw new Error(friendly(e)) } finally { t.close() }
+    if (inv.uid) {
+      this.db.prepare(`insert into invite_answers (uid, answer, answered_at) values (?,?,?)
+        on conflict(uid) do update set answer = excluded.answer, answered_at = excluded.answered_at`).run(inv.uid, answer, now())
+    }
+  }
+
+  /** the message exactly as the server has it (Save as .eml) */
+  async rawSource(id: string): Promise<{ subject: string; source: Buffer }> {
+    const row = this.db.prepare('select account_id, subject from messages where id = ?').get(id) as Row
+    if (!row) throw new Error('message not found')
+    return { subject: row.subject || '', source: await this.source(id, row.account_id) }
   }
 
   // ---------- unsubscribe and blocked senders ----------
@@ -1307,7 +1400,7 @@ export class MailService {
               const have = new Set((this.db.prepare('select uid from message_folders where folder_id = ?').all(f.id) as Row[]).map((r) => r.uid))
               const missing = found.filter((u) => !have.has(u)).slice(-50)
               if (!missing.length) return
-              const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
+              const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe', 'list-id'] }
               if (gmail) query.threadId = true
               const batch: Row[] = []
               for await (const m of c.fetch(missing, query as any, { uid: true })) batch.push(m as any)
@@ -1810,6 +1903,96 @@ export class MailService {
       this.alert(r.recipients || 'RoarMail', `🔔 ${r.subject || ''}`)
     }
   }
+
+  // ---------- rules ----------
+
+  rules(): Rule[] {
+    return (this.db.prepare('select * from rules order by sort, rowid').all() as Row[])
+      .map((r) => cleanRule({ id: r.id, name: r.name, enabled: !!r.enabled, match: r.match, conditions: json(r.conditions), actions: json(r.actions) }))
+  }
+
+  saveRule(x: Rule): Rule {
+    const r = cleanRule(x)
+    const old = r.id && this.db.prepare('select 1 from rules where id = ?').get(r.id)
+    const id = old ? r.id : uuid()
+    const name = r.name || 'Rule'
+    if (old) {
+      this.db.prepare('update rules set name = ?, enabled = ?, match = ?, conditions = ?, actions = ? where id = ?')
+        .run(name, r.enabled ? 1 : 0, r.match, JSON.stringify(r.conditions), JSON.stringify(r.actions), id)
+    } else {
+      const sort = ((this.db.prepare('select max(sort) m from rules').get() as Row).m ?? -1) + 1
+      this.db.prepare(`insert into rules (id, name, enabled, sort, applies, match, conditions, actions) values (?,?,?,?, 'incoming', ?,?,?)`)
+        .run(id, name, r.enabled ? 1 : 0, sort, r.match, JSON.stringify(r.conditions), JSON.stringify(r.actions))
+    }
+    return { ...r, id, name }
+  }
+
+  deleteRule(id: string) { this.db.prepare('delete from rules where id = ?').run(id) }
+
+  orderRules(ids: string[]) {
+    const set = this.db.prepare('update rules set sort = ? where id = ?')
+    this.db.transaction(() => { (Array.isArray(ids) ? ids : []).forEach((id, i) => set.run(i, String(id))) })()
+  }
+
+  /**
+   * the rules over these messages (new mail, or a whole folder from its menu): mark read and star at once, moves and
+   * archives through the queue a few seconds later, so the marks reach the server first. quiet: the messages moved or
+   * marked read (no notification for them); changed: how many messages a rule did something to
+   */
+  applyRules(ids: string[]): { quiet: Set<string>; changed: number } {
+    const quiet = new Set<string>()
+    const touched = new Set<string>()
+    const rules = this.rules().filter((r) => r.enabled && r.conditions.length && r.actions.length)
+    if (!rules.length || !ids.length) return { quiet, changed: 0 }
+    const read: string[] = [], flag: string[] = [], archive: string[] = []
+    const moves = new Map<string, string[]>()
+    const folderAccount = this.db.prepare('select account_id from folders where id = ?')
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500)
+      const rows = this.db.prepare(`select id, account_id, from_name, from_email, to_json, cc_json, subject, has_attachments, list_id, seen, flagged
+        from messages where id in (${part.map(() => '?').join(',')}) and pending_op is null`).all(...part) as Row[]
+      for (const r of rows) {
+        const people = [...json(r.to_json), ...json(r.cc_json)].map((a: any) => `${a?.name || ''} <${a?.address || ''}>`).join(', ')
+        const p = plan(rules, { fromName: r.from_name || '', fromEmail: r.from_email || '', to: people, subject: r.subject || '', hasAttachments: !!r.has_attachments, listId: r.list_id || '' })
+        if (p.read && !r.seen) { read.push(r.id); quiet.add(r.id); touched.add(r.id) }
+        if (p.flag && !r.flagged) { flag.push(r.id); touched.add(r.id) }
+        const to = p.moveTo && (folderAccount.get(p.moveTo) as Row | undefined)?.account_id === r.account_id ? p.moveTo : null
+        if (p.archive) { archive.push(r.id); quiet.add(r.id); touched.add(r.id) }
+        else if (to) { moves.set(to, [...(moves.get(to) || []), r.id]); quiet.add(r.id); touched.add(r.id) }
+      }
+    }
+    const run = (list: string[], action: Action, target?: string) => {
+      for (let i = 0; i < list.length; i += 500) this.act(list.slice(i, i + 500), action, target).catch(() => {})
+    }
+    run(read, 'seen'); run(flag, 'flag'); run(archive, 'archive')
+    for (const [to, list] of moves) run(list, 'move', to)
+    return { quiet, changed: touched.size }
+  }
+
+  /** Run Rules from a folder's right-click menu: every rule over everything in the folder now */
+  runRules(folderId: string): number {
+    const ids = (this.db.prepare(`select mf.message_id id from message_folders mf join messages m on m.id = mf.message_id
+      where mf.folder_id = ? and m.pending_op is null`).all(folderId) as Row[]).map((r) => r.id as string)
+    return this.applyRules(ids).changed
+  }
+
+  // ---------- templates ----------
+
+  templates(): Template[] {
+    return (this.db.prepare('select id, name, subject, html from templates order by created_at').all() as Row[])
+      .map((r) => ({ id: r.id, name: r.name, subject: r.subject || '', html: r.html }))
+  }
+
+  saveTemplate(x: Template): Template {
+    const id = x.id || uuid()
+    const v = { id, name: String(x.name || '').trim().slice(0, 80) || 'Template', subject: String(x.subject || '').slice(0, 300), html: String(x.html || '') }
+    this.db.prepare(`insert into templates (id, name, subject, html, created_at, updated_at) values (?,?,?,?,?,?)
+      on conflict(id) do update set name = excluded.name, subject = excluded.subject, html = excluded.html, updated_at = excluded.updated_at`)
+      .run(v.id, v.name, v.subject, v.html, now(), now())
+    return v
+  }
+
+  deleteTemplate(id: string) { this.db.prepare('delete from templates where id = ?').run(id) }
 
   // ---------- signatures and settings ----------
 

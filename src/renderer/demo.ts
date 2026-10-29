@@ -2,8 +2,8 @@
 // sample mail. Nothing connects anywhere and nothing is kept; it shows the app and how it feels.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS } from './look'
 import type {
-  Account, Action, Address, Draft, Folder, FolderRole, ListScope, MailApi, MailEvent, MessageFull, MessageRow, OutboxItem,
-  Settings, Signature, SnoozedItem,
+  Account, Action, Address, Draft, Folder, FolderRole, Invite, ListScope, MailApi, MailEvent, MessageFull, MessageRow, OutboxItem,
+  Rule, Settings, Signature, SnoozedItem, Template,
 } from '../shared/api'
 
 interface DemoMsg {
@@ -13,6 +13,7 @@ interface DemoMsg {
   attachments?: { filename: string; mime: string; size: number }[]
   listUnsubscribe?: string; oneClick?: boolean
   security?: MessageFull['security']
+  invite?: Invite
 }
 
 const H = 3600e3
@@ -71,6 +72,17 @@ const msgs: DemoMsg[] = [
     html: p('<p>Σου στέλνω το brief για το spot των 30 δευτερολέπτων. Τα λέμε τη Δευτέρα.</p>') },
 ]
 
+// an invitation, to show the invite card (the app reads it from the message's .ics)
+const scout = new Date(now + 2 * 24 * H); scout.setHours(10, 0, 0, 0)
+msgs.push({ id: 'm10', accountId: 'a1', folderId: 'a1-inbox', threadId: 't8', fromName: 'Μαρία Παπαδοπούλου', fromEmail: 'maria@studio-north.gr', to: [me], cc: [],
+  subject: 'Invitation: Location scout', date: now - 2 * H, seen: false, flagged: false, answered: false,
+  html: p('<p>Location scout for the Friday shoot, bring the second camera and the lights.</p>'),
+  attachments: [{ filename: 'invite.ics', mime: 'text/calendar', size: 1800 }],
+  invite: { method: 'REQUEST', uid: 'demo-scout', title: 'Location scout', start: scout.getTime(), end: scout.getTime() + 1.5 * H, allDay: false,
+    location: 'Studio North, Kerameikos, Athens', organizer: { name: 'Μαρία Παπαδοπούλου', address: 'maria@studio-north.gr' }, answer: null } })
+const rules: Rule[] = [{ id: 'r1', name: 'Film Gear Weekly', enabled: true, match: 'all', conditions: [{ field: 'list', value: 'filmgear-weekly' }], actions: [{ kind: 'read' }, { kind: 'move', folderId: 'a1-projects' }] }]
+const templates: Template[] = [{ id: 'tp1', name: 'Call sheet', subject: '{project}: call sheet {date}', html: '<p>Hi {first},</p><p>the call sheet for {project} is attached. See you on set.</p>' }]
+
 const sigs: Signature[] = [{ id: 's1', name: 'THEMADLIONS', html: '<b>Alex Konstantinidis</b><br>THEMADLIONS · themadlions.com' }]
 let settings: Settings = { ...LOOK_DEFAULTS, ...GENERAL_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false }
 const outbox: (OutboxItem & { draft: Draft })[] = []
@@ -121,7 +133,7 @@ function full(m: DemoMsg): MessageFull {
     ...row(m), to: m.to, cc: m.cc, messageId: `<${m.id}@demo>`, html: m.html,
     attachments: (m.attachments || []).map((a, i) => ({ id: `${m.id}:${i}`, filename: a.filename, mime: a.mime, size: a.size, inline: false })),
     inlineImages: {}, imagesAllowed: false, listUnsubscribe: m.listUnsubscribe, oneClickUnsubscribe: m.oneClick,
-    security: m.security || { auth: 'pass', warnings: [] }, senderBlocked: false,
+    security: m.security || { auth: 'pass', warnings: [] }, senderBlocked: false, invite: m.invite || null,
   }
 }
 
@@ -304,6 +316,20 @@ export function createDemo(): MailApi & { update: any } {
     signatures: async () => sigs.map((s) => ({ ...s })),
     saveSignature: async (s) => { const id = s.id || uid(); const i = sigs.findIndex((x) => x.id === id); const v = { ...s, id }; if (i >= 0) sigs[i] = v; else sigs.push(v); return v },
     deleteSignature: async (id) => { const i = sigs.findIndex((x) => x.id === id); if (i >= 0) sigs.splice(i, 1) },
+    rules: async () => rules.map((r) => ({ ...r })),
+    saveRule: async (r) => { const v = { ...r, id: r.id || uid(), name: r.name || 'Rule' }; const i = rules.findIndex((x) => x.id === v.id); if (i >= 0) rules[i] = v; else rules.push(v); return v },
+    deleteRule: async (id) => { const i = rules.findIndex((x) => x.id === id); if (i >= 0) rules.splice(i, 1) },
+    orderRules: async (ids) => { rules.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)) },
+    runRules: async () => 0,
+    templates: async () => templates.map((x) => ({ ...x })),
+    saveTemplate: async (x) => { const v = { ...x, id: x.id || uid() }; const i = templates.findIndex((y) => y.id === v.id); if (i >= 0) templates[i] = v; else templates.push(v); return v },
+    deleteTemplate: async (id) => { const i = templates.findIndex((x) => x.id === id); if (i >= 0) templates.splice(i, 1) },
+    answerInvite: async (id, answer) => { const m = msgs.find((x) => x.id === id); if (m?.invite) m.invite.answer = answer },
+    inviteToCalendar: async () => { alert('Demo: η πρόσκληση ανοίγει στο ημερολόγιο του υπολογιστή στην εφαρμογή. / The app opens the invitation in your calendar.') },
+    // the browser's own print window (it can also save a PDF)
+    printMessage: async (html) => { const w = window.open('', '_blank'); if (w) { w.document.write(html); w.document.close(); w.print() } },
+    saveMessagePdf: async (html) => { await api.printMessage(html); return null },
+    saveMessageEml: async () => { alert('Demo: το .eml αποθηκεύεται στην εφαρμογή. / The app saves the .eml.'); return null },
     settings: async () => ({ ...settings }),
     setSetting: async (k, v) => { settings = { ...settings, [k]: v } },
     // RoarMe, signed in as a sample person with sample chats and tasks
