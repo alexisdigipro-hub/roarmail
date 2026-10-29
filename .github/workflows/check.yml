@@ -16,3 +16,14 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npx tsc -p tsconfig.json
+      # the screens must open (0.18.2-0.18.7 opened blank): run them as the web demo in Chrome and look for the list
+      - name: Screens open
+        run: |
+          npx vite preview --port 4173 --strictPort &
+          for i in $(seq 1 30); do curl -sf http://localhost:4173/ >/dev/null && break; sleep 1; done
+          google-chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=8000 --dump-dom http://localhost:4173/ > dom.html
+          grep -q 'class="rows' dom.html && grep -q 'class="rail-tools' dom.html || { echo "The screens did not open:"; head -c 3000 dom.html; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: dist/renderer
