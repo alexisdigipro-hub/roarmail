@@ -853,3 +853,8 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .fi-acts { display: flex; gap: 2px; opacity: .55; }
 .fi-row:hover .fi-acts { opacity: 1; }
 .fi-main b, .fi-main small { display: block; }
+
+/* the drifting backdrop rests when RoarMail is not in front: every glass panel above it re-blurs on each frame
+   it moves (29 Oct 2026, "make it lighter") */
+html[data-away] body::before { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) { body::before { animation: none !important; } }

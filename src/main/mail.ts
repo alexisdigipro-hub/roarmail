@@ -229,6 +229,13 @@ function securityOf(mail: ParsedMail, fromEmail: string): Security {
 export class MailService {
   private worker = new Map<string, ImapFlow>()
   private queue = new Map<string, Promise<unknown>>()
+  // the foreground lane (29 Oct 2026, "deleting is slow"): opening a message gets its own connection, so it never
+  // waits behind background sync, prefetch or listing files on the worker
+  private fg = new Map<string, ImapFlow>()
+  private fgQueue = new Map<string, Promise<unknown>>()
+  // a folder's check after a move waits a little and runs once, however many moves came meanwhile
+  private syncSoon = new Map<string, ReturnType<typeof setTimeout>>()
+  private filesListed = false
   private idle = new Map<string, ImapFlow>()
   private state = new Map<string, { state: Account['state']; error?: string }>()
   private retry = new Map<string, NodeJS.Timeout>()
@@ -555,6 +562,30 @@ export class MailService {
     return next as Promise<T>
   }
 
+  /** the same, on the foreground connection: what the person is waiting for right now */
+  private runNow<T>(accountId: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
+    const prev = this.fgQueue.get(accountId) || Promise.resolve()
+    const next = prev.catch(() => {}).then(async () => {
+      let c = this.fg.get(accountId)
+      if (!c || !c.usable) {
+        const r = this.accountRow(accountId)
+        c = new ImapFlow(imapOptions(this.cfgOf(r), await this.cred(r)))
+        c.on('error', () => {})
+        await c.connect()
+        this.fg.set(accountId, c)
+      }
+      return fn(c)
+    })
+    this.fgQueue.set(accountId, next)
+    return next as Promise<T>
+  }
+
+  private syncLater(accountId: string, folderId: string, ms = 20e3) {
+    const k = `${accountId}|${folderId}`
+    clearTimeout(this.syncSoon.get(k))
+    this.syncSoon.set(k, setTimeout(() => { this.syncSoon.delete(k); this.syncFolder(accountId, folderId, false).catch(() => {}) }, ms))
+  }
+
   startAll() {
     for (const a of this.accounts()) this.startAccount(a.id)
     this.schedulePoll()
@@ -764,6 +795,7 @@ export class MailService {
     clearTimeout(this.retry.get(id))
     const i = this.idle.get(id); this.idle.delete(id); i?.close()
     const w = this.worker.get(id); this.worker.delete(id); w?.close()
+    const g = this.fg.get(id); this.fg.delete(id); g?.close()
   }
 
   /** after sleep or a network change: drop every connection and start again */
@@ -1277,11 +1309,11 @@ export class MailService {
     return { folder: r, uid: r.uid }
   }
 
-  private async source(id: string, accountId: string): Promise<Buffer> {
+  private async source(id: string, accountId: string, background = false): Promise<Buffer> {
     const file = emlPath(id)
     if (fs.existsSync(file)) return fs.readFileSync(file)
     const { folder, uid } = this.location(id)
-    const src = await this.run(accountId, async (c) => {
+    const src = await (background ? this.run.bind(this) : this.runNow.bind(this))(accountId, async (c: ImapFlow) => {
       const lock = await c.getMailboxLock(folder.path)
       try {
         const m = await c.fetchOne(String(uid), { source: true }, { uid: true })
@@ -1293,10 +1325,10 @@ export class MailService {
     return src
   }
 
-  private async parsed(id: string): Promise<{ row: Row; mail: ParsedMail }> {
+  private async parsed(id: string, background = false): Promise<{ row: Row; mail: ParsedMail }> {
     const row = this.db.prepare('select * from messages where id = ?').get(id) as Row
     if (!row) throw new Error('message not found')
-    const mail = await simpleParser(await this.source(id, row.account_id))
+    const mail = await simpleParser(await this.source(id, row.account_id, background))
     this.indexParsed(id, mail)
     if (row.body_text == null) {
       const text = mail.text || (mail.html ? String(mail.html).replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ') : '')
@@ -1373,7 +1405,7 @@ export class MailService {
       where m.account_id = ? and m.body_text is null and f.role = 'inbox' ${mode === 'none' ? 'and m.has_attachments = 0' : ''}
       order by m.date desc limit ?`).all(accountId, mode === 'all' ? PREFETCH * 5 : PREFETCH) as Row[]
     if (!ids.length) return
-    for (const r of ids) { try { await this.parsed(r.id) } catch { /* next time */ } }
+    for (const r of ids) { try { await this.parsed(r.id, true) } catch { /* next time */ } }
     this.emit({ type: 'messages', accountId })
   }
 
@@ -1636,7 +1668,7 @@ export class MailService {
     for (const f of all) counts[f.kind] = (counts[f.kind] || 0) + 1
     const pick = kind ? all.filter((f) => f.kind === kind) : all
     if (sort === 'size') pick.sort((a, b) => b.size - a.size)
-    this.backfillAttachments().catch(() => {})
+    if (!this.filesListed) { this.filesListed = true; this.backfillAttachments().catch(() => { this.filesListed = false }) }
     return { files: pick.slice(0, 800), counts, indexing: this.listingFiles }
   }
 
@@ -1868,7 +1900,7 @@ export class MailService {
         }
         this.db.prepare('delete from operations where id = ?').run(op.id)
       })()
-      if (target) this.syncFolder(op.account_id, target.id, false).catch(() => {})
+      if (target) this.syncLater(op.account_id, target.id)
     } catch (e) {
       const code = friendly(e)
       if (transient(code)) {

@@ -101,11 +101,25 @@ export default function App() {
   useEffect(() => { loadFolders(); loadRows(); setSelected([]) }, [scope])
   // RoarMe's opening: the side from the left, the rows in turn, the reader rising (once)
   useEffect(() => { const h = setTimeout(() => setIntro(false), 1600); return () => clearTimeout(h) }, [])
+  // a burst of events (one delete sends several) reloads the list, folders and accounts once, 150 ms after the last
+  // (29 Oct 2026, "deleting is slow": each event used to reload everything)
+  const due = useRef({ rows: false, folders: false, accounts: false, h: 0 as unknown as ReturnType<typeof setTimeout> })
+  const reloadSoon = useCallback((what: 'rows' | 'folders' | 'accounts') => {
+    const d = due.current
+    d[what] = true
+    clearTimeout(d.h)
+    d.h = setTimeout(() => {
+      if (d.rows) loadRows()
+      if (d.folders) loadFolders()
+      if (d.accounts) loadAccounts()
+      d.rows = d.folders = d.accounts = false
+    }, 150)
+  }, [loadRows, loadFolders, loadAccounts])
   useEffect(() => api.on((e) => {
-    if (e.type === 'accounts') loadAccounts()
-    if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) loadFolders()
-    if (e.type === 'folders') loadAccounts()
-    if (e.type === 'messages') { if (scopeRef.current.accountId === 'all' || scopeRef.current.accountId === e.accountId) loadRows() }
+    if (e.type === 'accounts') reloadSoon('accounts')
+    if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) reloadSoon('folders')
+    if (e.type === 'folders') reloadSoon('accounts')
+    if (e.type === 'messages') { if (scopeRef.current.accountId === 'all' || scopeRef.current.accountId === e.accountId) reloadSoon('rows') }
     if (e.type === 'sync') setSyncing((s) => ({ ...s, [e.accountId]: e.busy }))
     if (e.type === 'open' && e.subject != null) { setScope({ accountId: 'all', role: 'inbox' }); setQuery(e.subject); setTimeout(() => setSelected([e.messageId]), 600) }
     else if (e.type === 'open') { setScope({ accountId: 'all', role: 'inbox' }); setTimeout(() => setSelected([e.messageId]), 80) }
