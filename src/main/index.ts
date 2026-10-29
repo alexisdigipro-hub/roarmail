@@ -42,10 +42,41 @@ function show() {
   win.show(); win.focus()
 }
 
+// the window opens where and as big as it was left (Alex, 29 Oct: "keep the size I made it, every time"), kept in
+// window.json in the app's data folder; a place no longer on any screen falls back to the screen's middle
+const WIN_FILE = () => path.join(app.getPath('userData'), 'window.json')
+function savedBounds(): { x?: number; y?: number; width: number; height: number; maximized?: boolean } {
+  const fallback = { width: 1360, height: 860 }
+  try {
+    const b = JSON.parse(fs.readFileSync(WIN_FILE(), 'utf8'))
+    if (!(b.width >= 900 && b.height >= 560)) return fallback
+    const { screen } = require('electron')
+    const onScreen = typeof b.x === 'number' && screen.getAllDisplays().some((d: Electron.Display) => {
+      const a = d.workArea
+      return b.x < a.x + a.width - 80 && b.x + b.width > a.x + 80 && b.y >= a.y - 20 && b.y < a.y + a.height - 60
+    })
+    return onScreen ? b : { width: b.width, height: b.height, maximized: b.maximized }
+  } catch { return fallback }
+}
+function keepBounds(w: BrowserWindow) {
+  let t: ReturnType<typeof setTimeout> | undefined
+  const save = () => {
+    clearTimeout(t)
+    t = setTimeout(() => {
+      if (w.isDestroyed() || w.isFullScreen() || w.isMinimized()) return
+      const maximized = w.isMaximized()
+      const b = maximized ? w.getNormalBounds() : w.getBounds()
+      try { fs.writeFileSync(WIN_FILE(), JSON.stringify({ ...b, maximized })) } catch { /* the next move tries again */ }
+    }, 400)
+  }
+  w.on('resize', save); w.on('move', save); w.on('maximize', save); w.on('unmaximize', save); w.on('close', save)
+}
+
 function createWindow() {
   const mac = process.platform === 'darwin'
+  const { maximized: keptMax, ...kept } = savedBounds()
   win = new BrowserWindow({
-    width: 1360, height: 860, minWidth: 900, minHeight: 560, show: false,
+    ...kept, minWidth: 900, minHeight: 560, show: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1e23' : '#eceef1',
     title: 'RoarMail',
     ...(mac
@@ -56,6 +87,8 @@ function createWindow() {
       contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true,
     },
   })
+  if (keptMax) win.maximize()
+  keepBounds(win)
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   // opened at login: stay in the menu bar until asked
   // (a Mac login item gets no arguments: a start in the first two minutes after the computer starts counts as one)
