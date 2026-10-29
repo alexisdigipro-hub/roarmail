@@ -715,9 +715,20 @@ export class MailService {
   async deleteFolder(folderId: string) {
     const f = this.folderRow(folderId)
     if (f.role === 'inbox') return
-    await this.run(f.account_id, (c) => c.mailboxDelete(f.path))
-    this.dropFolderMessages(folderId)
-    this.db.prepare('delete from folders where id = ?').run(folderId)
+    // the server says no ("Command failed") to deleting the folder that is open on the connection (Dovecot) and to a
+    // folder with folders inside: the open one is closed first, the ones inside go first, deepest first (29 Oct 2026)
+    const kids = f.delimiter ? (this.db.prepare('select id, path from folders where account_id = ?').all(f.account_id) as Row[])
+      .filter((k) => k.path.startsWith(f.path + f.delimiter)).sort((a, b) => b.path.length - a.path.length) : []
+    await this.run(f.account_id, async (c) => {
+      for (const p of [...kids.map((k) => k.path as string), f.path]) {
+        if ((c.mailbox as any)?.path === p) await c.mailboxClose()
+        try { await c.mailboxDelete(p) } catch (e: any) { throw new Error(e?.responseText || e?.message || String(e)) }
+      }
+    })
+    for (const k of [...kids, f]) {
+      this.dropFolderMessages(k.id)
+      this.db.prepare('delete from folders where id = ?').run(k.id)
+    }
     await this.syncFolders(f.account_id)
     this.emit({ type: 'messages', accountId: f.account_id })
   }
