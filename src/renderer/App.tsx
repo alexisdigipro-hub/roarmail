@@ -50,6 +50,12 @@ export default function App() {
   const [roar, setRoar] = useState<{ kind: 'share' | 'task'; m: MessageFull } | null>(null)
   const [workOpen, setWorkOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
+  const [accDrag, setAccDrag] = useState('')
+  const [accDrop, setAccDrop] = useState('')
+  // the folders shown or hidden, ticked in place (Alex, 29 Oct: "the folders I want, and hide the rest")
+  const [editFolders, setEditFolders] = useState(false)
+  const [hiddenList, setHiddenList] = useState<Folder[]>([])
+  useEffect(() => { setEditFolders(false) }, [scope.accountId])
   const [railWide, setRailWide] = useState(() => { try { return localStorage.getItem('roarmail.railwide') === '1' } catch { return false } })
   const toggleRail = () => setRailWide((v) => { try { localStorage.setItem('roarmail.railwide', v ? '0' : '1') } catch { /* this run only */ } return !v })
   const [toast, setToast] = useState<Toast | null>(null)
@@ -408,6 +414,18 @@ export default function App() {
     return f.role === 'sent' || f.role === 'trash' || f.role === 'drafts' ? 0 : f.unread
   }
   const accountOf = (id: string) => accounts.find((a) => a.id === id)
+  // the rail in the order dragged by hand (Settings accountOrder); accounts not in it keep their place after
+  const railOrder = (prefs.accountOrder || '').split(',').filter(Boolean)
+  const railAt = (id: string) => { const i = railOrder.indexOf(id); return i < 0 ? railOrder.length + accounts.findIndex((a) => a.id === id) : i }
+  const railAccounts = [...accounts].sort((a, b) => railAt(a.id) - railAt(b.id))
+  const moveAccount = (from: string, to: string) => {
+    setAccDrag(''); setAccDrop('')
+    if (from === to) return
+    const ids = railAccounts.map((a) => a.id).filter((id) => id !== from)
+    ids.splice(ids.indexOf(to) + (railAccounts.findIndex((a) => a.id === from) < railAccounts.findIndex((a) => a.id === to) ? 1 : 0), 0, from)
+    const v = ids.join(',')
+    api.setSetting('accountOrder', v); setPrefs((p) => ({ ...p, accountOrder: v }))
+  }
   const viewRole = scope.folderId ? folders.find((f) => f.id === scope.folderId)?.role : scope.accountId === 'all' ? scope.role : undefined
   const binRole = viewRole === 'trash' || viewRole === 'spam' ? viewRole : null
   const failed = outbox.filter((o) => o.status === 'failed')
@@ -425,8 +443,11 @@ export default function App() {
             <span className="acc-label"><b>{t.allInboxes}</b></span>
           </button>
         )}
-        {accounts.map((a) => (
-          <button key={a.id} className={`acc-line ${scope.accountId === a.id ? 'on' : ''}`}
+        {railAccounts.map((a) => (
+          <button key={a.id} className={`acc-line ${scope.accountId === a.id ? 'on' : ''} ${accDrop === a.id ? 'acc-drop' : ''} ${accDrag === a.id ? 'acc-dragging' : ''}`}
+            draggable onDragStart={(e) => { setAccDrag(a.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-roarmail-account', a.id) }}
+            onDragOver={(e) => { if (accDrag) { e.preventDefault(); setAccDrop(a.id) } }} onDragLeave={() => setAccDrop((x) => (x === a.id ? '' : x))}
+            onDrop={(e) => { if (accDrag) { e.preventDefault(); moveAccount(accDrag, a.id) } }} onDragEnd={() => { setAccDrag(''); setAccDrop('') }}
             title={`${a.email}${a.state !== 'online' ? ` · ${t[a.state as Key] || a.state}` : ''}`}
             onClick={() => setScope({ accountId: a.id, role: 'inbox' })}>
             <span className={`acc ${scope.accountId === a.id ? 'on' : ''} ${a.state}`} style={{ ['--c' as any]: a.color }}>
@@ -439,10 +460,7 @@ export default function App() {
             </span>
           </button>
         ))}
-        <button className="acc-line" title={t.addAccount} onClick={() => setAdding(true)}>
-          <span className="acc add"><Icon name="plus" size={18} /></span>
-          <span className="acc-label muted">{t.addAccount}</span>
-        </button>
+        {/* Add account lives in Settings > Accounts (Alex, 29 Oct: "take it out of here") */}
         <span className="grow" />
         <div className="rail-tools">
           <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
@@ -494,9 +512,21 @@ export default function App() {
             <span className="grow name-col"><b>{accountOf(scope.accountId)?.description || accountOf(scope.accountId)?.displayName || accountOf(scope.accountId)?.email.split('@')[0]}</b>
               <small className="muted block">{accountOf(scope.accountId)?.email}</small></span>
             <button className="tool small" title={t.fm_syncEverything} onClick={() => syncEverything(scope.accountId)}><Icon name="download" size={15} /></button>
+            <button className={`link small ${editFolders ? 'on' : ''}`} onClick={() => { if (!editFolders) api.hiddenFolders(scope.accountId).then(setHiddenList); setEditFolders((v) => !v) }}>{editFolders ? t.done : t.edit}</button>
           </div>
           <div className="folder-list list-lens lens" ref={folderLens}>
-          {folders.map((f) => {
+          {editFolders && [...folders, ...hiddenList.filter((h) => !folders.some((f) => f.id === h.id))].map((f) => {
+            const shown = !hiddenList.some((h) => h.id === f.id)
+            return (
+              <label key={f.id} className={`folder pick ${f.role === 'inbox' ? 'fixed' : ''}`} style={{ paddingLeft: 14 + Math.min(f.depth, 4) * 14 }}>
+                <input type="checkbox" disabled={f.role === 'inbox'} checked={shown}
+                  onChange={async (e) => { await api.hideFolder(f.id, !e.target.checked); setHiddenList(await api.hiddenFolders(scope.accountId)) }} />
+                <span className="folder-ic" style={f.color ? { color: f.color } : undefined}><Icon name={folderIcon(f.role)} size={16} filled={!!f.color && !f.role} /></span>
+                <span className="grow ellipsis">{f.role ? t[f.role as Key] : f.name}</span>
+              </label>
+            )
+          })}
+          {!editFolders && folders.map((f) => {
             const on = scope.folderId ? scope.folderId === f.id : f.role === 'inbox'
             return (
               <button key={f.id} className={`folder ${on ? 'on' : ''} ${dropOn === f.id ? 'drop' : ''}`} style={{ paddingLeft: 14 + Math.min(f.depth, 4) * 14 }}

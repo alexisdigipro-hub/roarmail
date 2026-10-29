@@ -473,3 +473,7 @@ html.resizing iframe { pointer-events: none; }
 .pull-refresh.ready span { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .pull-refresh.busy span { animation: pull-spin .9s linear infinite; color: var(--accent); }
 @keyframes pull-spin { to { transform: rotate(360deg); } }
+
+/* the rail's accounts dragged into the order you want (App.tsx moveAccount): the one under the pointer shows where it lands */
+.acc-line.acc-drop { box-shadow: inset 0 2px 0 var(--accent); }
+.acc-line.acc-dragging { opacity: .45; }

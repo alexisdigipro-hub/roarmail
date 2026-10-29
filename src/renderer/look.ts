@@ -28,7 +28,7 @@ export const GENERAL_DEFAULTS = {
   accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
-  unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash',
+  unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', accountOrder: '',
 } as const satisfies Partial<Settings>
 
 /** a font setting as CSS: one of FONTS, or a font installed on this computer ('local:<family>') */
