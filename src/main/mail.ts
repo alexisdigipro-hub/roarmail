@@ -155,6 +155,9 @@ const isCalendar = (a: { contentType?: string; filename?: string }) => /^(text\/
 function hasAttachment(node: any): boolean {
   if (!node) return false
   if (node.disposition === 'attachment') return true
+  // a named file that is not shown inside the text counts too (many senders give no disposition)
+  if (!(Array.isArray(node.childNodes) && node.childNodes.length) && (node.dispositionParameters?.filename || node.parameters?.name)
+    && node.disposition !== 'inline' && !String(node.type || '').startsWith('text/')) return true
   return Array.isArray(node.childNodes) && node.childNodes.some(hasAttachment)
 }
 
@@ -1151,6 +1154,7 @@ export class MailService {
         }
         ins.run(row)
         link.run(row.id, folderId, m.uid)
+        if (row.has_attachments) this.indexStructure(row.id, m.bodyStructure)
         if (row.from_email) contact.run(row.from_email, row.from_name || null, row.date)
         out.push(toRow(row))
       }
@@ -1293,11 +1297,72 @@ export class MailService {
     const row = this.db.prepare('select * from messages where id = ?').get(id) as Row
     if (!row) throw new Error('message not found')
     const mail = await simpleParser(await this.source(id, row.account_id))
+    this.indexParsed(id, mail)
     if (row.body_text == null) {
       const text = mail.text || (mail.html ? String(mail.html).replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ') : '')
       this.db.prepare('update messages set body_text = ?, snippet = ? where id = ?').run(text, snippetOf(text), id)
     }
     return { row, mail }
+  }
+
+  /**
+   * Files (29 Oct 2026, 0.22.0 showed none: attachments were only read when a message opened). A message's files go in
+   * the attachments table three ways: from its structure when it is synced (named by file name until it is read),
+   * in full when it is read (by position, as attachment() opens them), and for older mail in the background.
+   */
+  private indexParsed(id: string, mail: ParsedMail) {
+    const files = mail.attachments.map((a, i) => ({ a, i })).filter(({ a }) => !(a.related || (a.contentDisposition === 'inline' && a.cid)) && !(isCalendar(a) && !a.filename))
+    this.db.transaction(() => {
+      this.db.prepare('delete from attachments where message_id = ?').run(id)
+      const put = this.db.prepare(`insert or replace into attachments (id, message_id, filename, mime, size, content_id, part, inline) values (?,?,?,?,?,?,?,0)`)
+      for (const { a, i } of files) put.run(`${id}:${i}`, id, a.filename || 'attachment', a.contentType || '', a.size || 0, a.cid || null, String(i))
+      if (files.length) this.db.prepare('update messages set has_attachments = 1 where id = ?').run(id)
+    })()
+  }
+
+  /** a message's files from its IMAP structure, before it is read */
+  private indexStructure(id: string, node: any) {
+    const out: { name: string; type: string; size: number; part: string }[] = []
+    const walk = (n: any) => {
+      if (!n) return
+      if (Array.isArray(n.childNodes) && n.childNodes.length) { n.childNodes.forEach(walk); return }
+      const name = n.dispositionParameters?.filename || n.parameters?.name
+      if (n.disposition === 'attachment' || (name && n.disposition !== 'inline' && !String(n.type || '').startsWith('text/'))) out.push({ name: String(name || 'attachment'), type: String(n.type || ''), size: Number(n.size) || 0, part: String(n.part || '') })
+    }
+    walk(node)
+    if (!out.length) return
+    const put = this.db.prepare(`insert or ignore into attachments (id, message_id, filename, mime, size, part, inline) values (?,?,?,?,?,?,0)`)
+    for (const f of out) put.run(`${id}:n:${f.name}`, id, f.name, f.type, f.size, f.part)
+  }
+
+  /** older mail with attachments that are not listed yet: their structure, folder by folder, in the background */
+  private listingFiles = false
+  async backfillAttachments() {
+    if (this.listingFiles) return
+    this.listingFiles = true
+    try {
+      const folders = this.db.prepare(`select distinct f.id, f.path, f.account_id from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
+        where m.has_attachments = 1 and not exists (select 1 from attachments a where a.message_id = m.id) and f.account_id in (select id from accounts where enabled = 1)`).all() as Row[]
+      for (const f of folders) {
+        const rows = this.db.prepare(`select m.id, mf.uid from messages m join message_folders mf on mf.message_id = m.id
+          where mf.folder_id = ? and m.has_attachments = 1 and not exists (select 1 from attachments a where a.message_id = m.id) order by m.date desc limit 3000`).all(f.id) as Row[]
+        if (!rows.length) continue
+        const byUid = new Map(rows.map((r) => [r.uid as number, r.id as string]))
+        try {
+          await this.run(f.account_id, async (c) => {
+            const lock = await c.getMailboxLock(f.path)
+            try {
+              const uids = [...byUid.keys()]
+              for (let i = 0; i < uids.length; i += 200) {
+                const got: Row[] = []
+                for await (const m of c.fetch(uids.slice(i, i + 200), { uid: true, bodyStructure: true } as any, { uid: true })) got.push(m as any)
+                this.db.transaction(() => { for (const m of got) { const id = byUid.get(m.uid); if (id) this.indexStructure(id, m.bodyStructure) } })()
+              }
+            } finally { lock.release() }
+          })
+        } catch { /* that folder did not answer: next time */ }
+      }
+    } finally { this.listingFiles = false }
   }
 
   /** download the newest bodies in the background, for snippets and search */
@@ -1449,9 +1514,11 @@ export class MailService {
   }
 
   async attachment(attId: string): Promise<{ filename: string; content: Buffer }> {
-    const [id, i] = attId.split(':')
+    const cut = attId.indexOf(':')
+    const id = attId.slice(0, cut), i = attId.slice(cut + 1)
     const { mail } = await this.parsed(id)
-    const a = mail.attachments[Number(i)]
+    // a file listed from the message's structure (Files, before the message was read) is found by its name
+    const a = i.startsWith('n:') ? mail.attachments.find((x) => (x.filename || 'attachment') === i.slice(2)) : mail.attachments[Number(i)]
     if (!a) throw new Error('attachment not found')
     return { filename: (a.filename || 'attachment').replace(/[/\\:*?"<>|]/g, '_'), content: a.content }
   }
@@ -1555,7 +1622,7 @@ export class MailService {
   }
 
   /** Files: every real attachment (not pictures inside the text), in every enabled account */
-  files(query: string, kind: string, sort: 'date' | 'size', accountId: string): { files: MailFile[]; counts: Record<string, number> } {
+  files(query: string, kind: string, sort: 'date' | 'size', accountId: string): { files: MailFile[]; counts: Record<string, number>; indexing: boolean } {
     const q = `%${fold(query.trim().toLowerCase())}%`
     const rows = this.db.prepare(`select a.id, a.filename, a.size, a.mime, m.date, m.from_name, m.from_email, m.subject, m.account_id, m.id as mid
       from attachments a join messages m on m.id = a.message_id
@@ -1569,7 +1636,8 @@ export class MailService {
     for (const f of all) counts[f.kind] = (counts[f.kind] || 0) + 1
     const pick = kind ? all.filter((f) => f.kind === kind) : all
     if (sort === 'size') pick.sort((a, b) => b.size - a.size)
-    return { files: pick.slice(0, 800), counts }
+    this.backfillAttachments().catch(() => {})
+    return { files: pick.slice(0, 800), counts, indexing: this.listingFiles }
   }
 
   /** the companies in the address book: every address ending that is not a free mail service, with how many people */

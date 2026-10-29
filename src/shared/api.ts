@@ -423,7 +423,7 @@ export interface MailApi {
   /** one person's card with their latest mail and files; a signature not read yet is read first */
   contactCard(email: string): Promise<ContactFull | null>
   /** Files: attachments of every account, newest first (or biggest); a search on file name, sender or subject */
-  files(query: string, kind: FileKind | '', sort: 'date' | 'size', accountId: string): Promise<{ files: MailFile[]; counts: Record<string, number> }>
+  files(query: string, kind: FileKind | '', sort: 'date' | 'size', accountId: string): Promise<{ files: MailFile[]; counts: Record<string, number>; indexing?: boolean }>
   /** the companies (address endings that are not free mail services) and how many people at each */
   contactDomains(): Promise<{ domain: string; count: number }[]>
   saveContact(email: string, patch: ContactPatch): Promise<void>
