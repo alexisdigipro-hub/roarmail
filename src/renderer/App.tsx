@@ -213,6 +213,7 @@ export default function App() {
   }, [inDrafts])
 
   const click = (r: MessageRow, e: MouseEvent) => {
+    const k = keyOf(r)
     if (e.metaKey || e.ctrlKey) {
       setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k)
     } else if (e.shiftKey && anchor) {
