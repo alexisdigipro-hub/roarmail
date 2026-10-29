@@ -707,3 +707,7 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .crop-box:active { cursor: grabbing; }
 .crop-box img { position: absolute; left: 50%; top: 50%; max-width: none; pointer-events: none; }
 .crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0, 0, 0, .45), inset 0 0 0 2px rgba(255, 255, 255, .85); pointer-events: none; }
+
+/* Delete in the filter bar when several messages are picked */
+.tool.danger-tool { color: var(--danger); }
+.tool.danger-tool:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
