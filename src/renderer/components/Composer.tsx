@@ -395,8 +395,8 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             {fb('italic', t.fm_italic, <i>I</i>)}
             {fb('underline', t.fm_underline, <u>U</u>)}
             {fb('strikeThrough', t.fm_strike, <s>S</s>)}
-            {fb('superscript', t.fm_sup, <span>x<sup>2</sup></span>)}
-            {fb('subscript', t.fm_sub, <span>x<sub>2</sub></span>)}
+            {fb('superscript', t.fm_superscript, <span>x<sup>2</sup></span>)}
+            {fb('subscript', t.fm_subscript, <span>x<sub>2</sub></span>)}
             <span className="sep" />
             {fb('justifyLeft', t.fm_left, <Icon name="alignL" size={15} />)}
             {fb('justifyCenter', t.fm_center, <Icon name="alignC" size={15} />)}
