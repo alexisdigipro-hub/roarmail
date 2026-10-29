@@ -391,7 +391,7 @@ export class MailService {
         const here = this.db.prepare('select id from accounts where lower(email) = lower(?)').get(a.email) as Row | undefined
         const id = here?.id || ((this.db.prepare('select 1 from accounts where id = ?').get(a.id)) ? uuid() : a.id)
         ids.set(a.id, id)
-        const row = { ...a, id, secret: a.secret ? seal(String(a.secret)) : null, updated_at: now() }
+        const row: Row = { ...a, id, secret: a.secret ? seal(String(a.secret)) : null, updated_at: now() }
         if (here) {
           const { id: _i, created_at: _c, ...rest } = row
           const have = cols('accounts'), keys = Object.keys(rest).filter((k) => have.has(k))
