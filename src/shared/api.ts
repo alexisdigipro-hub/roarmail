@@ -396,6 +396,10 @@ export interface MailApi {
   serverFolders(accountId: string): Promise<{ path: string; name: string }[]>
   /** asks for an image, makes it a round-ready square and keeps it as the account's picture; false = cancelled */
   pickAvatar(accountId: string): Promise<boolean>
+  /** asks for an image file and gives it back as a PNG data URL (at most 1200 px), for the crop window; null = cancelled */
+  pickImage(): Promise<string | null>
+  /** keeps a picture made in the crop window as the account's picture (made again into a small square PNG) */
+  setAvatar(accountId: string, dataUrl: string): Promise<void>
   /** pictures for these senders (Gravatar for people, the company's icon for its domain), kept on this computer; null = none */
   senderIcons(emails: string[]): Promise<Record<string, string | null>>
   /** the system's emoji picker, typing into the focused field (Mac and Windows) */

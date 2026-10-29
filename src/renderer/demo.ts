@@ -191,6 +191,8 @@ export function createDemo(): MailApi & { update: any } {
     serverFolders: async (id) => folders.filter((f) => f.accountId === id && f.role !== 'inbox' && f.role !== 'snoozed').map((f) => ({ path: f.path, name: f.name })),
     searchOnline: async (q, a) => api.search(q, a),
     pickAvatar: async () => false,
+    pickImage: async () => null,
+    setAvatar: async () => {},
     emojiPanel: async () => {},
     folderMenu: async () => null,
     popMenu: async () => null,

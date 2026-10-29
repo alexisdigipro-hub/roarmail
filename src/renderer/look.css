@@ -413,8 +413,7 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 
 /* sender pictures: a white disc so a company's logo reads on dark */
 .avatar.pic { overflow: hidden; padding: 0; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .06); }
-.avatar.pic img { width: 62%; height: 62%; object-fit: contain; display: block; }
-.avatar.pic img[src*='image/jpeg'], .avatar.pic img[src*='gravatar'] { width: 100%; height: 100%; object-fit: cover; }
+.avatar.pic img { width: 100%; height: 100%; object-fit: cover; display: block; } /* the whole circle, not a small logo in white (Alex, 29 Oct) */
 /* All accounts: choose which unified folders show */
 .row-name { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; }
 .row-name .link.on { color: var(--accent-2); font-weight: 600; }
@@ -698,3 +697,13 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
   background: var(--float); color: var(--text); font-size: 12px; line-height: 1.35; font-weight: 500;
   box-shadow: var(--shadow), inset 0 0 0 1px var(--edge-2); opacity: 0; transform: translateY(2px); transition: opacity .12s, transform .12s; }
 .tip.show { opacity: 1; transform: none; }
+
+/* the crop window for a picture (SettingsSheet CropPicture) */
+.crop-wrap { z-index: 40; }
+.crop-sheet { width: min(340px, 100%); display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.crop-sheet h3 { margin: 0; align-self: flex-start; }
+.crop-sheet .row.end, .crop-sheet input[type=range] { align-self: stretch; }
+.crop-box { position: relative; overflow: hidden; border-radius: 18px; background: var(--glass-2); cursor: grab; touch-action: none; user-select: none; }
+.crop-box:active { cursor: grabbing; }
+.crop-box img { position: absolute; left: 50%; top: 50%; max-width: none; pointer-events: none; }
+.crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0, 0, 0, .45), inset 0 0 0 2px rgba(255, 255, 255, .85); pointer-events: none; }

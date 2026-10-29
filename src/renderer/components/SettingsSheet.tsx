@@ -422,6 +422,7 @@ function AccountInfo({ a, sigs }: { a: Account; sigs: Signature[] }) {
   const [desc, setDesc] = useState(a.description)
   const [alias, setAlias] = useState({ email: '', name: '' })
   const [error, setError] = useState('')
+  const [crop, setCrop] = useState<string | null>(null)
   const up = (patch: Parameters<typeof window.roarmail.updateAccount>[1]) => window.roarmail.updateAccount(a.id, patch)
   const addAlias = async () => {
     setError('')
@@ -429,12 +430,14 @@ function AccountInfo({ a, sigs }: { a: Account; sigs: Signature[] }) {
   }
   return (
     <>
+      {crop && <CropPicture src={crop} onCancel={() => setCrop(null)}
+        onDone={(png) => { setCrop(null); window.roarmail.setAvatar(a.id, png).catch(() => setError(t.ac_badPicture)) }} />}
       <div className="row avatar-row">
         <span className="acc big-acc" style={{ ['--c' as any]: a.color, background: a.color }}>
           {a.avatar ? <img className="acc-img" src={a.avatar} alt="" /> : (a.description || a.displayName || a.email).slice(0, 2).toUpperCase()}
         </span>
         <div className="grow"><b>{t.ac_picture}</b><small className="muted block">{t.ac_pictureHint}</small></div>
-        <button className="pill small" onClick={() => window.roarmail.pickAvatar(a.id).catch(() => setError(t.ac_badPicture))}>{a.avatar ? t.ac_pictureChange : t.ac_pictureAdd}</button>
+        <button className="pill small" onClick={() => window.roarmail.pickImage().then((src) => { if (src) setCrop(src) }).catch(() => setError(t.ac_badPicture))}>{a.avatar ? t.ac_pictureChange : t.ac_pictureAdd}</button>
         {a.avatar && <button className="pill small ghost" onClick={() => up({ avatar: null })}>{t.delete}</button>}
       </div>
       <Toggle label={t.ac_enabled} hint={t.ac_enabledHint} on={a.enabled} set={(v) => up({ enabled: v })} />
@@ -485,6 +488,54 @@ function AccountInfo({ a, sigs }: { a: Account; sigs: Signature[] }) {
         <button className="pill small ghost danger" onClick={() => { if (confirm(`${t.removeQ}\n\n${a.email}`)) window.roarmail.removeAccount(a.id) }}>{t.removeAccount}</button>
       </div>
     </>
+  )
+}
+
+/** frame a picture before it is kept: drag it to move, the slider (or the wheel) to zoom, the circle is what shows */
+function CropPicture({ src, onCancel, onDone }: { src: string; onCancel: () => void; onDone: (png: string) => void }) {
+  const BOX = 260
+  const [img, setImg] = useState<HTMLImageElement | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  useEffect(() => { const i = new Image(); i.onload = () => setImg(i); i.src = src }, [src])
+  // at zoom 1 the picture just covers the circle; it can never be moved so far that an edge shows
+  const base = img ? BOX / Math.min(img.naturalWidth, img.naturalHeight) : 1
+  const w = img ? img.naturalWidth * base * zoom : BOX, h = img ? img.naturalHeight * base * zoom : BOX
+  const clamp = (p: { x: number; y: number }, z = zoom) => {
+    const mx = img ? (img.naturalWidth * base * z - BOX) / 2 : 0, my = img ? (img.naturalHeight * base * z - BOX) / 2 : 0
+    return { x: Math.max(-mx, Math.min(mx, p.x)), y: Math.max(-my, Math.min(my, p.y)) }
+  }
+  const setZ = (z: number) => { const n = Math.max(1, Math.min(4, z)); setZoom(n); setPos((p) => clamp(p, n)) }
+  const save = () => {
+    if (!img) return
+    const out = 320, c = document.createElement('canvas'); c.width = c.height = out
+    const k = out / BOX, ctx = c.getContext('2d')!
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(img, (BOX / 2 - w / 2 + pos.x) * k, (BOX / 2 - h / 2 + pos.y) * k, w * k, h * k)
+    onDone(c.toDataURL('image/png'))
+  }
+  return (
+    <div className="sheet-wrap crop-wrap" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel() } }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div className="sheet crop-sheet">
+        <h3>{t.ac_picture}</h3>
+        <div className="crop-box" style={{ width: BOX, height: BOX }}
+          onPointerDown={(e) => { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y } }}
+          onPointerMove={(e) => { const d = drag.current; if (d) setPos(clamp({ x: d.px + e.clientX - d.x, y: d.py + e.clientY - d.y })) }}
+          onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}
+          onWheel={(e) => setZ(zoom - e.deltaY * 0.002)}>
+          {img && <img src={src} alt="" draggable={false} style={{ width: w, height: h, transform: `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px))` }} />}
+          <i className="crop-ring" />
+        </div>
+        <p className="muted small">{t.ac_cropHint}</p>
+        <input type="range" min={1} max={4} step={0.01} value={zoom} onChange={(e) => setZ(Number(e.target.value))} />
+        <div className="row end">
+          <button className="pill small ghost" onClick={onCancel}>{t.cancel}</button>
+          <button className="pill small primary" disabled={!img} onClick={save}>{t.save}</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

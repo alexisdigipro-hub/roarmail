@@ -356,6 +356,24 @@ app.whenReady().then(() => {
     mail.setAvatar(id, square.resize({ width: 160, height: 160, quality: 'best' }).toDataURL())
     return true
   })
+  // the crop window (Alex, 29 Oct: "crop and move where we upload pictures"): the file comes back whole, the page
+  // frames it, and what it sends is drawn again here as a 160 px square, so only a real small picture is kept
+  handle('mail:pickImage', async () => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'heic', 'gif', 'webp', 'tiff'] }] })
+    if (r.canceled || !r.filePaths[0]) return null
+    let img = nativeImage.createFromPath(r.filePaths[0])
+    if (img.isEmpty()) img = await nativeImage.createThumbnailFromPath(r.filePaths[0], { width: 1200, height: 1200 }).catch(() => nativeImage.createEmpty())
+    if (img.isEmpty()) throw new Error('not-an-image')
+    const { width, height } = img.getSize()
+    const k = Math.min(1, 1200 / Math.max(width, height))
+    return (k < 1 ? img.resize({ width: Math.round(width * k), height: Math.round(height * k), quality: 'best' }) : img).toDataURL()
+  })
+  handle('mail:setAvatar', (_e, id: string, dataUrl: string) => {
+    if (typeof dataUrl !== 'string' || !/^data:image\/(png|jpeg);base64,/.test(dataUrl) || dataUrl.length > 4e6) throw new Error('not-an-image')
+    const img = nativeImage.createFromDataURL(dataUrl)
+    if (img.isEmpty()) throw new Error('not-an-image')
+    mail.setAvatar(String(id), img.resize({ width: 160, height: 160, quality: 'best' }).toDataURL())
+  })
   // Settings > General > Default mail app: mailto: links open RoarMail (the packaged app declares mailto, see package.json)
   handle('mail:isDefaultMail', () => app.isDefaultProtocolClient('mailto'))
   handle('mail:makeDefaultMail', () => { app.setAsDefaultProtocolClient('mailto'); return app.isDefaultProtocolClient('mailto') })
