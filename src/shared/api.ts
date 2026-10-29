@@ -437,7 +437,8 @@ export interface MailApi {
   folderMenu(folderId: string, labels: Record<string, string>): Promise<FolderMenuChoice | null>
   createFolder(accountId: string, parentId: string | null, name: string): Promise<void>
   renameFolder(folderId: string, name: string): Promise<void>
-  deleteFolder(folderId: string): Promise<void>
+  /** 'hidden' when the server will not let the folder go (it is hidden instead) */
+  deleteFolder(folderId: string): Promise<'deleted' | 'hidden'>
   setFolderColor(folderId: string, color: string | null): Promise<void>
   hideFolder(folderId: string, hidden: boolean): Promise<void>
   hiddenFolders(accountId: string): Promise<Folder[]>

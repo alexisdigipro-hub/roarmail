@@ -288,7 +288,8 @@ export default function App() {
       else if (pick === 'rules') { const n = await api.runRules(f.id); flash({ text: `${t.fm_rulesDone} ${n}`, ms: 3500 }) }
       else if (pick === 'sync') { flash({ text: t.fm_syncing, ms: 2500 }); const n = await api.syncFolderAll(f.id); flash({ text: `${t.fm_synced} ${n}`, ms: 3500 }) }
       else if (pick === 'delete' && confirm(`${t.fm_deleteQ}\n\n${f.name}`)) {
-        await api.deleteFolder(f.id)
+        const r = await api.deleteFolder(f.id)
+        if (r === 'hidden') flash({ text: t.fm_keptHidden, ms: 6000 })
         if (scope.folderId === f.id) setScope({ accountId: f.accountId, role: 'inbox' })
       }
     } catch (err) { flash({ text: clean(err) }) }

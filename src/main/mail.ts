@@ -819,25 +819,34 @@ export class MailService {
   }
 
   /** the folder and everything in it go from the server (the window asks first) */
-  async deleteFolder(folderId: string) {
+  async deleteFolder(folderId: string): Promise<'deleted' | 'hidden'> {
     const f = this.folderRow(folderId)
-    if (f.role === 'inbox') return
+    if (f.role === 'inbox') return 'hidden'
     // the server says no ("Command failed") to deleting the folder that is open on the connection (Dovecot) and to a
     // folder with folders inside: the open one is closed first, the ones inside go first, deepest first (29 Oct 2026)
     const kids = f.delimiter ? (this.db.prepare('select id, path from folders where account_id = ?').all(f.account_id) as Row[])
       .filter((k) => k.path.startsWith(f.path + f.delimiter)).sort((a, b) => b.path.length - a.path.length) : []
+    // some folders the server keeps for itself and never lets go (Outlook / Exchange "Sync Issues" and the ones inside,
+    // Alex 29 Oct: "DELETE failed"): what the server refuses is hidden instead, and the person is told so
+    const refused: string[] = []
     await this.run(f.account_id, async (c) => {
       for (const p of [...kids.map((k) => k.path as string), f.path]) {
         if ((c.mailbox as any)?.path === p) await c.mailboxClose()
-        try { await c.mailboxDelete(p) } catch (e: any) { throw new Error(e?.responseText || e?.message || String(e)) }
+        try { await c.mailboxDelete(p) } catch { refused.push(p) }
       }
     })
+    if (refused.length) {
+      for (const k of [...kids, f]) this.db.prepare('update folders set hidden = 1 where id = ?').run(k.id)
+      this.emit({ type: 'folders', accountId: f.account_id })
+      return 'hidden'
+    }
     for (const k of [...kids, f]) {
       this.dropFolderMessages(k.id)
       this.db.prepare('delete from folders where id = ?').run(k.id)
     }
     await this.syncFolders(f.account_id)
     this.emit({ type: 'messages', accountId: f.account_id })
+    return 'deleted'
   }
 
   folderAccount(folderId: string): string | null {

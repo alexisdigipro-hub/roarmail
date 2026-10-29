@@ -205,7 +205,7 @@ export function createDemo(): MailApi & { update: any } {
     popMenu: async () => null,
     createFolder: async (accountId, parentId, name) => { const p = folders.find((f) => f.id === parentId); folders.push({ id: uid(), accountId, path: p ? `${p.path}/${name}` : name, name, role: null, unread: 0, total: 0, depth: p ? p.depth + 1 : 0 }); emit({ type: 'folders', accountId }) },
     renameFolder: async (id, name) => { const f = folders.find((x) => x.id === id); if (f) { f.name = name; emit({ type: 'folders', accountId: f.accountId }) } },
-    deleteFolder: async (id) => { const i = folders.findIndex((x) => x.id === id); if (i >= 0) { const a = folders[i].accountId; folders.splice(i, 1); emit({ type: 'folders', accountId: a }) } },
+    deleteFolder: async (id) => { const i = folders.findIndex((x) => x.id === id); if (i >= 0) { const a = folders[i].accountId; folders.splice(i, 1); emit({ type: 'folders', accountId: a }) } return 'deleted' },
     setFolderColor: async (id, color) => { const f = folders.find((x) => x.id === id); if (f) { f.color = color; emit({ type: 'folders', accountId: f.accountId }) } },
     hideFolder: async () => {},
     hiddenFolders: async () => [],
