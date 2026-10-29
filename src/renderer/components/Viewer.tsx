@@ -9,12 +9,13 @@ import { FONTS, TEXT_SIZES, fontStack } from '../look'
 import { fullDate, lang, size, t, when, type Key } from '../i18n'
 import { Icon } from './Icon'
 import { useSenderIcons } from '../senders'
+import { SenderHover } from './Contacts'
 
 export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
 export type RoarAction = 'share' | 'task'
 
-export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule }: {
+export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule, onContact, onWriteTo }: {
   row: MessageRow | null
   accounts: Account[]
   prefs: Settings
@@ -23,6 +24,9 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule 
   onRoar: (action: RoarAction, m: MessageFull) => void
   /** Make a Rule from This Sender (the message's menu) */
   onRule: (m: MessageFull) => void
+  /** the sender's card in Contacts, and a new message to them (the hover card over their name) */
+  onContact?: (email: string) => void
+  onWriteTo?: (email: string) => void
 }) {
   const [items, setItems] = useState<MessageRow[] | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -84,7 +88,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule 
           ? <MessageCard key={m.id} id={m.id} accounts={accounts} prefs={prefs} isLast={m === items[items.length - 1]}
               onLoaded={(full) => { if (m === items[items.length - 1]) last.current = full }}
               onFold={items.length > 1 ? () => setOpen((s) => { const n = new Set(s); n.delete(m.id); return n }) : undefined}
-              onCompose={onCompose} onRule={onRule} />
+              onCompose={onCompose} onRule={onRule} onContact={onContact} onWriteTo={onWriteTo} />
           : (
             <button key={m.id} className="folded" onClick={() => setOpen((s) => new Set(s).add(m.id))}>
               <div className="avatar small-av" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
@@ -98,10 +102,11 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule 
   )
 }
 
-function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose, onRule }: {
+function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose, onRule, onContact, onWriteTo }: {
   id: string; accounts: Account[]; prefs: Settings; isLast: boolean
   onLoaded: (m: MessageFull) => void; onFold?: () => void; onCompose: (kind: ComposeKind, m: MessageFull) => void
   onRule: (m: MessageFull) => void
+  onContact?: (email: string) => void; onWriteTo?: (email: string) => void
 }) {
   const [m, setM] = useState<MessageFull | null>(null)
   // the message's menu (the ⋯ button, or a right-click on its header): a rule, print, PDF, .eml
@@ -148,7 +153,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
         {(() => { const pic = accounts.find((a) => a.email.toLowerCase() === m.fromEmail)?.avatar || senderPic(m.fromEmail); return (
           <div className={`avatar ${pic ? 'pic' : ''}`} style={{ background: pic ? '#fff' : tint(m.fromEmail) }}>{pic ? <img src={pic} alt="" /> : initials(m.fromName || m.fromEmail)}</div>) })()}
         <div className="who">
-          <div><b>{m.fromName || m.fromEmail}</b> {m.fromName && <span className="muted">&lt;{m.fromEmail}&gt;</span>}</div>
+          <div><SenderHover email={m.fromEmail} name={m.fromName} pictures={prefs.senderPictures} onOpen={onContact} onWrite={onWriteTo}><b>{m.fromName || m.fromEmail}</b></SenderHover> {m.fromName && <span className="muted">&lt;{m.fromEmail}&gt;</span>}</div>
           <div className="muted small">{t.to}: {people(m.to)}{m.cc.length ? ` · ${t.cc}: ${people(m.cc)}` : ''}</div>
         </div>
         <div className="muted small date">{fullDate(m.date)}{acc && <i className="acc-dot" style={{ background: acc.color }} title={acc.email} />}</div>
