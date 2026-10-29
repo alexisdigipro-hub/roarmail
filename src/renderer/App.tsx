@@ -280,7 +280,7 @@ export default function App() {
     e.preventDefault()
     const labels = { new: t.fm_new, sub: t.fm_sub, rename: t.fm_rename, red: t.qc_red, orange: t.qc_orange, yellow: t.fc_yellow, green: t.qc_green,
       blue: t.qc_blue, purple: t.qc_purple, custom: t.fc_custom, nocolor: t.fc_none, hide: t.fm_hide, read: t.fm_read, sync: t.fm_sync, rules: t.fm_rules, delete: t.fm_delete,
-      empty: f.role === 'spam' ? t.fm_emptyJunk : t.fm_emptyTrash }
+      empty: f.role === 'spam' ? t.fm_emptyJunk : t.fm_emptyTrash, colour: t.fc_pick }
     const pick = await api.folderMenu(f.id, labels)
     if (!pick) return
     try {
@@ -314,22 +314,39 @@ export default function App() {
     }
     const blocked = (await api.blockedSenders().catch(() => [] as string[])).includes(r.fromEmail.toLowerCase())
     const allSeen = targets.every((x) => x.seen), allFlag = targets.every((x) => x.flagged)
+    const one = targets.length === 1
+    // tidied (Alex, 29 Oct): answer first, then mark, then file it, the sender's things in one submenu, Delete last
     const pick = await api.popMenu([
+      { id: 'reply', label: t.reply, enabled: one },
+      { id: 'replyAll', label: t.replyAll, enabled: one },
+      { id: 'forward', label: t.forward, enabled: one },
+      null,
       { id: 'seen', label: allSeen ? t.markUnread : t.markRead },
       { id: 'flag', label: allFlag ? t.unflag : t.flag },
       null,
-      { id: 'archive', label: t.archiveIt },
       { id: 'move', label: t.moveTo },
-      { id: 'snooze', label: t.snoozeIt },
-      { id: 'trash', label: t.trashIt },
+      { id: 'archive', label: t.archiveIt },
+      { id: 'snooze', label: t.snoozeUntil },
       null,
-      { id: 'block', label: blocked ? t.unblockSender : t.blockSender, enabled: !!r.fromEmail },
-      { id: 'rule', label: t.ru_fromSender, enabled: !!r.fromEmail },
-      { id: 'contact', label: t.ct_card, enabled: !!r.fromEmail },
+      { label: `${t.mn_sender}${r.fromName ? ` · ${r.fromName}` : ''}`, enabled: !!r.fromEmail, sub: [
+        { id: 'contact', label: t.ct_card },
+        { id: 'allMail', label: t.ct_allMail },
+        { id: 'rule', label: t.ru_fromSender },
+        null,
+        { id: 'block', label: blocked ? t.unblockSender : t.blockSender },
+      ] },
+      null,
+      { id: 'trash', label: targets.length > 1 ? `${t.trashIt} (${targets.length})` : t.trashIt },
     ])
     if (!pick) return
     try {
-      if (pick === 'seen') act(targets, allSeen ? 'unseen' : 'seen')
+      if (pick === 'reply' || pick === 'replyAll' || pick === 'forward') {
+        const items = await api.thread(keyOf(r))
+        const m = await api.message((items[items.length - 1] || r).id)
+        setCompose({ kind: pick, source: m })
+      }
+      else if (pick === 'allMail') setScope({ accountId: 'all', person: r.fromEmail })
+      else if (pick === 'seen') act(targets, allSeen ? 'unseen' : 'seen')
       else if (pick === 'flag') act(targets, allFlag ? 'unflag' : 'flag')
       else if (pick === 'archive' || pick === 'trash') act(targets, pick)
       else if (pick === 'move') openMove(targets)

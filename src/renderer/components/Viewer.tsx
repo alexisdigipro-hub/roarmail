@@ -174,6 +174,23 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     else if (pick === 'all') onAllMail?.(email)
     else if (pick === 'block') { await window.roarmail.blockSender(email, !known?.blocked); toast(known?.blocked ? `${t.unblock}: ${email}` : t.blockedNote) }
   }
+  // the message's ⋯ and right-click on its head: one native menu in groups (Alex, 29 Oct: tidy the menus)
+  const moreMenu = async (e: ReactMouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const id = await window.roarmail.popMenu([
+      { id: 'reply', label: t.reply }, { id: 'replyAll', label: t.replyAll }, { id: 'forward', label: t.forward },
+      null,
+      { id: 'print', label: t.mm_print }, { id: 'pdf', label: t.mm_pdf }, { id: 'eml', label: t.mm_eml },
+      null,
+      { label: `${t.mn_sender} · ${m.fromName || m.fromEmail}`, sub: [
+        { id: 'card', label: t.ct_card }, { id: 'all', label: t.ct_allMail }, { id: 'rule', label: t.ru_fromSender },
+      ] },
+    ])
+    if (id === 'reply' || id === 'replyAll' || id === 'forward') onCompose(id, m)
+    else if (id === 'card') onContact?.(m.fromEmail)
+    else if (id === 'all') onAllMail?.(m.fromEmail)
+    else if (id === 'rule' || id === 'print' || id === 'pdf' || id === 'eml') pick(id)
+  }
   const dateMenu = async (e: ReactMouseEvent) => {
     e.preventDefault(); e.stopPropagation()
     const day = new Date(m.date); day.setHours(0, 0, 0, 0)
@@ -231,7 +248,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
 
   return (
     <article className={`card ${isLast ? 'last' : ''}`}>
-      <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }} onContextMenu={(e) => { e.preventDefault(); setMenu(true) }}>
+      <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }} onContextMenu={(e) => moreMenu(e)}>
         {(() => { const pic = accounts.find((a) => a.email.toLowerCase() === m.fromEmail)?.avatar || senderPic(m.fromEmail); return (
           <div className={`avatar ${pic ? 'pic' : ''}`} style={{ background: pic ? '#fff' : tint(m.fromEmail) }}>{pic ? <img src={pic} alt="" /> : initials(m.fromName || m.fromEmail)}</div>) })()}
         <div className="who">
@@ -252,17 +269,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
               // blocking also puts this message in the Trash (Alex, 29 Oct)
               if (!blocked) window.roarmail.act([m.id], 'trash').catch(() => {})
             }}><Icon name="block" size={16} /></button>
-          <span className="msg-menu-wrap">
-            <button className={`tool small ${menu ? 'on' : ''}`} title={t.mm_more} onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
-            {menu && (
-              <div className="attach-menu msg-menu" onMouseLeave={() => setMenu(false)}>
-                <button onClick={() => pick('rule')}><Icon name="funnel" size={16} /><span><b>{t.ru_fromSender}</b><small>{m.fromEmail}</small></span></button>
-                <button onClick={() => pick('print')}><Icon name="print" size={16} /><span><b>{t.mm_print}</b></span></button>
-                <button onClick={() => pick('pdf')}><Icon name="download" size={16} /><span><b>{t.mm_pdf}</b></span></button>
-                <button onClick={() => pick('eml')}><Icon name="drafts" size={16} /><span><b>{t.mm_eml}</b></span></button>
-              </div>
-            )}
-          </span>
+          <button className="tool small" title={t.mm_more} onClick={(e) => moreMenu(e)}><Icon name="more" size={16} /></button>
         </div>
       </header>
 

@@ -9,7 +9,7 @@ import { MailService } from './mail'
 import { autodetect } from './autodetect'
 import { readCsv, readVcf } from './contacts'
 import { RoarMe } from './roarme'
-import type { LockState, MailEvent, MessageRow, NewMailSound, RoarTransferFile } from '../shared/api'
+import type { LockState, MailEvent, MenuItem, MessageRow, NewMailSound, RoarTransferFile } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const updater = require('./updater.js')
 
@@ -317,9 +317,13 @@ app.whenReady().then(() => {
       { label: l.sub, click: pick('sub') },
       { label: l.rename, enabled: !fixed, click: pick('rename') },
       { type: 'separator' },
-      ...colours.map(([hex, label]) => ({ label, type: 'checkbox' as const, checked: f.color === hex, click: pick(`c:${hex}`) })),
-      { label: l.custom, click: pick('custom') },
-      ...(f.color ? [{ label: l.nocolor, click: pick('nocolor') }] : []),
+      // the colours in one submenu, so the menu stays short (Alex, 29 Oct: tidy the menus)
+      { label: l.colour || 'Colour', submenu: [
+        ...colours.map(([hex, label]) => ({ label, type: 'checkbox' as const, checked: f.color === hex, click: pick(`c:${hex}`) })),
+        { type: 'separator' as const },
+        { label: l.custom, click: pick('custom') },
+        ...(f.color ? [{ label: l.nocolor, click: pick('nocolor') }] : []),
+      ] },
       { type: 'separator' },
       { label: l.hide, enabled: f.role !== 'inbox', click: pick('hide') },
       { type: 'separator' },
@@ -332,11 +336,13 @@ app.whenReady().then(() => {
       { label: l.delete, enabled: !fixed, click: pick('delete') },
     ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
-  handle('mail:popMenu', (_e, items: ({ id: string; label: string; enabled?: boolean } | null)[]) => new Promise((resolve) => {
+  handle('mail:popMenu', (_e, items: MenuItem[]) => new Promise((resolve) => {
     if (!win) return resolve(null)
     let picked: string | null = null
-    Menu.buildFromTemplate(items.map((x) => x ? { label: String(x.label), enabled: x.enabled !== false, click: () => { picked = String(x.id) } } : { type: 'separator' as const }))
-      .popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
+    const build = (list: MenuItem[]): Electron.MenuItemConstructorOptions[] => list.map((x) => !x ? { type: 'separator' as const }
+      : x.sub ? { label: String(x.label), enabled: x.enabled !== false, submenu: build(x.sub) }
+      : { label: String(x.label), enabled: x.enabled !== false, ...(x.checked != null ? { type: 'checkbox' as const, checked: !!x.checked } : {}), click: () => { picked = String(x.id) } })
+    Menu.buildFromTemplate(build(items)).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
   handle('mail:createFolder', (_e, accountId, parentId, name) => mail.createFolder(accountId, parentId, name))
   handle('mail:renameFolder', (_e, id, name) => mail.renameFolder(id, name))
