@@ -125,6 +125,20 @@ export interface MailStats {
 
 export interface Address { name?: string; address: string }
 
+/** Contacts (29 Oct 2026): a person in the address book; built from mail, signatures, imports and what was typed */
+export type ContactGroup = 'vip' | 'team' | 'clients' | 'crew' | 'blocked'
+export interface Contact {
+  email: string; name: string; phone: string; company: string; title: string; website: string; notes: string
+  groups: string[]; vip: boolean; blocked: boolean
+  /** messages from them, and the newest one's time */
+  count: number; last: number
+}
+export interface ContactFull extends Contact {
+  recent: MessageRow[]
+  files: { id: string; filename: string; size: number; mime: string; date: number }[]
+}
+export type ContactPatch = Partial<Pick<Contact, 'name' | 'phone' | 'company' | 'title' | 'website' | 'notes' | 'groups' | 'vip'>>
+
 /** a row of the list: a whole conversation (its newest message), or a single message in search */
 export interface MessageRow {
   id: string
@@ -396,6 +410,13 @@ export interface MailApi {
   serverFolders(accountId: string): Promise<{ path: string; name: string }[]>
   /** asks for an image, makes it a round-ready square and keeps it as the account's picture; false = cancelled */
   pickAvatar(accountId: string): Promise<boolean>
+  /** Contacts: the address book (search on name, address, company; a group), at most 400 */
+  contactList(query: string, group?: ContactGroup | ''): Promise<Contact[]>
+  /** one person's card with their latest mail and files; a signature not read yet is read first */
+  contactCard(email: string): Promise<ContactFull | null>
+  saveContact(email: string, patch: ContactPatch): Promise<void>
+  /** a .vcf or .csv from another address book; how many people came, or null if cancelled */
+  importContacts(): Promise<number | null>
   /** Move to another computer: saves the whole setup to a file sealed with this passphrase; the file's path, or null if cancelled */
   exportSetup(passphrase: string): Promise<string | null>
   /** opens such a file with its passphrase and puts everything in it here; what came, or null if cancelled */

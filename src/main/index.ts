@@ -7,6 +7,7 @@ import path from 'path'
 import { openStore } from './store'
 import { MailService } from './mail'
 import { autodetect } from './autodetect'
+import { readCsv, readVcf } from './contacts'
 import { RoarMe } from './roarme'
 import type { LockState, MailEvent, MessageRow, NewMailSound, RoarTransferFile } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -379,6 +380,16 @@ app.whenReady().then(() => {
     const img = nativeImage.createFromDataURL(dataUrl)
     if (img.isEmpty()) throw new Error('not-an-image')
     mail.setAvatar(String(id), img.resize({ width: 160, height: 160, quality: 'best' }).toDataURL())
+  })
+  // Contacts
+  handle('mail:contactList', (_e, q: string, group: string) => mail.contactList(String(q || ''), String(group || '')))
+  handle('mail:contactCard', (_e, email: string) => mail.contactCard(String(email)))
+  handle('mail:saveContact', (_e, email: string, patch) => mail.saveContact(String(email), patch || {}))
+  handle('mail:importContacts', async () => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: 'Contacts', extensions: ['vcf', 'csv'] }] })
+    if (r.canceled || !r.filePaths[0]) return null
+    const file = r.filePaths[0], text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
+    return mail.importContacts(/\.csv$/i.test(file) ? readCsv(text) : readVcf(text))
   })
   // Move to another computer: the setup in one file, sealed with the person's passphrase (scrypt + AES-256-GCM), since
   // it carries the mail passwords; without the passphrase the file is noise

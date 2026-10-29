@@ -9,6 +9,7 @@ import { Viewer, initials, tint, type ComposeKind } from './components/Viewer'
 import { Composer, type ComposeSeed } from './components/Composer'
 import { MovePicker } from './components/MovePicker'
 import { SettingsSheet, type Page } from './components/SettingsSheet'
+import { ContactsSheet } from './components/Contacts'
 import { blankRule } from './components/Rules'
 import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
@@ -53,6 +54,7 @@ export default function App() {
   const [roar, setRoar] = useState<{ kind: 'share' | 'task'; m: MessageFull } | null>(null)
   const [workOpen, setWorkOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
+  const [contactsAt, setContactsAt] = useState<string | null>(null) // open on this address ('' = the list)
   const [accDrag, setAccDrag] = useState('')
   const [accDrop, setAccDrop] = useState('')
   // the folders shown or hidden, ticked in place (Alex, 29 Oct: "the folders I want, and hide the rest")
@@ -310,6 +312,7 @@ export default function App() {
       null,
       { id: 'block', label: blocked ? t.unblockSender : t.blockSender, enabled: !!r.fromEmail },
       { id: 'rule', label: t.ru_fromSender, enabled: !!r.fromEmail },
+      { id: 'contact', label: t.ct_card, enabled: !!r.fromEmail },
     ])
     if (!pick) return
     try {
@@ -319,6 +322,7 @@ export default function App() {
       else if (pick === 'move') openMove(targets)
       else if (pick === 'snooze') openSnooze(targets)
       else if (pick === 'block') { await api.blockSender(r.fromEmail, !blocked); flash({ text: blocked ? `${t.unblock}: ${r.fromEmail}` : t.blockedNote, ms: 3500 }) }
+      else if (pick === 'contact') setContactsAt(r.fromEmail)
       else if (pick === 'rule') {
         setSettingsAt({ page: 'rules', rule: blankRule({ name: r.fromName || r.fromEmail, conditions: [{ field: 'from', value: r.fromEmail }] }) })
         setSettingsOpen(true)
@@ -521,6 +525,7 @@ export default function App() {
         <div className="rail-tools">
           <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
           <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
+          <button className={`acc tool-btn ${contactsAt !== null ? 'on-tool' : ''}`} title={t.ct_title} onClick={() => setContactsAt('')}><Icon name="person" size={18} /></button>
           <button className={`acc tool-btn ${statsOpen ? 'on-tool' : ''}`} title={t.st_title} onClick={() => setStatsOpen(true)}><Icon name="chart" size={18} /></button>
           <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
           <button className={`acc tool-btn ${railWide ? 'on-tool' : ''}`} title={railWide ? t.railIcons : t.railNames} onClick={toggleRail}><Icon name="sidebar" size={18} /></button>
@@ -752,6 +757,7 @@ export default function App() {
             setSettingsAt({ page: 'rules', rule: blankRule({ name: m.fromName || m.fromEmail, conditions: [{ field: 'from', value: m.fromEmail }] }) })
             setSettingsOpen(true)
           }}
+          onContact={(email) => setContactsAt(email)} onWriteTo={(to) => setCompose({ kind: 'new', to })}
           onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else if (a === 'snooze') openSnooze([current]); else act([current], a) }} />
       )}
 
@@ -763,6 +769,9 @@ export default function App() {
       )}
       {folderAsk && <FolderSheet ask={folderAsk} onClose={() => setFolderAsk(null)} onDone={(text) => { setFolderAsk(null); if (text) flash({ text, ms: 3000 }) }} />}
       {adding && <AddAccount first={false} onDone={() => { setAdding(false); loadAccounts() }} onCancel={() => setAdding(false)} />}
+      {contactsAt !== null && <ContactsSheet start={contactsAt || undefined} pictures={prefs.senderPictures} onClose={() => setContactsAt(null)}
+        onWrite={(to) => { setContactsAt(null); setCompose({ kind: 'new', to }) }}
+        onAllMail={(person) => { setContactsAt(null); setScope({ accountId: 'all', person }) }} />}
       {statsOpen && <StatsSheet accounts={accounts} onClose={() => setStatsOpen(false)}
         onOpen={(accountId, sender) => { setStatsOpen(false); setScope({ accountId, role: 'inbox', person: sender }) }} />}
       {settingsOpen && <SettingsSheet accounts={accounts} start={settingsAt} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); setSettingsAt(null); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}

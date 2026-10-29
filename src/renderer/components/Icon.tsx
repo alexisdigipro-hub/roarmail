@@ -47,6 +47,7 @@ const P: Record<string, string> = {
   outdent: 'M4 6h16M11 10h9M11 14h9M4 18h16M7 9.5 4 12l3 2.5',
   check: 'M5 12.5l4.5 4.5L19 7',
   chat: 'M5 5h14v10H10l-4 4v-4H5z',
+  person: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20a7.5 7.5 0 0 1 15 0',
   target: 'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0M12 12h.01',
   calendar: 'M4 6h16v14H4zM4 10h16M8 3.5v4M16 3.5v4M12 14h.01',
   sort: 'M7 5v14M4 16l3 3 3-3M14 7h6M14 12h4.5M14 17h3',

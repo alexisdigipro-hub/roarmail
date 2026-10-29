@@ -19,9 +19,10 @@ import { fold, now, uuid } from './store'
 import { seal, open } from './vault'
 import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './microsoft'
 import { cleanRule, plan } from './rules'
+import { readSignature, type CardFields } from './contacts'
 import { attendeeFor, buildReply, readInvite } from './ics'
 import type {
-  Account, AccountPatch, Action, Address, Draft, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
+  Account, AccountPatch, Action, Address, Contact, ContactFull, ContactPatch, Draft, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   MailStats, Rule, Security, ServerConfig, Settings, Signature, SnoozedItem, Template,
 } from '../shared/api'
 
@@ -99,6 +100,11 @@ const mailDir = () => path.join(app.getPath('userData'), 'mail')
 const emlPath = (id: string) => path.join(mailDir(), `${id}.eml`)
 
 /** a list row from a grouped query (conversation) or a plain message row */
+const contactOf = (r: Row): Contact => ({
+  email: r.email, name: r.name || '', phone: r.phone || '', company: r.company || '', title: r.title || '', website: r.website || '',
+  notes: r.notes || '', groups: String(r.groups || '').split(',').filter(Boolean), vip: !!r.vip, blocked: !!r.blocked, count: r.n || 0, last: r.last || 0,
+})
+
 const toRow = (r: Row): MessageRow => ({
   id: r.id, accountId: r.account_id, threadId: r.thread_id || null,
   fromName: r.from_name || '', fromEmail: r.from_email || '',
@@ -1499,6 +1505,93 @@ export class MailService {
       try { freed += fs.statSync(p).size; fs.rmSync(p, { force: true }) } catch { /* in use */ }
     }
     return freed
+  }
+
+  /**
+   * Contacts: everyone who wrote or was written to (the contacts table, filled by sync and sending), with their card.
+   * Automated senders (no-reply, notifications…) stay out unless the person did something with them.
+   */
+  contactList(query: string, group: string): Contact[] {
+    const own = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e))
+    const q = `%${fold(query.trim().toLowerCase())}%`
+    const where = group === 'vip' ? 'and c.vip = 1' : group === 'blocked' ? 'and c.blocked = 1'
+      : group ? `and instr(',' || c.groups || ',', ',' || @group || ',') > 0` : 'and c.blocked = 0'
+    const rows = this.db.prepare(`select c.*, (select count(*) from messages m where m.from_email = c.email) as n,
+        max(coalesce(c.last_used, 0), coalesce((select max(date) from messages m where m.from_email = c.email), 0)) as last
+      from contacts c
+      where (fold(c.email) like @q or fold(coalesce(c.name, '')) like @q or fold(coalesce(c.company, '')) like @q) ${where}
+        and (c.vip = 1 or c.groups != '' or c.edited != '' or c.use_count > 0 or c.email not glob '*[nN][oO]*[rR][eE][pP][lL][yY]*'
+          and c.email not like '%notification%' and c.email not like 'mailer-daemon%' and c.email not like '%bounce%')
+      order by c.vip desc, (c.use_count > 0) desc, last desc limit 400`).all({ q, group }) as Row[]
+    return rows.filter((r) => !own.has(r.email)).map(contactOf)
+  }
+
+  contactCard(email: string): ContactFull | null {
+    const e = email.toLowerCase().trim()
+    this.readSignatureOf(e)
+    const r = this.db.prepare(`select c.*, (select count(*) from messages m where m.from_email = c.email) as n,
+      (select max(date) from messages m where m.from_email = c.email) as last from contacts c where c.email = ?`).get(e) as Row | undefined
+    if (!r) return null
+    const files = (this.db.prepare(`select a.id, a.filename, a.size, a.mime, m.date from attachments a join messages m on m.id = a.message_id
+      where m.from_email = ? and a.inline = 0 and a.filename is not null order by m.date desc limit 40`).all(e) as Row[])
+      .map((f) => ({ id: f.id, filename: f.filename, size: f.size || 0, mime: f.mime || '', date: f.date }))
+    return { ...contactOf(r), recent: this.list({ accountId: 'all', person: e }).slice(0, 12), files }
+  }
+
+  saveContact(email: string, patch: ContactPatch) {
+    const e = email.toLowerCase().trim()
+    this.db.prepare('insert into contacts (email) values (?) on conflict(email) do nothing').run(e)
+    const cur = this.db.prepare('select edited from contacts where email = ?').get(e) as Row
+    const edited = new Set(String(cur?.edited || '').split(',').filter(Boolean))
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === 'groups') this.db.prepare('update contacts set groups = ? where email = ?').run((v as string[]).filter((g) => /^[a-z]+$/.test(g)).join(','), e)
+      else if (k === 'vip') this.db.prepare('update contacts set vip = ? where email = ?').run(v ? 1 : 0, e)
+      else if (['name', 'phone', 'company', 'title', 'website', 'notes'].includes(k)) {
+        this.db.prepare(`update contacts set ${k} = ? where email = ?`).run(String(v ?? '').trim() || null, e)
+        edited.add(k)
+      }
+    }
+    this.db.prepare('update contacts set edited = ? where email = ?').run([...edited].join(','), e)
+  }
+
+  /** fills what is empty on a card from fields read elsewhere; what the person typed is left alone */
+  private fillCard(email: string, f: CardFields, mark = false) {
+    const cur = this.db.prepare('select * from contacts where email = ?').get(email) as Row | undefined
+    if (!cur) return
+    const edited = new Set(String(cur.edited || '').split(',').filter(Boolean))
+    for (const k of ['name', 'phone', 'company', 'title', 'website', 'notes'] as const) {
+      const v = f[k]?.trim()
+      if (!v || edited.has(k) || (cur[k] && !mark)) continue
+      this.db.prepare(`update contacts set ${k} = ? where email = ?`).run(v, email)
+      if (mark) edited.add(k)
+    }
+    if (mark) this.db.prepare('update contacts set edited = ? where email = ?').run([...edited].join(','), email)
+  }
+
+  /** the signature in a person's newest mail, read once per new mail from them */
+  private readSignatureOf(email: string) {
+    const c = this.db.prepare('select sig_checked from contacts where email = ?').get(email) as Row | undefined
+    if (!c) return
+    const msgs = this.db.prepare(`select from_name, body_text, date from messages where from_email = ? and body_text is not null and date > ?
+      order by date desc limit 4`).all(email, c.sig_checked || 0) as Row[]
+    if (!msgs.length) return
+    for (const m of msgs) this.fillCard(email, readSignature(String(m.body_text), String(m.from_name || ''), email))
+    this.db.prepare('update contacts set sig_checked = ? where email = ?').run(msgs[0].date, email)
+  }
+
+  /** people from another address book (.vcf / .csv): new ones are added, known ones get what they lacked */
+  importContacts(cards: CardFields[]): number {
+    let n = 0
+    this.db.transaction(() => {
+      for (const c of cards) for (const e of c.emails || []) {
+        const email = e.toLowerCase().trim()
+        if (!/^[^\s@]+@[^\s@]+$/.test(email)) continue
+        this.db.prepare('insert into contacts (email, name) values (?, ?) on conflict(email) do nothing').run(email, c.name || null)
+        this.fillCard(email, c)
+        n++
+      }
+    })()
+    return n
   }
 
   contacts(query: string): Address[] {
