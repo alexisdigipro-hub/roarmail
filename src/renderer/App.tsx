@@ -300,6 +300,13 @@ export default function App() {
   const rowMenu = async (r: MessageRow, e: MouseEvent) => {
     e.preventDefault()
     const targets = selected.includes(keyOf(r)) ? chosen : [r]
+    // a draft (Alex, 29 Oct): open it to go on writing, or delete it
+    if (inDrafts) {
+      const id = await api.popMenu([{ id: 'open', label: t.dr_open }, null, { id: 'trash', label: t.dr_delete }])
+      if (id === 'open') openRow(r)
+      else if (id === 'trash') act(targets, 'trash')
+      return
+    }
     const blocked = (await api.blockedSenders().catch(() => [] as string[])).includes(r.fromEmail.toLowerCase())
     const allSeen = targets.every((x) => x.seen), allFlag = targets.every((x) => x.flagged)
     const pick = await api.popMenu([
@@ -761,6 +768,12 @@ export default function App() {
           }}
           onContact={(email) => setContactsAt(email)} onWriteTo={(to) => setCompose({ kind: 'new', to })}
           onAllMail={(person) => setScope({ accountId: 'all', person })}
+          onFind={(w) => {
+            if (w.search) { setSearchOpen(true); setQuery(w.search) }
+            else if (w.day) setScope((s) => ({ ...s, day: w.day }))
+            else if (w.account) setScope({ accountId: w.account, role: 'inbox' })
+            else if (w.ruleSubject) { setSettingsAt({ page: 'rules', rule: blankRule({ name: w.ruleSubject, conditions: [{ field: 'subject', value: w.ruleSubject }] }) }); setSettingsOpen(true) }
+          }}
           onAct={(a) => { if (!current) return; if (a === 'move') openMove([current]); else if (a === 'snooze') openSnooze([current]); else act([current], a) }} />
       )}
 

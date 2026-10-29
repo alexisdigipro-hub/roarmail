@@ -15,7 +15,7 @@ export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
 export type RoarAction = 'share' | 'task'
 
-export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule, onContact, onWriteTo, onAllMail }: {
+export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule, onContact, onWriteTo, onAllMail, onFind }: {
   row: MessageRow | null
   accounts: Account[]
   prefs: Settings
@@ -28,6 +28,8 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
   onContact?: (email: string) => void
   onWriteTo?: (email: string) => void
   onAllMail?: (email: string) => void
+  /** the menus on the subject, the date and the account: search a subject, a day's mail, an account, a rule */
+  onFind?: (what: { search?: string; day?: number; account?: string; ruleSubject?: string }) => void
 }) {
   const [items, setItems] = useState<MessageRow[] | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -83,13 +85,25 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
       </div>
 
       <div className="read" key={key}>
-        <h2 className="subject">{row.subject || t.noSubject}{items.length > 1 && <span className="muted count-pill">{items.length}</span>}</h2>
+        <h2 className="subject" onContextMenu={async (e) => {
+          e.preventDefault()
+          const s = row.subject || ''
+          const id = await window.roarmail.popMenu([
+            { id: 'copy', label: t.sm_copy, enabled: !!s },
+            { id: 'search', label: t.sm_search, enabled: !!s },
+            { id: 'rule', label: t.sm_rule, enabled: !!s },
+          ])
+          const bare = s.replace(/^\s*((re|fw|fwd|σχ|πρθ)\s*:\s*)+/i, '')
+          if (id === 'copy') navigator.clipboard.writeText(s)
+          else if (id === 'search') onFind?.({ search: bare })
+          else if (id === 'rule') onFind?.({ ruleSubject: bare })
+        }}>{row.subject || t.noSubject}{items.length > 1 && <span className="muted count-pill">{items.length}</span>}</h2>
         {/* Settings > Message list > Conversations: oldest first (as written) or the newest on top */}
         {(prefs.threadOrder === 'newest' ? [...items].reverse() : items).map((m) => open.has(m.id)
           ? <MessageCard key={m.id} id={m.id} accounts={accounts} prefs={prefs} isLast={m === items[items.length - 1]}
               onLoaded={(full) => { if (m === items[items.length - 1]) last.current = full }}
               onFold={items.length > 1 ? () => setOpen((s) => { const n = new Set(s); n.delete(m.id); return n }) : undefined}
-              onCompose={onCompose} onRule={onRule} onContact={onContact} onWriteTo={onWriteTo} onAllMail={onAllMail} />
+              onCompose={onCompose} onRule={onRule} onContact={onContact} onWriteTo={onWriteTo} onAllMail={onAllMail} onFind={onFind} onSnooze={() => onAct('snooze')} />
           : (
             <button key={m.id} className="folded" onClick={() => setOpen((s) => new Set(s).add(m.id))}>
               <div className="avatar small-av" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
@@ -103,11 +117,12 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
   )
 }
 
-function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose, onRule, onContact, onWriteTo, onAllMail }: {
+function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose, onRule, onContact, onWriteTo, onAllMail, onFind, onSnooze }: {
   id: string; accounts: Account[]; prefs: Settings; isLast: boolean
   onLoaded: (m: MessageFull) => void; onFold?: () => void; onCompose: (kind: ComposeKind, m: MessageFull) => void
   onRule: (m: MessageFull) => void
   onContact?: (email: string) => void; onWriteTo?: (email: string) => void; onAllMail?: (email: string) => void
+  onFind?: (what: { search?: string; day?: number; account?: string; ruleSubject?: string }) => void; onSnooze?: () => void
 }) {
   const [m, setM] = useState<MessageFull | null>(null)
   // the message's menu (the ⋯ button, or a right-click on its header): a rule, print, PDF, .eml
@@ -159,6 +174,45 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     else if (pick === 'all') onAllMail?.(email)
     else if (pick === 'block') { await window.roarmail.blockSender(email, !known?.blocked); toast(known?.blocked ? `${t.unblock}: ${email}` : t.blockedNote) }
   }
+  const dateMenu = async (e: ReactMouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const day = new Date(m.date); day.setHours(0, 0, 0, 0)
+    const id = await window.roarmail.popMenu([
+      { id: 'day', label: t.dm_day },
+      { id: 'snooze', label: t.snoozeUntil, enabled: !!onSnooze },
+      null,
+      { id: 'copy', label: t.dm_copy },
+    ])
+    if (id === 'day') onFind?.({ day: day.getTime() })
+    else if (id === 'snooze') onSnooze?.()
+    else if (id === 'copy') navigator.clipboard.writeText(fullDate(m.date))
+  }
+  const accountMenu = async (e: ReactMouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    if (!acc) return
+    const id = await window.roarmail.popMenu([
+      { id: 'inbox', label: `${t.am_inbox} ${acc.description || acc.email}` },
+      { id: 'copy', label: t.ad_copyAddress },
+    ])
+    if (id === 'inbox') onFind?.({ account: acc.id })
+    else if (id === 'copy') navigator.clipboard.writeText(acc.email)
+  }
+  const fileMenu = async (e: ReactMouseEvent, a: MessageFull['attachments'][number]) => {
+    e.preventDefault(); e.stopPropagation()
+    const id = await window.roarmail.popMenu([
+      { id: 'open', label: window.roarmail.platform === 'darwin' ? t.preview : t.open },
+      { id: 'save', label: t.fl_saveAs },
+      { id: 'name', label: t.fl_copyName },
+      null,
+      { id: 'forward', label: t.fl_forward },
+      { id: 'all', label: t.fl_allFrom },
+    ])
+    if (id === 'open') window.roarmail.openAttachment(a.id)
+    else if (id === 'save') window.roarmail.saveAttachment(a.id).then((p) => { if (p) toast(`${t.savedTo} ${p.split(/[\\/]/).slice(-2, -1)[0] || ''}`) })
+    else if (id === 'name') navigator.clipboard.writeText(a.filename)
+    else if (id === 'forward') onCompose('forward', m)
+    else if (id === 'all') onContact?.(m.fromEmail)
+  }
   const chips = (list: Address[]) => list.map((a, i) => (
     <span key={a.address + i}>{i > 0 && ', '}<button type="button" className="addr" title={a.address} onClick={(e) => personMenu(e, a)} onContextMenu={(e) => personMenu(e, a)}>
       {acc && a.address.toLowerCase() === acc.email.toLowerCase() ? t.me : a.name || a.address}</button></span>
@@ -184,7 +238,10 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
           <div><SenderHover email={m.fromEmail} name={m.fromName} pictures={prefs.senderPictures} onOpen={onContact} onWrite={onWriteTo}><b className="addr-name" onClick={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })} onContextMenu={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })}>{m.fromName || m.fromEmail}</b></SenderHover> {m.fromName && <button type="button" className="addr muted" onClick={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })} onContextMenu={(e) => personMenu(e, { name: m.fromName, address: m.fromEmail })}>&lt;{m.fromEmail}&gt;</button>}</div>
           <div className="muted small">{t.to}: {chips(m.to)}{m.cc.length > 0 && <> · {t.cc}: {chips(m.cc)}</>}</div>
         </div>
-        <div className="muted small date">{fullDate(m.date)}{acc && <i className="acc-dot" style={{ background: acc.color }} title={acc.email} />}</div>
+        <div className="muted small date" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="addr" title={t.dm_title} onClick={(e) => dateMenu(e)} onContextMenu={(e) => dateMenu(e)}>{fullDate(m.date)}</button>
+          {acc && <button type="button" className="acc-dot-btn" title={acc.email} onClick={(e) => accountMenu(e)} onContextMenu={(e) => accountMenu(e)}><i className="acc-dot" style={{ background: acc.color }} /></button>}
+        </div>
         <div className="card-tools" onClick={(e) => e.stopPropagation()}>
           <button className="tool small" title={t.reply} onClick={() => onCompose('reply', m)}><Icon name="reply" size={16} /></button>
           <button className="tool small" title={t.forward} onClick={() => onCompose('forward', m)}><Icon name="forward" size={16} /></button>
@@ -234,10 +291,11 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
       {m.attachments.length > 0 && (
         <div className="atts">
           {m.attachments.map((a) => (
-            <div className="att" key={a.id}>
+            <div className="att" key={a.id} onContextMenu={(e) => fileMenu(e, a)}>
               <Icon name="clip" size={16} />
               <button className="att-name" onClick={() => window.roarmail.openAttachment(a.id)} title={window.roarmail.platform === 'darwin' ? t.preview : t.open}>{a.filename}</button>
               <span className="muted small">{size(a.size)}</span>
+              <button className="tool small" title={t.mm_more} onClick={(e) => fileMenu(e, a)}><Icon name="more" size={16} /></button>
               <button className="tool small" title={t.save} onClick={() => window.roarmail.saveAttachment(a.id).then((p) => {
                 if (p && prefs.downloadsFolder) window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: `${t.savedTo} ${p.split(/[\\/]/).slice(-2, -1)[0] || ''}` }))
               })}><Icon name="download" size={16} /></button>
