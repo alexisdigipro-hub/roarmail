@@ -1336,10 +1336,10 @@ export class MailService {
   }
 
   /** older mail with attachments that are not listed yet: their structure, folder by folder, in the background */
-  private backfilling = false
+  private listingFiles = false
   async backfillAttachments() {
-    if (this.backfilling) return
-    this.backfilling = true
+    if (this.listingFiles) return
+    this.listingFiles = true
     try {
       const folders = this.db.prepare(`select distinct f.id, f.path, f.account_id from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
         where m.has_attachments = 1 and not exists (select 1 from attachments a where a.message_id = m.id) and f.account_id in (select id from accounts where enabled = 1)`).all() as Row[]
@@ -1362,7 +1362,7 @@ export class MailService {
           })
         } catch { /* that folder did not answer: next time */ }
       }
-    } finally { this.backfilling = false }
+    } finally { this.listingFiles = false }
   }
 
   /** download the newest bodies in the background, for snippets and search */
@@ -1637,7 +1637,7 @@ export class MailService {
     const pick = kind ? all.filter((f) => f.kind === kind) : all
     if (sort === 'size') pick.sort((a, b) => b.size - a.size)
     this.backfillAttachments().catch(() => {})
-    return { files: pick.slice(0, 800), counts, indexing: this.backfilling }
+    return { files: pick.slice(0, 800), counts, indexing: this.listingFiles }
   }
 
   /** the companies in the address book: every address ending that is not a free mail service, with how many people */
