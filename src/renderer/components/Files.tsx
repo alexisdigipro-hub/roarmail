@@ -50,19 +50,20 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
   return (
     <div className="sheet-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
       <div className="sheet contacts files" tabIndex={-1}>
-        <div className="ct-head">
+        {/* one top row: the title, the search, which account, the order, close (Alex, 29 Oct: "the layout is bad") */}
+        <div className="fi-head">
           <h2>{t.fi_title}</h2>
-          <label className="search ct-search"><Icon name="search" size={15} /><input id="fi-q" autoFocus value={q} placeholder={t.fi_search} onChange={(e) => setQ(e.target.value)} /></label>
-          <select id="fi-acc" value={acc} onChange={(e) => setAcc(e.target.value)} title={t.accounts}>
+          <label className="fi-search"><Icon name="search" size={15} /><input id="fi-q" autoFocus value={q} placeholder={t.fi_search} onChange={(e) => setQ(e.target.value)} /></label>
+          <select id="fi-acc" className="fi-select" value={acc} onChange={(e) => setAcc(e.target.value)} title={t.accounts}>
             <option value="all">{t.allAccounts}</option>
             {accounts.filter((a) => a.enabled).map((a) => <option key={a.id} value={a.id}>{a.description || a.email}</option>)}
           </select>
-          <select id="fi-sort" value={sort} onChange={(e) => setSort(e.target.value as 'date' | 'size')} title={t.fl_sort}>
+          <select id="fi-sort" className="fi-select" value={sort} onChange={(e) => setSort(e.target.value as 'date' | 'size')} title={t.fl_sort}>
             <option value="date">{t.fi_newest}</option><option value="size">{t.fi_biggest}</option>
           </select>
           <button className="tool" title={t.done} onClick={onClose}><Icon name="close" /></button>
         </div>
-        <div className="seg lens ct-groups" ref={seg}>
+        <div className="seg lens fi-kinds" ref={seg}>
           <button className={!kind ? 'on' : ''} onClick={() => setKind('')}>{t.ct_all} <span className="muted">{total || ''}</span></button>
           {KINDS.filter((k) => res?.counts[k]).map((k) => (
             <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{t[`fk_${k}` as Key]} <span className="muted">{res!.counts[k]}</span></button>
@@ -79,11 +80,13 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
                   <b className="ellipsis">{f.filename}</b>
                   <small className="muted ellipsis">{f.fromName || f.fromEmail} · {f.subject || t.noSubject}</small>
                 </button>
-                <span className="muted small fi-meta">{size(f.size)}</span>
-                <span className="muted small fi-meta">{when(f.date)}</span>
-                {acc === 'all' && accOf(f.accountId) && <i className="acc-dot" style={{ background: accOf(f.accountId)!.color }} title={accOf(f.accountId)!.email} />}
-                <button className="tool small" title={t.save} onClick={() => window.roarmail.saveAttachment(f.id)}><Icon name="download" size={15} /></button>
-                <button className="tool small" title={t.mm_more} onClick={(e) => menu(e, f)}><Icon name="more" size={15} /></button>
+                <span className="muted small fi-size">{size(f.size)}</span>
+                <span className="muted small fi-date">{when(f.date)}</span>
+                <span className="fi-acc">{accOf(f.accountId) && <i className="acc-dot" style={{ background: accOf(f.accountId)!.color }} title={accOf(f.accountId)!.email} />}</span>
+                <span className="fi-acts">
+                  <button className="tool small" title={t.save} onClick={() => window.roarmail.saveAttachment(f.id)}><Icon name="download" size={15} /></button>
+                  <button className="tool small" title={t.mm_more} onClick={(e) => menu(e, f)}><Icon name="more" size={15} /></button>
+                </span>
               </div>
             ))}
         </div>
