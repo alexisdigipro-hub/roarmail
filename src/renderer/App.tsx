@@ -369,8 +369,6 @@ export default function App() {
 
   if (locked) return <LockScreen />
   if (!accounts) return <div className="boot"><div className="empty-mark boot-mark"><b>ROAR</b><i>MAIL</i></div></div>
-  if (!accounts.length) return <AddAccount first onDone={loadAccounts} onCancel={() => {}} />
-
   const busy = Object.values(syncing).some(Boolean)
   // pull down to refresh (Alex, 29 Oct: "swipe down on the messages and it loads"): at the top of the list, two fingers
   // pulling the list down on a trackpad (or a finger on a touch screen) draws the circle; far enough, and mail is
@@ -400,12 +398,14 @@ export default function App() {
     el.addEventListener('touchmove', move, { passive: true })
     el.addEventListener('touchend', up)
     return () => { el.removeEventListener('wheel', wheel); el.removeEventListener('touchstart', down); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', up); clearTimeout(p.idle) }
-  }, [])
+  }, [accounts.length > 0])
   useEffect(() => {
     if (!pulled) return undefined
     const id = setTimeout(() => setPulled(false), busy ? 30000 : 900)
     return () => clearTimeout(id)
   }, [pulled, busy])
+  if (!accounts.length) return <AddAccount first onDone={loadAccounts} onCancel={() => {}} />
+
   // Settings > Appearance: unread, all messages or nothing next to the inbox and the other folders
   const counter = (f: Folder) => {
     const mode = f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter
