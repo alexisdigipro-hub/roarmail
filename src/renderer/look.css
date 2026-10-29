@@ -796,5 +796,6 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; vertical-align: middle; }
 .pill > .ic { flex: none; }
 
-/* the wide rail's tools: two even rows of three, nothing left alone on a line (Alex, 29 Oct) */
-.rail.wide .rail-tools { display: grid; grid-template-columns: repeat(3, 36px); justify-content: center; gap: 8px; }
+/* the wide rail's tools: all six in one row, sized to fit whatever the rail's width (Alex, 29 Oct) */
+.rail.wide .rail-tools { display: grid; grid-template-columns: repeat(6, minmax(0, 36px)); justify-content: space-between; gap: 4px; width: 100%; }
+.rail.wide .rail-tools .acc { width: 100%; height: auto; aspect-ratio: 1; min-width: 0; }
