@@ -590,3 +590,17 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .swatch-pick.marker input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; }
 .fmt-bar .link-ask { display: flex; align-items: center; gap: 6px; flex: 1 1 240px; animation: rm-ref-in .25s var(--ease) both; }
 .fmt-bar .link-ask input { flex: 1; min-width: 0; height: 28px; padding: 0 10px; border: 0; border-radius: var(--r); background: var(--field); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge); font: inherit; font-size: 12.5px; outline: none; }
+
+/* the paperclip's menu (29 Oct 2026): attach, or RoarTransfer as one link */
+.attach-wrap { position: relative; display: inline-flex; }
+.attach-menu { position: absolute; top: 40px; right: -60px; z-index: 40; width: 290px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  border-radius: var(--r); background: var(--float); box-shadow: var(--shadow), inset 0 0 0 1px var(--edge-2);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); animation: rm-menu-in .3s var(--spring) both; transform-origin: top right; }
+.attach-menu button { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border-radius: 10px; text-align: left; color: var(--text); animation: rm-item-in .3s var(--ease) both; }
+.attach-menu button:nth-child(2) { animation-delay: 30ms; }
+.attach-menu button:hover { background: var(--glass-2); }
+.attach-menu button .ic { margin-top: 2px; flex: none; color: var(--muted); }
+.attach-menu button.rt .ic, .attach-menu button.rt b { color: var(--accent-2); }
+.attach-menu span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.attach-menu b { font-weight: 600; font-size: 13px; }
+.attach-menu small { font-size: 11.5px; color: var(--muted); line-height: 1.35; }

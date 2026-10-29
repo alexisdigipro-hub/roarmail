@@ -111,6 +111,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
   // the format bar shows unless it was hidden with the Aa button (29 Oct 2026: on by default, with every text tool)
   const [fmtBar, setFmtBar] = useState(() => { try { return localStorage.getItem('roarmail.fmtbar') !== '0' } catch { return true } })
   const [linkAsk, setLinkAsk] = useState<string | null>(null)
+  const [attachMenu, setAttachMenu] = useState(false)
   const [states, setStates] = useState<Record<string, boolean>>({})
   // files sent up with the RoarTransfer button; each becomes a link card in the message
   const [rt, setRt] = useState<string[]>([])
@@ -335,8 +336,20 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             <button className={`tool ${fmtBar ? 'on-filter' : ''}`} title={t.fm_bar} onClick={toggleFmt}><Icon name="aa" /></button>
             <button className="tool" title={t.emoji} onMouseDown={(e) => e.preventDefault()} onClick={() => { body.current?.focus(); window.roarmail.emojiPanel() }}><Icon name="emoji" /></button>
             <span className="sep" />
-            <button className="tool" title={t.attach} onClick={async () => { const p = await window.roarmail.pickFiles(); if (p.length) { setFiles([...files, ...p]); dirty.current = true } }}><Icon name="clip" /></button>
-            <button className="tool rt-btn" title={t.rt_button} onClick={transferNow}><Icon name="roarUp" /></button>
+            {/* the paperclip offers both: attach to the message, or send through RoarTransfer as one link (29 Oct 2026) */}
+            <span className="attach-wrap">
+              <button className={`tool ${attachMenu ? 'on-filter' : ''}`} title={t.attach} onClick={() => setAttachMenu((v) => !v)}><Icon name="clip" /></button>
+              {attachMenu && (
+                <div className="attach-menu" onMouseLeave={() => setAttachMenu(false)}>
+                  <button onClick={async () => { setAttachMenu(false); const p = await window.roarmail.pickFiles(); if (p.length) { setFiles([...files, ...p]); dirty.current = true } }}>
+                    <Icon name="clip" size={16} /><span><b>{t.attach}</b><small>{t.at_attachHint}</small></span>
+                  </button>
+                  <button className="rt" onClick={() => { setAttachMenu(false); transferNow() }}>
+                    <Icon name="roarUp" size={16} /><span><b>RoarTransfer</b><small>{roarReady ? t.at_rtHint : t.rt_needSignIn}</small></span>
+                  </button>
+                </div>
+              )}
+            </span>
           </div>
           <span className="sep" />
           <button className="tool" onClick={() => close()} title={t.discard}><Icon name="close" /></button>
