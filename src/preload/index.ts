@@ -55,6 +55,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   hideFolder: call('hideFolder') as MailApi['hideFolder'],
   hiddenFolders: call('hiddenFolders') as MailApi['hiddenFolders'],
   markFolderRead: call('markFolderRead') as MailApi['markFolderRead'],
+  emptyFolder: call('emptyFolder') as MailApi['emptyFolder'],
   syncFolderAll: call('syncFolderAll') as MailApi['syncFolderAll'],
   isDefaultMail: call('isDefaultMail') as MailApi['isDefaultMail'],
   makeDefaultMail: call('makeDefaultMail') as MailApi['makeDefaultMail'],

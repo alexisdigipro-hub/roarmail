@@ -283,6 +283,7 @@ app.whenReady().then(() => {
       { label: l.hide, enabled: f.role !== 'inbox', click: pick('hide') },
       { type: 'separator' },
       { label: l.read, enabled: f.unread > 0, click: pick('read') },
+      ...(f.role === 'trash' || f.role === 'spam' ? [{ label: l.empty, enabled: f.total > 0, click: pick('empty') }] : []),
       { type: 'separator' },
       { label: l.sync, click: pick('sync') },
       { type: 'separator' },
@@ -296,6 +297,7 @@ app.whenReady().then(() => {
   handle('mail:hideFolder', (_e, id, hidden) => mail.hideFolder(id, !!hidden))
   handle('mail:hiddenFolders', (_e, accountId) => mail.folders(accountId, true))
   handle('mail:markFolderRead', (_e, id) => mail.markFolderRead(id))
+  handle('mail:emptyFolder', (_e, target) => mail.emptyFolder(target || {}))
   handle('mail:syncFolderAll', (_e, id) => mail.syncFolderAll(id))
   handle('mail:senderIcons', (_e, emails: string[]) => mail.senderIcons(Array.isArray(emails) ? emails : []))
   handle('mail:emojiPanel', () => { if (app.isEmojiPanelSupported()) app.showEmojiPanel() })

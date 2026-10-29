@@ -749,6 +749,26 @@ export class MailService {
   }
 
   /** every message in the folder read, here at once and on the server */
+  /**
+   * Empty Trash / Empty Junk (29 Oct 2026): everything in it deleted for good, on the server first; one account's
+   * folder, or with a role alone the Trash (or Junk) of every account (the unified folder)
+   */
+  async emptyFolder(target: { folderId?: string; role?: 'trash' | 'spam' }) {
+    const list = target.folderId ? [this.folderRow(target.folderId)]
+      : this.db.prepare(`select f.* from folders f join accounts a on a.id = f.account_id where a.enabled = 1 and f.role = ?`).all(target.role || 'trash') as Row[]
+    for (const f of list) {
+      if (f.role !== 'trash' && f.role !== 'spam') continue
+      await this.run(f.account_id, async (c) => {
+        const lock = await c.getMailboxLock(f.path)
+        try { if ((c.mailbox as any).exists) await c.messageDelete('1:*') } finally { lock.release() }
+      })
+      this.dropFolderMessages(f.id)
+      this.recount(f.id)
+      this.emit({ type: 'messages', accountId: f.account_id }); this.emit({ type: 'folders', accountId: f.account_id })
+    }
+    this.badge()
+  }
+
   async markFolderRead(folderId: string) {
     const f = this.folderRow(folderId)
     this.db.prepare(`update messages set seen = 1 where id in (select message_id from message_folders where folder_id = ?)`).run(folderId)

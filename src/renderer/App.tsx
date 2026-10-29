@@ -246,10 +246,17 @@ export default function App() {
   }
 
   /** a folder's right-click menu (the Mac's own, from the engine) and what each choice does */
+  // Empty Trash / Empty Junk, from a folder's menu or the button over the list (29 Oct 2026)
+  const emptyBin = async (target: { folderId?: string; role?: 'trash' | 'spam' }) => {
+    if (!confirm(t.fm_emptyQ)) return
+    try { await api.emptyFolder(target); flash({ text: t.fm_emptied }) } catch (err) { flash({ text: clean(err) }) }
+  }
+
   const folderMenu = async (f: Folder, e: MouseEvent) => {
     e.preventDefault()
     const labels = { new: t.fm_new, sub: t.fm_sub, rename: t.fm_rename, red: t.qc_red, orange: t.qc_orange, yellow: t.fc_yellow, green: t.qc_green,
-      blue: t.qc_blue, purple: t.qc_purple, custom: t.fc_custom, nocolor: t.fc_none, hide: t.fm_hide, read: t.fm_read, sync: t.fm_sync, delete: t.fm_delete }
+      blue: t.qc_blue, purple: t.qc_purple, custom: t.fc_custom, nocolor: t.fc_none, hide: t.fm_hide, read: t.fm_read, sync: t.fm_sync, delete: t.fm_delete,
+      empty: f.role === 'spam' ? t.fm_emptyJunk : t.fm_emptyTrash }
     const pick = await api.folderMenu(f.id, labels)
     if (!pick) return
     try {
@@ -258,6 +265,7 @@ export default function App() {
       else if (pick === 'nocolor') await api.setFolderColor(f.id, null)
       else if (pick === 'hide') { await api.hideFolder(f.id, true); flash({ text: `${t.fm_hidden}`, ms: 3500 }) }
       else if (pick === 'read') await api.markFolderRead(f.id)
+      else if (pick === 'empty') await emptyBin({ folderId: f.id })
       else if (pick === 'sync') { flash({ text: t.fm_syncing, ms: 2500 }); const n = await api.syncFolderAll(f.id); flash({ text: `${t.fm_synced} ${n}`, ms: 3500 }) }
       else if (pick === 'delete' && confirm(`${t.fm_deleteQ}\n\n${f.name}`)) {
         await api.deleteFolder(f.id)
@@ -358,6 +366,8 @@ export default function App() {
     return f.role === 'sent' || f.role === 'trash' || f.role === 'drafts' ? 0 : f.unread
   }
   const accountOf = (id: string) => accounts.find((a) => a.id === id)
+  const viewRole = scope.folderId ? folders.find((f) => f.id === scope.folderId)?.role : scope.accountId === 'all' ? scope.role : undefined
+  const binRole = viewRole === 'trash' || viewRole === 'spam' ? viewRole : null
   const failed = outbox.filter((o) => o.status === 'failed')
   const waiting = outbox.filter((o) => o.status !== 'failed' && !o.scheduled && o.sendAt < Date.now() - 1000)
   const later = outbox.filter((o) => o.status !== 'failed' && o.scheduled)
@@ -463,6 +473,11 @@ export default function App() {
           <div className="drag" />
           <div className="row">
             <h3 className="grow ellipsis" key={title}>{title}</h3>
+            {binRole && !results && list.length > 0 && (
+              <button className="pill small ghost" onClick={() => emptyBin(scope.folderId ? { folderId: scope.folderId } : { role: binRole })}>
+                {binRole === 'spam' ? t.fm_emptyJunk : t.fm_emptyTrash}
+              </button>
+            )}
             <button className="tool" title={`${t.compose} (C)`} onClick={() => setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId })}><Icon name="compose" /></button>
           </div>
           {(searchOpen || query) && (

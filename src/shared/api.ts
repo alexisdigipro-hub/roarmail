@@ -72,7 +72,7 @@ export interface Folder {
 }
 
 /** what a folder's right-click menu asks for (the window then asks for a name, a colour or a yes) */
-export type FolderMenuChoice = 'new' | 'sub' | 'rename' | 'custom' | 'hide' | 'read' | 'sync' | 'delete' | 'nocolor' | `c:${string}`
+export type FolderMenuChoice = 'new' | 'sub' | 'rename' | 'custom' | 'hide' | 'read' | 'empty' | 'sync' | 'delete' | 'nocolor' | `c:${string}`
 
 export interface Address { name?: string; address: string }
 
@@ -354,6 +354,8 @@ export interface MailApi {
   hideFolder(folderId: string, hidden: boolean): Promise<void>
   hiddenFolders(accountId: string): Promise<Folder[]>
   markFolderRead(folderId: string): Promise<void>
+  /** Empty Trash / Empty Junk: one account's folder, or with a role the folder of every account */
+  emptyFolder(target: { folderId?: string; role?: 'trash' | 'spam' }): Promise<void>
   /** every message of the folder, not only the recent ones the first sync takes */
   syncFolderAll(folderId: string): Promise<number>
   /** the unified folders (All Inboxes, All Sent, All Trash…): every switched-on account's folder of that role together */
