@@ -75,7 +75,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar }: {
         <button className="tool" title={t.rm_task} onClick={() => last.current && onRoar('task', last.current)}><Icon name="tasks" /></button>
       </div>
 
-      <div className="read">
+      <div className="read" key={key}>
         <h2 className="subject">{row.subject || t.noSubject}{items.length > 1 && <span className="muted count-pill">{items.length}</span>}</h2>
         {items.map((m, i) => open.has(m.id)
           ? <MessageCard key={m.id} id={m.id} accounts={accounts} prefs={prefs} isLast={i === items.length - 1}

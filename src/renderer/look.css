@@ -12,9 +12,9 @@
 @keyframes rm-slide-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 @keyframes rm-badge-pop { from { transform: scale(.2); } to { transform: scale(1); } }
 @keyframes rm-drop-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
-@keyframes rm-side-in { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
-@keyframes rm-main-in { from { opacity: 0; transform: translateY(18px) scale(.985); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
-@keyframes rm-row-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes rm-side-in { from { opacity: 0; transform: translateX(-28px) scale(.97); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes rm-main-in { from { opacity: 0; transform: translateY(22px) scale(.97); filter: blur(8px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes rm-row-in { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
 @keyframes rm-drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-3%, 2%, 0) scale(1.06); } }
 @keyframes rm-shake { 10%, 90% { transform: translateX(-1px); } 20%, 80% { transform: translateX(2px); } 30%, 50%, 70% { transform: translateX(-4px); } 40%, 60% { transform: translateX(4px); } }
 
@@ -500,3 +500,80 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 @keyframes rm-quick-in { from { opacity: 0; transform: translateY(6px) scale(.82); } to { opacity: 1; transform: none; } }
 @keyframes rm-quick-btn { from { opacity: 0; transform: scale(.5); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .msg:hover .quick, .msg:hover .quick button { animation: none; } }
+
+/* =====================================================================
+   RoarMe's motion, everywhere in RoarMail (29 Oct 2026). Same rules as RoarMe: things arrive with a little spring,
+   only transform and opacity move, lists come in one row after another, menus open from where they belong,
+   and all of it stops with Motion off, Power saving or the system's Reduce motion.
+   ===================================================================== */
+@keyframes rm-menu-in { from { opacity: 0; transform: scale(.86); } to { opacity: 1; transform: none; } }
+@keyframes rm-zoom-in { from { opacity: 0; transform: scale(.88); } to { opacity: 1; transform: none; } }
+@keyframes rm-hop { 40% { transform: translateY(-4px) scale(1.12); } }
+@keyframes rm-ref-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes rm-title-in { from { opacity: 0; transform: translateY(6px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes rm-label-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+@keyframes rm-mark-pop { from { opacity: 0; transform: scale(.5) rotate(-12deg); } to { opacity: 1; transform: none; } }
+@keyframes rm-mark-breathe { 50% { transform: scale(1.07); filter: drop-shadow(0 0 22px color-mix(in srgb, var(--accent) 45%, transparent)); } }
+
+/* opening: the name pops in and breathes while the accounts load */
+.boot .boot-mark { opacity: 1; font-size: 40px; animation: rm-mark-pop .6s cubic-bezier(.3, 1.5, .5, 1) both, rm-mark-breathe 1.6s ease-in-out .6s infinite; }
+.app.intro .rail, .app.intro .folders { animation-duration: .75s; animation-timing-function: cubic-bezier(.2, .9, .25, 1); }
+.app.intro .viewer { animation-duration: .85s; animation-timing-function: cubic-bezier(.2, .9, .25, 1); }
+
+/* switching folder, account or filter: the title swaps softly, the rows come in one after another */
+.list-head h3 { animation: rm-title-in .4s var(--ease) both; }
+.rows > * { animation: rm-row-in .45s var(--ease) both; }
+.rows > :nth-child(2) { animation-delay: 22ms; } .rows > :nth-child(3) { animation-delay: 44ms; } .rows > :nth-child(4) { animation-delay: 66ms; }
+.rows > :nth-child(5) { animation-delay: 88ms; } .rows > :nth-child(6) { animation-delay: 110ms; } .rows > :nth-child(7) { animation-delay: 132ms; }
+.rows > :nth-child(8) { animation-delay: 154ms; } .rows > :nth-child(9) { animation-delay: 176ms; } .rows > :nth-child(10) { animation-delay: 198ms; }
+.rows > :nth-child(n + 11) { animation-delay: 220ms; }
+.list-empty .zero { animation: rm-mark-pop .6s cubic-bezier(.3, 1.5, .5, 1) both; }
+
+/* a row answers the mouse: its picture grows a little, a press sinks it */
+.msg .avatar { transition: transform .3s var(--spring); }
+.msg:hover .avatar { transform: scale(1.06); }
+.msg { transition: transform .18s var(--spring), background .2s, box-shadow .2s; }
+.msg:active { transform: scale(.985); }
+
+/* the chosen account and the chosen filter hop */
+.acc.on { animation: rm-hop .5s var(--spring); }
+.pill-group .tool.on-filter .ic, .folder.on .ic { animation: rm-hop .5s var(--spring); }
+
+/* the rail opening wide: names slide in after the pictures */
+.rail.wide .acc-label { animation: rm-label-in .35s var(--ease) both; }
+.acc-badge { animation: rm-badge-pop .5s var(--spring) both; }
+
+/* opening a message: the reader slides in, each message of the conversation follows, attachments pop */
+.read > * { animation-duration: .42s; }
+.read > :nth-child(2) { animation-delay: 40ms; } .read > :nth-child(3) { animation-delay: 80ms; } .read > :nth-child(n + 4) { animation-delay: 120ms; }
+.viewer .toolbar .tool { animation: rm-item-in .38s var(--ease) both; }
+.viewer .toolbar .tool:nth-child(2) { animation-delay: 20ms; } .viewer .toolbar .tool:nth-child(3) { animation-delay: 40ms; }
+.viewer .toolbar .tool:nth-child(5) { animation-delay: 60ms; } .viewer .toolbar .tool:nth-child(6) { animation-delay: 80ms; }
+.viewer .toolbar .tool:nth-child(7) { animation-delay: 100ms; } .viewer .toolbar .tool:nth-child(8) { animation-delay: 120ms; }
+.viewer .toolbar .tool:nth-child(9) { animation-delay: 140ms; } .viewer .toolbar .tool:nth-child(n + 10) { animation-delay: 160ms; }
+.atts .att { animation: rm-menu-in .4s var(--spring) both; transform-origin: left center; }
+.atts .att:nth-child(2) { animation-delay: 40ms; } .atts .att:nth-child(3) { animation-delay: 80ms; } .atts .att:nth-child(n + 4) { animation-delay: 120ms; }
+.viewer.empty .empty-mark, .viewer.empty > p { animation: rm-zoom-in .5s var(--ease) both; }
+
+/* menus open from their button with a spring, their lines follow */
+.pop { animation: rm-menu-in .32s var(--spring) both; transform-origin: top left; }
+.sort-pop > * { animation: rm-item-in .3s var(--ease) both; }
+.sort-pop > :nth-child(2) { animation-delay: 22ms; } .sort-pop > :nth-child(3) { animation-delay: 44ms; } .sort-pop > :nth-child(4) { animation-delay: 66ms; }
+.sort-pop > :nth-child(5) { animation-delay: 88ms; } .sort-pop > :nth-child(6) { animation-delay: 110ms; } .sort-pop > :nth-child(n + 7) { animation-delay: 132ms; }
+.search.search-cap { animation: rm-menu-in .32s var(--spring) both; transform-origin: left center; }
+.list-head .filters .pill-group { animation: rm-pop .3s var(--spring) both; }
+
+/* settings: each card comes in after the one above it */
+.set-page .card { animation: rm-item-in .42s var(--ease) both; }
+.set-page .card:nth-of-type(2) { animation-delay: 30ms; } .set-page .card:nth-of-type(3) { animation-delay: 60ms; }
+.set-page .card:nth-of-type(4) { animation-delay: 90ms; } .set-page .card:nth-of-type(n + 5) { animation-delay: 120ms; }
+
+/* the composer: files added come up from below */
+.composer .chip { animation: rm-ref-in .3s var(--ease) both; }
+
+/* while a column is being resized nothing moves */
+html.resizing *, html.resizing *::before, html.resizing *::after { animation-play-state: paused !important; transition: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-delay: 0ms !important; animation-iteration-count: 1 !important; }
+}

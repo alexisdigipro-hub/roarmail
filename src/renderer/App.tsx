@@ -346,7 +346,7 @@ export default function App() {
   }, [scope, folders, results, list])
 
   if (locked) return <LockScreen />
-  if (!accounts) return <div className="boot"><div className="spinner" /></div>
+  if (!accounts) return <div className="boot"><div className="empty-mark boot-mark"><b>ROAR</b><i>MAIL</i></div></div>
   if (!accounts.length) return <AddAccount first onDone={loadAccounts} onCancel={() => {}} />
 
   const busy = Object.values(syncing).some(Boolean)
@@ -462,7 +462,7 @@ export default function App() {
         <div className="list-head">
           <div className="drag" />
           <div className="row">
-            <h3 className="grow ellipsis">{title}</h3>
+            <h3 className="grow ellipsis" key={title}>{title}</h3>
             <button className="tool" title={`${t.compose} (C)`} onClick={() => setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId })}><Icon name="compose" /></button>
           </div>
           {(searchOpen || query) && (
@@ -544,7 +544,8 @@ export default function App() {
             </div>
           ))}
         </div>
-        <div className="rows">
+        {/* a new folder, account or filter brings its rows in again, one after another (RoarMe's stagger) */}
+        <div className="rows" key={`${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`}>
           {list.map((r) => (
             <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
               prefs={prefs} onClick={(e) => click(r, e)} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
