@@ -366,6 +366,40 @@ export default function App() {
   if (!accounts.length) return <AddAccount first onDone={loadAccounts} onCancel={() => {}} />
 
   const busy = Object.values(syncing).some(Boolean)
+  // pull down to refresh (Alex, 29 Oct: "swipe down on the messages and it loads"): at the top of the list, two fingers
+  // pulling the list down on a trackpad (or a finger on a touch screen) draws the circle; far enough, and mail is
+  // fetched from every account, as the refresh button does
+  const PULL_AT = 72
+  const [pull, setPull] = useState(0)
+  const [pulled, setPulled] = useState(false) // a pull asked for mail: the circle spins until it has come
+  const pullRef = useRef({ v: 0, idle: 0 as unknown as ReturnType<typeof setTimeout>, y0: -1, fired: false })
+  const listRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return undefined
+    const p = pullRef.current
+    const rowsAtTop = (t: EventTarget | null) => { const rows = (t as HTMLElement | null)?.closest?.('.rows') as HTMLElement | null; return !!rows && rows.scrollTop <= 0 }
+    const show = (v: number) => { p.v = Math.max(0, Math.min(110, v)); setPull(p.v) }
+    const end = () => { if (p.v >= PULL_AT && !p.fired) { p.fired = true; setPulled(true); api.refresh() } show(0); setTimeout(() => { p.fired = false }, 600) }
+    const wheel = (e: globalThis.WheelEvent) => {
+      if (!rowsAtTop(e.target) || e.ctrlKey) return
+      if (e.deltaY < 0) { show(p.v - e.deltaY * 0.45); clearTimeout(p.idle); p.idle = setTimeout(end, 140) }
+      else if (p.v) { show(p.v - e.deltaY); clearTimeout(p.idle); p.idle = setTimeout(end, 140) }
+    }
+    const down = (e: TouchEvent) => { p.y0 = rowsAtTop(e.target) ? e.touches[0].clientY : -1 }
+    const move = (e: TouchEvent) => { if (p.y0 >= 0) { const d = e.touches[0].clientY - p.y0; if (d > 0) show(d * 0.55) } }
+    const up = () => { if (p.y0 >= 0) { p.y0 = -1; end() } }
+    el.addEventListener('wheel', wheel, { passive: true })
+    el.addEventListener('touchstart', down, { passive: true })
+    el.addEventListener('touchmove', move, { passive: true })
+    el.addEventListener('touchend', up)
+    return () => { el.removeEventListener('wheel', wheel); el.removeEventListener('touchstart', down); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', up); clearTimeout(p.idle) }
+  }, [])
+  useEffect(() => {
+    if (!pulled) return undefined
+    const id = setTimeout(() => setPulled(false), busy ? 30000 : 900)
+    return () => clearTimeout(id)
+  }, [pulled, busy])
   // Settings > Appearance: unread, all messages or nothing next to the inbox and the other folders
   const counter = (f: Folder) => {
     const mode = f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter
@@ -479,7 +513,7 @@ export default function App() {
       )}
       {<Splitter col="folders" width={widths.folders} onChange={setWidth} title={t.resizeCol} />}
 
-      <section className="list">
+      <section className="list" ref={listRef}>
         <div className="list-head">
           <div className="drag" />
           <div className="row">
@@ -569,6 +603,10 @@ export default function App() {
               <button className="pill small ghost" onClick={async () => { const d = await api.cancelSend(o.id); if (d) setCompose({ kind: 'draft', draft: d }) }}>{t.edit}</button>
             </div>
           ))}
+        </div>
+        {/* pull down to refresh: the circle fills as the list is pulled, spins while mail is being fetched */}
+        <div className={`pull-refresh${pull >= PULL_AT ? ' ready' : ''}${pulled && !pull ? ' busy' : ''}`} style={{ height: pull ? Math.min(pull, 80) : pulled ? 44 : 0 }} aria-hidden="true">
+          <span style={{ transform: `rotate(${pull * 3}deg)`, opacity: pulled && !pull ? 1 : Math.min(1, pull / PULL_AT) }}><Icon name="refresh" size={18} /></span>
         </div>
         {/* a new folder, account or filter brings its rows in again, one after another (RoarMe's stagger) */}
         <div className="rows" key={`${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`}>
