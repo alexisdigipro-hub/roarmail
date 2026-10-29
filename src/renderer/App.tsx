@@ -246,6 +246,12 @@ export default function App() {
   }
 
   /** a folder's right-click menu (the Mac's own, from the engine) and what each choice does */
+  // Sync all messages of the whole mail: every folder of the account shown, or of every account (29 Oct 2026)
+  const syncEverything = async (accountId: string) => {
+    flash({ text: t.fm_syncingEverything, ms: 3000 })
+    try { const n = await api.syncEverything(accountId); flash({ text: `${t.fm_synced} ${n}`, ms: 3500 }) } catch (err) { flash({ text: clean(err) }) }
+  }
+
   // Empty Trash / Empty Junk, from a folder's menu or the button over the list (29 Oct 2026)
   const emptyBin = async (target: { folderId?: string; role?: 'trash' | 'spam' }) => {
     if (!confirm(t.fm_emptyQ)) return
@@ -416,6 +422,7 @@ export default function App() {
           <div className="acct-name row-name">
             <span className="grow name-col"><b className="plain-case">{t.allAccounts}</b>
               <small className="muted block">{accounts.length} {t.accounts.toLowerCase()}</small></span>
+            <button className="tool small" title={t.fm_syncEverything} onClick={() => syncEverything('all')}><Icon name="download" size={15} /></button>
             <button className={`link small ${editUnified ? 'on' : ''}`} onClick={() => setEditUnified((v) => !v)}>{editUnified ? t.done : t.edit}</button>
           </div>
           <div className="folder-list list-lens lens" ref={folderLens}>
@@ -446,9 +453,10 @@ export default function App() {
       {scope.accountId !== 'all' && (
         <aside className="folders">
           <div className="drag" />
-          <div className="acct-name">
-            <b>{accountOf(scope.accountId)?.description || accountOf(scope.accountId)?.displayName || accountOf(scope.accountId)?.email.split('@')[0]}</b>
-            <span className="muted small">{accountOf(scope.accountId)?.email}</span>
+          <div className="acct-name row-name">
+            <span className="grow name-col"><b>{accountOf(scope.accountId)?.description || accountOf(scope.accountId)?.displayName || accountOf(scope.accountId)?.email.split('@')[0]}</b>
+              <small className="muted block">{accountOf(scope.accountId)?.email}</small></span>
+            <button className="tool small" title={t.fm_syncEverything} onClick={() => syncEverything(scope.accountId)}><Icon name="download" size={15} /></button>
           </div>
           <div className="folder-list list-lens lens" ref={folderLens}>
           {folders.map((f) => {

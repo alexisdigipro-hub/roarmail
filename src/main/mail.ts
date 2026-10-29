@@ -507,11 +507,7 @@ export class MailService {
     if (this.backfilling.has(accountId)) return
     this.backfilling.add(accountId)
     try {
-      const order = ['inbox', 'sent', 'archive', 'drafts', '', 'trash', 'spam']
-      const rank = (f: Row) => order.indexOf(f.role || '')
-      const list = (this.db.prepare(`select id, role from folders where account_id = ? and hidden = 0
-        and (role is null or role not in ('all', 'flagged'))`).all(accountId) as Row[]).sort((a, b) => rank(a) - rank(b))
-      for (const f of list) {
+      for (const f of this.allFolders(accountId)) {
         if (!this.exists(accountId) || this.state.get(accountId)?.state !== 'online') return
         await this.backfillFolder(accountId, f.id).catch(() => {})
       }
@@ -520,11 +516,38 @@ export class MailService {
     }
   }
 
-  private async backfillFolder(accountId: string, folderId: string) {
+  /** the folders the whole-mail download goes through, in its order */
+  private allFolders(accountId: string): Row[] {
+    const order = ['inbox', 'sent', 'archive', 'drafts', '', 'trash', 'spam']
+    const rank = (f: Row) => order.indexOf(f.role || '')
+    return (this.db.prepare(`select id, role from folders where account_id = ? and hidden = 0
+      and (role is null or role not in ('all', 'flagged'))`).all(accountId) as Row[]).sort((a, b) => rank(a) - rank(b))
+  }
+
+  /**
+   * Sync all messages, the whole mail (29 Oct 2026): every folder of the account (or of every account) brought down
+   * in full now, the same work the background download does, started by hand; returns how many messages came
+   */
+  async syncEverything(accountId: string): Promise<number> {
+    const ids = accountId === 'all' ? this.accounts().filter((a) => a.enabled).map((a) => a.id) : [accountId]
+    let added = 0
+    await Promise.all(ids.map(async (id) => {
+      this.emit({ type: 'sync', accountId: id, busy: true })
+      try {
+        await this.syncFolders(id)
+        for (const f of this.allFolders(id)) added += await this.backfillFolder(id, f.id, true).catch(() => 0)
+      } finally {
+        this.emit({ type: 'sync', accountId: id, busy: false })
+      }
+    }))
+    return added
+  }
+
+  private async backfillFolder(accountId: string, folderId: string, byHand = false): Promise<number> {
     const path = () => (this.db.prepare('select path from folders where id = ?').get(folderId) as Row | undefined)?.path as string | undefined
     const missing = await this.run(accountId, async (c) => {
       const p = path()
-      if (!p) return []
+      if (!p) return [] as number[]
       const lock = await c.getMailboxLock(p)
       try {
         const all = ((await c.search({ all: true }, { uid: true })) || []) as number[]
@@ -532,11 +555,12 @@ export class MailService {
         return all.filter((u) => !have.has(u)).reverse()
       } finally { lock.release() }
     })
-    if (!missing.length) return
+    if (!missing.length) return 0
+    let added = 0
     const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe'] }
     if (this.accountRow(accountId).provider === 'gmail') query.threadId = true
     for (let i = 0; i < missing.length; i += 200) {
-      if (!this.exists(accountId) || this.state.get(accountId)?.state !== 'online') return
+      if (!this.exists(accountId) || (!byHand && this.state.get(accountId)?.state !== 'online')) return added
       const stored = await this.run(accountId, async (c) => {
         const p = path()
         if (!p) return false
@@ -544,16 +568,17 @@ export class MailService {
         try {
           const batch: Row[] = []
           for await (const m of c.fetch(missing.slice(i, i + 200), query as any, { uid: true })) batch.push(m as any)
-          this.storeFetched(accountId, folderId, batch)
+          added += this.storeFetched(accountId, folderId, batch).length
           return true
         } finally { lock.release() }
       })
-      if (!stored) return
+      if (!stored) return added
       this.assignThreads(accountId)
       this.recount(folderId)
       this.emit({ type: 'messages', accountId })
       this.emit({ type: 'folders', accountId })
     }
+    return added
   }
 
   /** what the account signs in with: its password, or for Sign in with Microsoft an access token, renewed before it runs out */
@@ -940,10 +965,13 @@ export class MailService {
       values (@id, @account_id, @message_id, @in_reply_to, @refs, @gm_thrid, @from_name, @from_email, @to_json, @cc_json,
       @reply_to, @subject, '', @date, @seen, @flagged, @answered, @has_attachments, @size, @list_unsubscribe, @created_at)`)
     const link = this.db.prepare('insert or ignore into message_folders (message_id, folder_id, uid) values (?,?,?)')
+    // the background download and a sync started by hand can fetch the same message: it is kept once
+    const have = this.db.prepare('select 1 from message_folders where folder_id = ? and uid = ?')
     const contact = this.db.prepare(`insert into contacts (email, name, last_used, use_count) values (?,?,?,0)
       on conflict(email) do update set name = coalesce(contacts.name, excluded.name)`)
     this.db.transaction(() => {
       for (const m of batch) {
+        if (have.get(folderId, m.uid)) continue
         const env = m.envelope || {}
         const from = env.from?.[0] || {}
         const headers = String(m.headers || '')

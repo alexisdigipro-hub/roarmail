@@ -356,6 +356,8 @@ export interface MailApi {
   markFolderRead(folderId: string): Promise<void>
   /** Empty Trash / Empty Junk: one account's folder, or with a role the folder of every account */
   emptyFolder(target: { folderId?: string; role?: 'trash' | 'spam' }): Promise<void>
+  /** every message of every folder of the account ('all' = every account) downloaded now; how many came */
+  syncEverything(accountId: string): Promise<number>
   /** every message of the folder, not only the recent ones the first sync takes */
   syncFolderAll(folderId: string): Promise<number>
   /** the unified folders (All Inboxes, All Sent, All Trash…): every switched-on account's folder of that role together */

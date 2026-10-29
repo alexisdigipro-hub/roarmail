@@ -577,3 +577,6 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-delay: 0ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Sync all messages, the whole mail: a small button beside the account name (29 Oct 2026) */
+.row-name .tool { flex: none; margin-top: -4px; }

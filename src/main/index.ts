@@ -299,6 +299,7 @@ app.whenReady().then(() => {
   handle('mail:markFolderRead', (_e, id) => mail.markFolderRead(id))
   handle('mail:emptyFolder', (_e, target) => mail.emptyFolder(target || {}))
   handle('mail:syncFolderAll', (_e, id) => mail.syncFolderAll(id))
+  handle('mail:syncEverything', (_e, accountId) => mail.syncEverything(String(accountId || 'all')))
   handle('mail:senderIcons', (_e, emails: string[]) => mail.senderIcons(Array.isArray(emails) ? emails : []))
   handle('mail:emojiPanel', () => { if (app.isEmojiPanelSupported()) app.showEmojiPanel() })
   // Settings > Accounts > Picture: any image, cut to the middle square and made small (160 px) before it is kept

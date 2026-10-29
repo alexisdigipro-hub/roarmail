@@ -187,6 +187,7 @@ export function createDemo(): MailApi & { update: any } {
     setFolderColor: async (id, color) => { const f = folders.find((x) => x.id === id); if (f) { f.color = color; emit({ type: 'folders', accountId: f.accountId }) } },
     hideFolder: async () => {},
     hiddenFolders: async () => [],
+    syncEverything: async () => 0,
     emptyFolder: async ({ folderId, role }) => {
       const hit = (m: DemoMsg) => folderId ? m.folderId === folderId : folders.some((f) => f.id === m.folderId && f.role === role)
       for (let i = msgs.length - 1; i >= 0; i--) if (hit(msgs[i])) msgs.splice(i, 1)
