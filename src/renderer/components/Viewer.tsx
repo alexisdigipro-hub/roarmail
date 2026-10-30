@@ -379,7 +379,10 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
     const css = `<style>html,body{margin:0;padding:0;background:#fff;color:#1a1a1a;font:${TEXT_SIZES[prefs.textSize] ?? 15.5}px/1.55 ${font};word-wrap:break-word;overflow-wrap:anywhere}
       body{padding:18px 22px}img{max-width:100%;height:auto}pre.plain{white-space:pre-wrap;font:inherit;margin:0}a{color:#c00000}
       ${prefs.plainMono ? `pre.plain{font-family:${mono};font-size:.92em}` : ''}${quotes}table{max-width:100%}</style>`
-    return { html: css + clean, blocked, trackers }
+    // with pictures off, the frame itself refuses anything from the network (security review 29 Oct 2026): a <style>
+    // block, an entity-hidden address, image-set() or an SVG image could otherwise still call home
+    const csp = images ? '' : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid: blob:; style-src 'unsafe-inline'; font-src data:">`
+    return { html: csp + css + clean, blocked, trackers }
   }, [m, images, prefs.detectLinks, prefs.blockTrackers, prefs.textSize, prefs.messageFont, prefs.monoFont, prefs.plainMono, prefs.quoteColors, prefs.quote1, prefs.quote2, prefs.quote3])
   // what Print and Save as PDF put on paper: the body exactly as shown here
   if (shown) shown.current = html

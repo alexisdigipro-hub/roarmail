@@ -406,7 +406,7 @@ export type MailEvent =
 export interface MailApi {
   platform: string
   autodetect(email: string): Promise<ServerConfig>
-  testAccount(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }>
+  testAccount(cfg: ServerConfig, password: string, approve?: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string; suggest?: string }>
   addAccount(cfg: ServerConfig, password: string): Promise<Account>
   /** Sign in with Microsoft in the browser, then the account is added (or an existing one signs in again) */
   addMicrosoft(cfg: ServerConfig): Promise<{ ok: true } | { ok: false; error: string }>

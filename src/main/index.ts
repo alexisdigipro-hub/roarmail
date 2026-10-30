@@ -1,6 +1,8 @@
 // RoarMail's main process: the window, the mail engine and the IPC door the screens use.
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, systemPreferences, Tray } from 'electron'
 import fs from 'fs'
+import { execFileSync } from 'child_process'
+import { pathToFileURL } from 'url'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
 import os from 'os'
 import path from 'path'
@@ -101,7 +103,12 @@ function createWindow() {
   win.once('ready-to-show', () => { if (!hidden || shownOnce) win?.show(); shownOnce = true })
   // nothing ever navigates the app window; links go to the system browser
   win.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); openSafe(url) } })
+  // only RoarMail's own page: a file dropped on the window (an .html from a mail) must not take it over
+  const home = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href
+  win.webContents.on('will-navigate', (e, url) => { if (url.split('#')[0] !== home) { e.preventDefault(); if (!url.startsWith('file:')) openSafe(url) } })
+  const allowed = new Set(['clipboard-sanitized-write', 'fullscreen', 'local-fonts'])
+  win.webContents.session.setPermissionRequestHandler((_w, p, cb) => cb(allowed.has(p)))
+  win.webContents.session.setPermissionCheckHandler((_w, p) => allowed.has(p))
   editMenu(win)
   win.on('close', (e) => { if ((process.platform === 'darwin' || background) && !quitting) { e.preventDefault(); win?.hide() } })
   win.on('closed', () => { win = null })
@@ -114,6 +121,18 @@ function createWindow() {
   })
 }
 
+/**
+ * A file from a mail carries the system's "downloaded from the internet" mark (security review 29 Oct 2026), so
+ * Gatekeeper on a Mac, and SmartScreen and Office's Protected View on Windows, still check it before it runs.
+ */
+const RISKY = /\.(exe|com|bat|cmd|scr|pif|msi|msp|hta|js|jse|vbs|vbe|wsf|wsh|ps1|psm1|lnk|url|reg|cpl|jar|app|command|tool|pkg|mpkg|terminal|workflow|scpt|applescript|sh|dmg|iso)$/i
+function markDownloaded(file: string) {
+  try {
+    if (process.platform === 'win32') fs.writeFileSync(`${file}:Zone.Identifier`, '[ZoneTransfer]\r\nZoneId=3\r\n')
+    else if (process.platform === 'darwin') execFileSync('xattr', ['-w', 'com.apple.quarantine', `0081;${Math.floor(Date.now() / 1000).toString(16)};RoarMail;`, file])
+  } catch { /* a disk that keeps no such marks */ }
+}
+
 function openSafe(url: string) {
   if (/^roarmail:/i.test(url)) openLink(url)
   else if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url, { activate: !linksInBackground() })
@@ -123,8 +142,10 @@ function openSafe(url: string) {
 let linksInBackground = () => false
 
 function mailtoEvent(url: string): MailEvent {
-  const u = new URL(url)
-  return { type: 'compose', to: decodeURIComponent(u.pathname), subject: u.searchParams.get('subject') || undefined, body: u.searchParams.get('body') || undefined }
+  try {
+    const u = new URL(url)
+    return { type: 'compose', to: decodeURIComponent(u.pathname), subject: u.searchParams.get('subject') || undefined, body: u.searchParams.get('body') || undefined }
+  } catch { return { type: 'compose', to: '' } } // a broken mailto: link opens an empty message instead of stopping the app
 }
 
 function handleMailto(url: string) {
@@ -269,7 +290,7 @@ app.whenReady().then(() => {
 
   handle('mail:platform', () => process.platform)
   handle('mail:autodetect', (_e, email: string) => autodetect(email))
-  handle('mail:testAccount', (_e, cfg, pass) => mail.test(cfg, pass))
+  handle('mail:testAccount', (_e, cfg, pass, approve) => mail.test(cfg, pass, typeof approve === 'string' ? approve : undefined))
   handle('mail:addAccount', (_e, cfg, pass) => mail.add(cfg, pass))
   handle('mail:addMicrosoft', (_e, cfg) => mail.addMicrosoft(cfg))
   handle('mail:removeAccount', (_e, id) => mail.remove(id))
@@ -404,7 +425,7 @@ app.whenReady().then(() => {
   // it carries the mail passwords; without the passphrase the file is noise
   const KDF = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
   handle('mail:exportSetup', async (_e, pass: string) => {
-    if (typeof pass !== 'string' || pass.length < 6) throw new Error('short-pass')
+    if (typeof pass !== 'string' || pass.length < 10) throw new Error('short-pass')
     const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('desktop'), `RoarMail setup ${new Date().toISOString().slice(0, 10)}.roarmail`), filters: [{ name: 'RoarMail setup', extensions: ['roarmail'] }] })
     if (r.canceled || !r.filePath) return null
     const salt = randomBytes(16), iv = randomBytes(12), key = scryptSync(pass, salt, 32, KDF)
@@ -564,6 +585,9 @@ app.whenReady().then(() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-'))
     const file = path.join(dir, a.filename)
     fs.writeFileSync(file, a.content)
+    markDownloaded(file)
+    // a program or script is never started from a mail: it is shown in its folder, marked as from the internet
+    if (RISKY.test(a.filename)) { shell.showItemInFolder(file); return }
     // Mac: shown in Quick Look over the window (29 Oct 2026), which also has a button to open it in its app
     if (process.platform === 'darwin' && win) win.previewFile(file, a.filename)
     else await shell.openPath(file)
@@ -577,11 +601,13 @@ app.whenReady().then(() => {
       let file = path.join(dir, a.filename)
       for (let i = 2; fs.existsSync(file); i++) file = path.join(dir, `${base} ${i}${ext}`)
       fs.writeFileSync(file, a.content)
+      markDownloaded(file)
       return file
     }
     const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('downloads'), a.filename) })
     if (r.canceled || !r.filePath) return null
     fs.writeFileSync(r.filePath, a.content)
+    markDownloaded(r.filePath)
     return r.filePath
   })
 

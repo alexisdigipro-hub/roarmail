@@ -185,7 +185,9 @@ function certificateHost(host: string, port: number): Promise<string | null> {
   return new Promise((resolve) => {
     const s = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: 10e3 }, () => {
       const alt = String(s.getPeerCertificate()?.subjectaltname || '')
+      const trusted = !s.authorizationError // the certificate itself is valid; only its name differs
       s.end()
+      if (!trusted) return resolve(null)
       const names = alt.split(',').map((x) => x.trim().replace(/^DNS:/, '')).filter((x) => x && !x.startsWith('*'))
       resolve(names[0] || null)
     })
@@ -286,7 +288,12 @@ export class MailService {
       })
   }
 
-  async test(cfg: ServerConfig, password: Cred): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }> {
+  /**
+   * Connects once to see that the settings work. A server whose certificate is for another name (a hosting company's
+   * shared server) is used only when the person has said yes to that name (approve); otherwise its name comes back to
+   * be asked about (security review 29 Oct 2026: switching quietly let a network attacker collect the password).
+   */
+  async test(cfg: ServerConfig, password: Cred, approve?: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string; suggest?: string }> {
     const c = { ...cfg }
     const tryImap = async () => { const cl = new ImapFlow(imapOptions(c, password)); await cl.connect(); await cl.logout() }
     const trySmtp = async () => { const t = smtpTransport(c, password); try { await t.verify() } finally { t.close() } }
@@ -295,6 +302,7 @@ export class MailService {
         if (!isAltnameError(e)) throw e
         const real = await certificateHost(c.imapHost, c.imapPort)
         if (!real) throw e
+        if (real !== approve) return { ok: false, error: 'cert-host', suggest: real }
         if (c.smtpHost === c.imapHost) c.smtpHost = real
         c.imapHost = real
         await tryImap()
@@ -303,6 +311,7 @@ export class MailService {
         if (!isAltnameError(e)) throw e
         const real = await certificateHost(c.smtpHost, c.smtpPort)
         if (!real) throw e
+        if (real !== approve) return { ok: false, error: 'cert-host', suggest: real }
         c.smtpHost = real
         await trySmtp()
       }
@@ -361,7 +370,7 @@ export class MailService {
     const r = this.accountRow(id)
     const pass = password || open(r.secret)
     const t = await this.test({ ...cfg, email: r.email, displayName: r.display_name, provider: r.provider }, password || await this.cred(r))
-    if (!t.ok) return t
+    if (!t.ok) return { ok: false, error: t.suggest ? `cert-host|${t.suggest}` : t.error }
     const c = t.cfg
     this.db.prepare(`update accounts set imap_host = ?, imap_port = ?, imap_tls = ?, smtp_host = ?, smtp_port = ?, smtp_tls = ?, username = ?,
       secret = ?, updated_at = ? where id = ?`).run(c.imapHost, c.imapPort, c.imapTls, c.smtpHost, c.smtpPort, c.smtpTls, c.username, seal(pass), now(), id)
@@ -466,7 +475,7 @@ export class MailService {
    */
   async senderIcons(emails: string[]): Promise<Record<string, string | null>> {
     const out: Record<string, string | null> = {}
-    if (!this.settings().senderPictures) { for (const e of emails) out[e] = null; return out }
+    if (!this.settings().senderPictures || this.settings().privacyMode) { for (const e of emails) out[e] = null; return out }
     const get = this.db.prepare('select data, fetched_at from sender_icons where key = ?')
     const put = this.db.prepare(`insert into sender_icons (key, data, fetched_at) values (?,?,?)
       on conflict(key) do update set data = excluded.data, fetched_at = excluded.fetched_at`)
@@ -1527,9 +1536,12 @@ export class MailService {
       if (r.ok) return 'done'
     }
     if (mailto) {
+      // one address and a fixed text: the sender of the list cannot make RoarMail mail others, or mail its own words
       const u = new URL(mailto)
-      this.send({ accountId: row.account_id, to: decodeURIComponent(u.pathname), subject: u.searchParams.get('subject') || 'unsubscribe',
-        html: u.searchParams.get('body') || 'unsubscribe', text: u.searchParams.get('body') || 'unsubscribe' })
+      const to = decodeURIComponent(u.pathname).split(',')[0].trim()
+      if (!/^[^\s@,<>]+@[^\s@,<>]+\.[^\s@,<>]+$/.test(to)) return 'none'
+      this.send({ accountId: row.account_id, to, subject: (u.searchParams.get('subject') || 'unsubscribe').replace(/[\r\n]/g, ' ').slice(0, 200),
+        html: 'unsubscribe', text: 'unsubscribe' })
       return 'sent'
     }
     if (web || links.find((l) => /^http:/i.test(l))) { shell.openExternal((web || links.find((l) => /^http:/i.test(l)))!); return 'opened' }

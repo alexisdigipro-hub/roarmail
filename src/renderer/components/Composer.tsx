@@ -11,6 +11,10 @@ import { TimePicker } from './TimePicker'
 import { FONTS } from '../look'
 import { TemplatesMenu, filled, templateValues } from './Templates'
 
+/** a quoted message inside the writing window: no pictures from the network in its styles, nothing that could sit
+ * over the app (security review 29 Oct 2026) */
+const tame = (html: string) => html.replace(/url\(\s*['"]?\s*(https?:)?\/\/[^)]*\)/gi, 'none').replace(/position\s*:\s*(fixed|absolute|sticky)/gi, 'position:static')
+
 export interface ComposeSeed {
   kind: ComposeKind | 'new' | 'draft'
   accountId?: string
@@ -56,7 +60,7 @@ function transferCard(l: RoarTransferLink) {
 function prefill(seed: ComposeSeed, accounts: Account[]) {
   if (seed.kind === 'draft' && seed.draft) {
     const d = seed.draft
-    return { accountId: d.accountId, to: d.to, cc: d.cc || '', bcc: d.bcc || '', subject: d.subject, body: DOMPurify.sanitize(d.html), signed: true }
+    return { accountId: d.accountId, to: d.to, cc: d.cc || '', bcc: d.bcc || '', subject: d.subject, body: tame(DOMPurify.sanitize(d.html)), signed: true }
   }
   const m = seed.source
   const accountId = m?.accountId || seed.accountId || accounts[0]?.id || ''
@@ -65,10 +69,10 @@ function prefill(seed: ComposeSeed, accounts: Account[]) {
   const from = m.replyTo || m.fromEmail
   // the quoted mail is cleaned like in the reader, and its web images are left out
   const quoted = m.html
-    ? DOMPurify.sanitize(m.html.replace(/<style[\s\S]*?<\/style>/gi, ''), {
+    ? tame(DOMPurify.sanitize(m.html.replace(/<style[\s\S]*?<\/style>/gi, ''), {
       FORBID_TAGS: ['script', 'style', 'iframe', 'frame', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select', 'meta', 'link', 'base', 'img'],
       FORBID_ATTR: ['srcset', 'background'],
-    }) as string
+    }) as string)
     : esc(m.text || '').replace(/\n/g, '<br>')
   const prefix = (p: string) => (new RegExp(`^${p}:`, 'i').test(m.subject) ? m.subject : `${p}: ${m.subject}`)
   if (seed.kind === 'forward') {
