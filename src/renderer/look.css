@@ -882,3 +882,9 @@ html:not([data-still]) .rail-tools .acc:hover { transform: translateY(-2px); tra
 @media (prefers-reduced-motion: reduce) {
   .read, .list .rows, .rm-reflow :is(.rail, .folders, .list, .viewer) { animation: none !important; }
 }
+
+/* the search fields of Files and Contacts are one round field: the input inside has no box, border or ring of its
+   own, even while typing; the ring goes around the whole field (Alex, 30 Oct: "the top is wrong") */
+.sheet :is(.fi-search, .ct-search) input, .sheet :is(.fi-search, .ct-search) input:focus {
+  height: 100% !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; outline: 0 !important; }
+.sheet :is(.fi-search, .ct-search):focus-within { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
