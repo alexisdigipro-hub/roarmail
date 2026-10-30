@@ -101,11 +101,25 @@ export default function App() {
   useEffect(() => { loadFolders(); loadRows(); setSelected([]) }, [scope])
   // RoarMe's opening: the side from the left, the rows in turn, the reader rising (once)
   useEffect(() => { const h = setTimeout(() => setIntro(false), 1600); return () => clearTimeout(h) }, [])
+  // a burst of events (one delete sends several) reloads the list, folders and accounts once, 150 ms after the last
+  // (29 Oct 2026, "deleting is slow": each event used to reload everything)
+  const due = useRef({ rows: false, folders: false, accounts: false, h: 0 as unknown as ReturnType<typeof setTimeout> })
+  const reloadSoon = useCallback((what: 'rows' | 'folders' | 'accounts') => {
+    const d = due.current
+    d[what] = true
+    clearTimeout(d.h)
+    d.h = setTimeout(() => {
+      if (d.rows) loadRows()
+      if (d.folders) loadFolders()
+      if (d.accounts) loadAccounts()
+      d.rows = d.folders = d.accounts = false
+    }, 150)
+  }, [loadRows, loadFolders, loadAccounts])
   useEffect(() => api.on((e) => {
-    if (e.type === 'accounts') loadAccounts()
-    if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) loadFolders()
-    if (e.type === 'folders') loadAccounts()
-    if (e.type === 'messages') { if (scopeRef.current.accountId === 'all' || scopeRef.current.accountId === e.accountId) loadRows() }
+    if (e.type === 'accounts') reloadSoon('accounts')
+    if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) reloadSoon('folders')
+    if (e.type === 'folders') reloadSoon('accounts')
+    if (e.type === 'messages') { if (scopeRef.current.accountId === 'all' || scopeRef.current.accountId === e.accountId) reloadSoon('rows') }
     if (e.type === 'sync') setSyncing((s) => ({ ...s, [e.accountId]: e.busy }))
     if (e.type === 'open' && e.subject != null) { setScope({ accountId: 'all', role: 'inbox' }); setQuery(e.subject); setTimeout(() => setSelected([e.messageId]), 600) }
     else if (e.type === 'open') { setScope({ accountId: 'all', role: 'inbox' }); setTimeout(() => setSelected([e.messageId]), 80) }
@@ -154,6 +168,8 @@ export default function App() {
   const [editUnified, setEditUnified] = useState(false)
   // All accounts' folders in the order dragged in Edit (Alex, 29 Oct: "reorder in edit")
   const [uDrag, setUDrag] = useState('')
+  // how the reader came to the message shown: by the arrows (down / up) or a click; it slides in from that side
+  const navWay = useRef<'down' | 'up' | 'click'>('click')
   const [uDrop, setUDrop] = useState('')
   // a folder's right-click menu asks here for a name or a colour
   const [folderAsk, setFolderAsk] = useState<{ kind: 'new' | 'sub' | 'rename' | 'custom'; folder: Folder } | null>(null)
@@ -220,6 +236,7 @@ export default function App() {
   }, [inDrafts])
 
   const click = (r: MessageRow, e: MouseEvent) => {
+    navWay.current = 'click'
     const k = keyOf(r)
     if (e.metaKey || e.ctrlKey) {
       setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k)
@@ -280,7 +297,7 @@ export default function App() {
     e.preventDefault()
     const labels = { new: t.fm_new, sub: t.fm_sub, rename: t.fm_rename, red: t.qc_red, orange: t.qc_orange, yellow: t.fc_yellow, green: t.qc_green,
       blue: t.qc_blue, purple: t.qc_purple, custom: t.fc_custom, nocolor: t.fc_none, hide: t.fm_hide, read: t.fm_read, sync: t.fm_sync, rules: t.fm_rules, delete: t.fm_delete,
-      empty: f.role === 'spam' ? t.fm_emptyJunk : t.fm_emptyTrash }
+      empty: f.role === 'spam' ? t.fm_emptyJunk : t.fm_emptyTrash, colour: t.fc_pick }
     const pick = await api.folderMenu(f.id, labels)
     if (!pick) return
     try {
@@ -314,22 +331,39 @@ export default function App() {
     }
     const blocked = (await api.blockedSenders().catch(() => [] as string[])).includes(r.fromEmail.toLowerCase())
     const allSeen = targets.every((x) => x.seen), allFlag = targets.every((x) => x.flagged)
+    const one = targets.length === 1
+    // tidied (Alex, 29 Oct): answer first, then mark, then file it, the sender's things in one submenu, Delete last
     const pick = await api.popMenu([
+      { id: 'reply', label: t.reply, enabled: one },
+      { id: 'replyAll', label: t.replyAll, enabled: one },
+      { id: 'forward', label: t.forward, enabled: one },
+      null,
       { id: 'seen', label: allSeen ? t.markUnread : t.markRead },
       { id: 'flag', label: allFlag ? t.unflag : t.flag },
       null,
-      { id: 'archive', label: t.archiveIt },
       { id: 'move', label: t.moveTo },
-      { id: 'snooze', label: t.snoozeIt },
-      { id: 'trash', label: t.trashIt },
+      { id: 'archive', label: t.archiveIt },
+      { id: 'snooze', label: t.snoozeUntil },
       null,
-      { id: 'block', label: blocked ? t.unblockSender : t.blockSender, enabled: !!r.fromEmail },
-      { id: 'rule', label: t.ru_fromSender, enabled: !!r.fromEmail },
-      { id: 'contact', label: t.ct_card, enabled: !!r.fromEmail },
+      { label: `${t.mn_sender}${r.fromName ? ` · ${r.fromName}` : ''}`, enabled: !!r.fromEmail, sub: [
+        { id: 'contact', label: t.ct_card },
+        { id: 'allMail', label: t.ct_allMail },
+        { id: 'rule', label: t.ru_fromSender },
+        null,
+        { id: 'block', label: blocked ? t.unblockSender : t.blockSender },
+      ] },
+      null,
+      { id: 'trash', label: targets.length > 1 ? `${t.trashIt} (${targets.length})` : t.trashIt },
     ])
     if (!pick) return
     try {
-      if (pick === 'seen') act(targets, allSeen ? 'unseen' : 'seen')
+      if (pick === 'reply' || pick === 'replyAll' || pick === 'forward') {
+        const items = await api.thread(keyOf(r))
+        const m = await api.message((items[items.length - 1] || r).id)
+        setCompose({ kind: pick, source: m })
+      }
+      else if (pick === 'allMail') setScope({ accountId: 'all', person: r.fromEmail })
+      else if (pick === 'seen') act(targets, allSeen ? 'unseen' : 'seen')
       else if (pick === 'flag') act(targets, allFlag ? 'unflag' : 'flag')
       else if (pick === 'archive' || pick === 'trash') act(targets, pick)
       else if (pick === 'move') openMove(targets)
@@ -431,7 +465,7 @@ export default function App() {
       const move = (d: number) => {
         const i = index >= 0 ? index : d > 0 ? -1 : list.length
         const n = list[Math.max(0, Math.min(list.length - 1, i + d))]
-        if (n) { setSelected([keyOf(n)]); setAnchor(keyOf(n)) }
+        if (n) { navWay.current = d > 0 ? 'down' : 'up'; setSelected([keyOf(n)]); setAnchor(keyOf(n)) }
       }
       if (k === 'ArrowDown' || k === 'j') { e.preventDefault(); move(1) }
       else if (k === 'ArrowUp' || k === 'k') { e.preventDefault(); move(-1) }
@@ -806,7 +840,7 @@ export default function App() {
           </div>
         </section>
       ) : (
-        <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs}
+        <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs} way={navWay.current}
           onCompose={(kind, m) => openCompose(kind, m)}
           onRoar={(kind, m) => setRoar({ kind, m })}
           onRule={(m) => {

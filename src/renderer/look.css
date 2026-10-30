@@ -832,3 +832,53 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .fi-meta { flex: none; min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
 .fi-indexing { display: flex; align-items: center; gap: 8px; margin: 0; }
 .spinner.small { width: 14px; height: 14px; border-width: 2px; }
+
+/* Files, laid out again (Alex, 29 Oct): a fixed top row, the kinds in one scrolling row, each file on a fixed grid
+   so the size, the date, the account and the buttons always line up on the right */
+.sheet.files { box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; }
+.fi-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fi-head h2 { margin: 0 6px 0 0; font-size: 22px; flex: none; }
+.fi-search { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; margin: 0 !important; border-radius: 999px;
+  background: var(--field, var(--glass)); box-shadow: inset 0 0 0 1px var(--edge); color: var(--muted); flex-direction: row !important; }
+.fi-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; box-shadow: none; outline: 0; color: var(--text); font-size: 14px; }
+.fi-select { flex: 0 0 auto; width: 190px !important; max-width: 24vw; height: 38px; margin: 0; }
+.fi-head .fi-select:last-of-type { width: 120px !important; }
+.fi-head .tool { flex: none; }
+.fi-kinds { align-self: stretch; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.fi-kinds::-webkit-scrollbar { display: none; }
+.fi-kinds button { flex: none; white-space: nowrap; }
+.fi-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 72px 92px 14px auto; align-items: center; gap: 12px; padding: 6px 10px; }
+.fi-size, .fi-date { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fi-acc { display: grid; place-items: center; }
+.fi-acts { display: flex; gap: 2px; opacity: .55; }
+.fi-row:hover .fi-acts { opacity: 1; }
+.fi-main b, .fi-main small { display: block; }
+
+/* the drifting backdrop rests when RoarMail is not in front: every glass panel above it re-blurs on each frame
+   it moves (29 Oct 2026, "make it lighter") */
+html[data-away] body::before { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) { body::before { animation: none !important; } }
+
+/* Motion (Alex, 29 Oct: "more animation, slides, with the arrows, and when the window grows"). All of it rests
+   under Settings > Appearance > Motion off (html[data-still]) and the system's Reduce motion. */
+@keyframes rm-in-right { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+@keyframes rm-in-down  { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: none; } }
+@keyframes rm-in-up    { from { opacity: 0; transform: translateY(-34px); } to { opacity: 1; transform: none; } }
+@keyframes rm-in-left  { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+@keyframes rm-reflow   { 0% { transform: scale(.982); filter: saturate(.85); } 60% { transform: scale(1.004); } 100% { transform: none; filter: none; } }
+html:not([data-still]) .read.in-click { animation: rm-in-right .42s var(--ease) both; }
+html:not([data-still]) .read.in-down { animation: rm-in-down .38s var(--spring) both; }
+html:not([data-still]) .read.in-up { animation: rm-in-up .38s var(--spring) both; }
+/* another folder, account or filter: the list slides in from the side the folders are on */
+html:not([data-still]) .list .rows { animation: rm-in-left .36s var(--ease) both; }
+/* the window was resized, maximised or went full screen: every column settles with a small spring */
+html:not([data-still]).rm-reflow :is(.rail, .folders, .list, .viewer) { animation: rm-reflow .6s var(--spring) both; transform-origin: center top; }
+html:not([data-still]).rm-reflow .list { animation-delay: .04s; }
+html:not([data-still]).rm-reflow .viewer { animation-delay: .08s; }
+/* the hover bar on a row and the rail's tools spring a little */
+html:not([data-still]) .msg .quick button { transition: transform .25s var(--spring), background .15s; }
+html:not([data-still]) .msg .quick button:hover { transform: translateY(-2px) scale(1.08); }
+html:not([data-still]) .rail-tools .acc:hover { transform: translateY(-2px); transition: transform .25s var(--spring); }
+@media (prefers-reduced-motion: reduce) {
+  .read, .list .rows, .rm-reflow :is(.rail, .folders, .list, .viewer) { animation: none !important; }
+}

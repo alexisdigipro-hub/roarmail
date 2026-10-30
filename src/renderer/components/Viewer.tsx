@@ -15,10 +15,12 @@ export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
 export type RoarAction = 'share' | 'task'
 
-export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule, onContact, onWriteTo, onAllMail, onFind }: {
+export function Viewer({ row, accounts, prefs, way, onCompose, onAct, onRoar, onRule, onContact, onWriteTo, onAllMail, onFind }: {
   row: MessageRow | null
   accounts: Account[]
   prefs: Settings
+  /** the arrows went down or up, or a click: the message slides in from that side */
+  way?: 'down' | 'up' | 'click'
   onCompose: (kind: ComposeKind, m: MessageFull) => void
   onAct: (action: RowAction) => void
   onRoar: (action: RoarAction, m: MessageFull) => void
@@ -84,7 +86,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
         <button className="tool" title={t.rm_task} onClick={() => last.current && onRoar('task', last.current)}><Icon name="tasks" /></button>
       </div>
 
-      <div className="read" key={key}>
+      <div className={`read in-${way || 'click'}`} key={key}>
         <h2 className="subject" onContextMenu={async (e) => {
           e.preventDefault()
           const s = row.subject || ''
@@ -174,6 +176,23 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     else if (pick === 'all') onAllMail?.(email)
     else if (pick === 'block') { await window.roarmail.blockSender(email, !known?.blocked); toast(known?.blocked ? `${t.unblock}: ${email}` : t.blockedNote) }
   }
+  // the message's ⋯ and right-click on its head: one native menu in groups (Alex, 29 Oct: tidy the menus)
+  const moreMenu = async (e: ReactMouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const id = await window.roarmail.popMenu([
+      { id: 'reply', label: t.reply }, { id: 'replyAll', label: t.replyAll }, { id: 'forward', label: t.forward },
+      null,
+      { id: 'print', label: t.mm_print }, { id: 'pdf', label: t.mm_pdf }, { id: 'eml', label: t.mm_eml },
+      null,
+      { label: `${t.mn_sender} · ${m.fromName || m.fromEmail}`, sub: [
+        { id: 'card', label: t.ct_card }, { id: 'all', label: t.ct_allMail }, { id: 'rule', label: t.ru_fromSender },
+      ] },
+    ])
+    if (id === 'reply' || id === 'replyAll' || id === 'forward') onCompose(id, m)
+    else if (id === 'card') onContact?.(m.fromEmail)
+    else if (id === 'all') onAllMail?.(m.fromEmail)
+    else if (id === 'rule' || id === 'print' || id === 'pdf' || id === 'eml') pick(id)
+  }
   const dateMenu = async (e: ReactMouseEvent) => {
     e.preventDefault(); e.stopPropagation()
     const day = new Date(m.date); day.setHours(0, 0, 0, 0)
@@ -231,7 +250,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
 
   return (
     <article className={`card ${isLast ? 'last' : ''}`}>
-      <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }} onContextMenu={(e) => { e.preventDefault(); setMenu(true) }}>
+      <header className="head" onClick={onFold} style={{ cursor: onFold ? 'pointer' : undefined }} onContextMenu={(e) => moreMenu(e)}>
         {(() => { const pic = accounts.find((a) => a.email.toLowerCase() === m.fromEmail)?.avatar || senderPic(m.fromEmail); return (
           <div className={`avatar ${pic ? 'pic' : ''}`} style={{ background: pic ? '#fff' : tint(m.fromEmail) }}>{pic ? <img src={pic} alt="" /> : initials(m.fromName || m.fromEmail)}</div>) })()}
         <div className="who">
@@ -252,17 +271,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
               // blocking also puts this message in the Trash (Alex, 29 Oct)
               if (!blocked) window.roarmail.act([m.id], 'trash').catch(() => {})
             }}><Icon name="block" size={16} /></button>
-          <span className="msg-menu-wrap">
-            <button className={`tool small ${menu ? 'on' : ''}`} title={t.mm_more} onClick={() => setMenu((v) => !v)}><Icon name="more" size={16} /></button>
-            {menu && (
-              <div className="attach-menu msg-menu" onMouseLeave={() => setMenu(false)}>
-                <button onClick={() => pick('rule')}><Icon name="funnel" size={16} /><span><b>{t.ru_fromSender}</b><small>{m.fromEmail}</small></span></button>
-                <button onClick={() => pick('print')}><Icon name="print" size={16} /><span><b>{t.mm_print}</b></span></button>
-                <button onClick={() => pick('pdf')}><Icon name="download" size={16} /><span><b>{t.mm_pdf}</b></span></button>
-                <button onClick={() => pick('eml')}><Icon name="drafts" size={16} /><span><b>{t.mm_eml}</b></span></button>
-              </div>
-            )}
-          </span>
+          <button className="tool small" title={t.mm_more} onClick={(e) => moreMenu(e)}><Icon name="more" size={16} /></button>
         </div>
       </header>
 
@@ -372,7 +381,10 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
     const css = `<style>html,body{margin:0;padding:0;background:#fff;color:#1a1a1a;font:${TEXT_SIZES[prefs.textSize] ?? 15.5}px/1.55 ${font};word-wrap:break-word;overflow-wrap:anywhere}
       body{padding:18px 22px}img{max-width:100%;height:auto}pre.plain{white-space:pre-wrap;font:inherit;margin:0}a{color:#c00000}
       ${prefs.plainMono ? `pre.plain{font-family:${mono};font-size:.92em}` : ''}${quotes}table{max-width:100%}</style>`
-    return { html: css + clean, blocked, trackers }
+    // with pictures off, the frame itself refuses anything from the network (security review 29 Oct 2026): a <style>
+    // block, an entity-hidden address, image-set() or an SVG image could otherwise still call home
+    const csp = images ? '' : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid: blob:; style-src 'unsafe-inline'; font-src data:">`
+    return { html: csp + css + clean, blocked, trackers }
   }, [m, images, prefs.detectLinks, prefs.blockTrackers, prefs.textSize, prefs.messageFont, prefs.monoFont, prefs.plainMono, prefs.quoteColors, prefs.quote1, prefs.quote2, prefs.quote3])
   // what Print and Save as PDF put on paper: the body exactly as shown here
   if (shown) shown.current = html

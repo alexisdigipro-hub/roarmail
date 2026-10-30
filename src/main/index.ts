@@ -1,6 +1,8 @@
 // RoarMail's main process: the window, the mail engine and the IPC door the screens use.
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, systemPreferences, Tray } from 'electron'
 import fs from 'fs'
+import { execFileSync } from 'child_process'
+import { pathToFileURL } from 'url'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
 import os from 'os'
 import path from 'path'
@@ -9,7 +11,7 @@ import { MailService } from './mail'
 import { autodetect } from './autodetect'
 import { readCsv, readVcf } from './contacts'
 import { RoarMe } from './roarme'
-import type { LockState, MailEvent, MessageRow, NewMailSound, RoarTransferFile } from '../shared/api'
+import type { LockState, MailEvent, MenuItem, MessageRow, NewMailSound, RoarTransferFile } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const updater = require('./updater.js')
 
@@ -101,17 +103,38 @@ function createWindow() {
   win.once('ready-to-show', () => { if (!hidden || shownOnce) win?.show(); shownOnce = true })
   // nothing ever navigates the app window; links go to the system browser
   win.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); openSafe(url) } })
+  // only RoarMail's own page: a file dropped on the window (an .html from a mail) must not take it over
+  const home = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href
+  win.webContents.on('will-navigate', (e, url) => { if (url.split('#')[0] !== home) { e.preventDefault(); if (!url.startsWith('file:')) openSafe(url) } })
+  const allowed = new Set(['clipboard-sanitized-write', 'fullscreen', 'local-fonts'])
+  win.webContents.session.setPermissionRequestHandler((_w, p, cb) => cb(allowed.has(p)))
+  win.webContents.session.setPermissionCheckHandler((_w, p) => allowed.has(p))
   editMenu(win)
   win.on('close', (e) => { if ((process.platform === 'darwin' || background) && !quitting) { e.preventDefault(); win?.hide() } })
   win.on('closed', () => { win = null })
   // full screen hides the Mac buttons, so the page drops the strip they sit in
   const fullscreen = (on: boolean) => win?.webContents.executeJavaScript(`document.documentElement.classList.toggle('fullscreen', ${on})`).catch(() => {})
-  win.on('enter-full-screen', () => fullscreen(true))
-  win.on('leave-full-screen', () => fullscreen(false))
+  win.on('enter-full-screen', () => { fullscreen(true); reflow() })
+  win.on('leave-full-screen', () => { fullscreen(false); reflow() })
+  // the window grows or shrinks: the columns settle into their new size with a short spring (Alex, 29 Oct)
+  const reflow = () => win?.webContents.executeJavaScript(`(() => { const r = document.documentElement; r.classList.remove('rm-reflow'); void r.offsetWidth;
+    r.classList.add('rm-reflow'); clearTimeout(window.__rmReflow); window.__rmReflow = setTimeout(() => r.classList.remove('rm-reflow'), 700) })()`).catch(() => {})
+  win.on('maximize', reflow); win.on('unmaximize', reflow); win.on('resized', reflow)
   win.webContents.on('did-finish-load', () => {
     if (pendingMailto) { emit(mailtoEvent(pendingMailto)); pendingMailto = null }
   })
+}
+
+/**
+ * A file from a mail carries the system's "downloaded from the internet" mark (security review 29 Oct 2026), so
+ * Gatekeeper on a Mac, and SmartScreen and Office's Protected View on Windows, still check it before it runs.
+ */
+const RISKY = /\.(exe|com|bat|cmd|scr|pif|msi|msp|hta|js|jse|vbs|vbe|wsf|wsh|ps1|psm1|lnk|url|reg|cpl|jar|app|command|tool|pkg|mpkg|terminal|workflow|scpt|applescript|sh|dmg|iso)$/i
+function markDownloaded(file: string) {
+  try {
+    if (process.platform === 'win32') fs.writeFileSync(`${file}:Zone.Identifier`, '[ZoneTransfer]\r\nZoneId=3\r\n')
+    else if (process.platform === 'darwin') execFileSync('xattr', ['-w', 'com.apple.quarantine', `0081;${Math.floor(Date.now() / 1000).toString(16)};RoarMail;`, file])
+  } catch { /* a disk that keeps no such marks */ }
 }
 
 function openSafe(url: string) {
@@ -123,8 +146,10 @@ function openSafe(url: string) {
 let linksInBackground = () => false
 
 function mailtoEvent(url: string): MailEvent {
-  const u = new URL(url)
-  return { type: 'compose', to: decodeURIComponent(u.pathname), subject: u.searchParams.get('subject') || undefined, body: u.searchParams.get('body') || undefined }
+  try {
+    const u = new URL(url)
+    return { type: 'compose', to: decodeURIComponent(u.pathname), subject: u.searchParams.get('subject') || undefined, body: u.searchParams.get('body') || undefined }
+  } catch { return { type: 'compose', to: '' } } // a broken mailto: link opens an empty message instead of stopping the app
 }
 
 function handleMailto(url: string) {
@@ -269,7 +294,7 @@ app.whenReady().then(() => {
 
   handle('mail:platform', () => process.platform)
   handle('mail:autodetect', (_e, email: string) => autodetect(email))
-  handle('mail:testAccount', (_e, cfg, pass) => mail.test(cfg, pass))
+  handle('mail:testAccount', (_e, cfg, pass, approve) => mail.test(cfg, pass, typeof approve === 'string' ? approve : undefined))
   handle('mail:addAccount', (_e, cfg, pass) => mail.add(cfg, pass))
   handle('mail:addMicrosoft', (_e, cfg) => mail.addMicrosoft(cfg))
   handle('mail:removeAccount', (_e, id) => mail.remove(id))
@@ -317,9 +342,13 @@ app.whenReady().then(() => {
       { label: l.sub, click: pick('sub') },
       { label: l.rename, enabled: !fixed, click: pick('rename') },
       { type: 'separator' },
-      ...colours.map(([hex, label]) => ({ label, type: 'checkbox' as const, checked: f.color === hex, click: pick(`c:${hex}`) })),
-      { label: l.custom, click: pick('custom') },
-      ...(f.color ? [{ label: l.nocolor, click: pick('nocolor') }] : []),
+      // the colours in one submenu, so the menu stays short (Alex, 29 Oct: tidy the menus)
+      { label: l.colour || 'Colour', submenu: [
+        ...colours.map(([hex, label]) => ({ label, type: 'checkbox' as const, checked: f.color === hex, click: pick(`c:${hex}`) })),
+        { type: 'separator' as const },
+        { label: l.custom, click: pick('custom') },
+        ...(f.color ? [{ label: l.nocolor, click: pick('nocolor') }] : []),
+      ] },
       { type: 'separator' },
       { label: l.hide, enabled: f.role !== 'inbox', click: pick('hide') },
       { type: 'separator' },
@@ -332,11 +361,13 @@ app.whenReady().then(() => {
       { label: l.delete, enabled: !fixed, click: pick('delete') },
     ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
-  handle('mail:popMenu', (_e, items: ({ id: string; label: string; enabled?: boolean } | null)[]) => new Promise((resolve) => {
+  handle('mail:popMenu', (_e, items: MenuItem[]) => new Promise((resolve) => {
     if (!win) return resolve(null)
     let picked: string | null = null
-    Menu.buildFromTemplate(items.map((x) => x ? { label: String(x.label), enabled: x.enabled !== false, click: () => { picked = String(x.id) } } : { type: 'separator' as const }))
-      .popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
+    const build = (list: MenuItem[]): Electron.MenuItemConstructorOptions[] => list.map((x) => !x ? { type: 'separator' as const }
+      : x.sub ? { label: String(x.label), enabled: x.enabled !== false, submenu: build(x.sub) }
+      : { label: String(x.label), enabled: x.enabled !== false, ...(x.checked != null ? { type: 'checkbox' as const, checked: !!x.checked } : {}), click: () => { picked = String(x.id) } })
+    Menu.buildFromTemplate(build(items)).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
   handle('mail:createFolder', (_e, accountId, parentId, name) => mail.createFolder(accountId, parentId, name))
   handle('mail:renameFolder', (_e, id, name) => mail.renameFolder(id, name))
@@ -398,7 +429,7 @@ app.whenReady().then(() => {
   // it carries the mail passwords; without the passphrase the file is noise
   const KDF = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
   handle('mail:exportSetup', async (_e, pass: string) => {
-    if (typeof pass !== 'string' || pass.length < 6) throw new Error('short-pass')
+    if (typeof pass !== 'string' || pass.length < 10) throw new Error('short-pass')
     const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('desktop'), `RoarMail setup ${new Date().toISOString().slice(0, 10)}.roarmail`), filters: [{ name: 'RoarMail setup', extensions: ['roarmail'] }] })
     if (r.canceled || !r.filePath) return null
     const salt = randomBytes(16), iv = randomBytes(12), key = scryptSync(pass, salt, 32, KDF)
@@ -558,6 +589,9 @@ app.whenReady().then(() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-'))
     const file = path.join(dir, a.filename)
     fs.writeFileSync(file, a.content)
+    markDownloaded(file)
+    // a program or script is never started from a mail: it is shown in its folder, marked as from the internet
+    if (RISKY.test(a.filename)) { shell.showItemInFolder(file); return }
     // Mac: shown in Quick Look over the window (29 Oct 2026), which also has a button to open it in its app
     if (process.platform === 'darwin' && win) win.previewFile(file, a.filename)
     else await shell.openPath(file)
@@ -571,11 +605,13 @@ app.whenReady().then(() => {
       let file = path.join(dir, a.filename)
       for (let i = 2; fs.existsSync(file); i++) file = path.join(dir, `${base} ${i}${ext}`)
       fs.writeFileSync(file, a.content)
+      markDownloaded(file)
       return file
     }
     const r = await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('downloads'), a.filename) })
     if (r.canceled || !r.filePath) return null
     fs.writeFileSync(r.filePath, a.content)
+    markDownloaded(r.filePath)
     return r.filePath
   })
 

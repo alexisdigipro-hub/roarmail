@@ -26,7 +26,7 @@ export function MoveSetup({ only, onImported }: { only?: 'import'; onImported?: 
     } catch (e) { setNote({ ok: false, text: err(e) }) } finally { setBusy(false) }
   }
 
-  const can = mode === 'export' ? pass.length >= 6 && pass === again : pass.length > 0
+  const can = mode === 'export' ? pass.length >= 10 && pass === again : pass.length > 0
   return (
     <div className="move-setup">
       {!only && (

@@ -591,7 +591,7 @@ function AccountServer({ a }: { a: Account }) {
   const save = async () => {
     setState({ busy: true })
     const r = await window.roarmail.updateServer(a.id, { ...c, email: a.email, displayName: a.displayName, provider: a.provider }, pass || undefined)
-    setState(r.ok ? { ok: true } : { error: t[`err_${r.error}` as Key] || r.error })
+    setState(r.ok ? { ok: true } : { error: r.error.startsWith('cert-host|') ? t.err_certHostType.replace('{host}', r.error.slice(10)) : t[`err_${r.error}` as Key] || r.error })
     if (r.ok) setPass('')
   }
   const tls = (v: Tls, set: (v: Tls) => void) => (

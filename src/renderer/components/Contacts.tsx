@@ -33,14 +33,13 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
   // a person's menu in the list (Alex, 29 Oct)
   const rowMenu = async (e: RMouseEvent, c: Contact) => {
     e.preventDefault()
-    const tag = (g: string) => ({ id: `tag:${g}`, label: `${c.groups.includes(g) ? '✓ ' : ''}${t[`ct_g_${g}` as Key]}` })
+    const tag = (g: string) => ({ id: `tag:${g}`, label: t[`ct_g_${g}` as Key], checked: c.groups.includes(g) })
     const id = await window.roarmail.popMenu([
       { id: 'write', label: t.ct_write },
       { id: 'all', label: t.ct_allMail },
       { id: 'copy', label: t.ad_copyAddress },
       null,
-      { id: 'vip', label: c.vip ? `✓ VIP` : 'VIP' },
-      tag('team'), tag('clients'), tag('crew'),
+      { label: t.mn_groups, sub: [{ id: 'vip', label: 'VIP', checked: c.vip }, null, tag('team'), tag('clients'), tag('crew')] },
       null,
       { id: 'company', label: `${t.ct_everyoneAt} @${c.email.split('@')[1] || ''}` },
       { id: 'block', label: c.blocked ? t.unblockSender : t.blockSender },

@@ -16,6 +16,8 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
   const [busy, setBusy] = useState<'' | 'checking' | 'testing' | 'microsoft'>('')
   const [usePass, setUsePass] = useState(false)
   const [error, setError] = useState('')
+  // the server's certificate names another server: asked once, used only on a yes
+  const [certAsk, setCertAsk] = useState('')
 
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
 
@@ -27,12 +29,13 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
     } finally { setBusy('') }
   }
 
-  async function connect() {
+  async function connect(approve?: string) {
     if (!cfg) return
-    setBusy('testing'); setError('')
+    setBusy('testing'); setError(''); setCertAsk('')
     const full = { ...cfg, email: email.trim(), displayName: name.trim(), username: cfg.username || email.trim() }
     try {
-      const r = await window.roarmail.testAccount(full, pass)
+      const r = await window.roarmail.testAccount(full, pass, approve)
+      if (!r.ok && r.error === 'cert-host' && r.suggest) { setCertAsk(r.suggest); return }
       if (!r.ok) { setError(errorText(r.error)); if (r.error !== 'auth') setManual(true); return }
       await window.roarmail.addAccount(r.cfg, pass)
       onDone()
@@ -90,6 +93,15 @@ export function AddAccount({ first, onDone, onCancel }: { first: boolean; onDone
           </>
         )}
 
+        {certAsk && (
+          <div className="panel cert-ask">
+            <p className="small">{t.err_certHostQ.replace('{host}', certAsk)}</p>
+            <div className="row end">
+              <button type="button" className="pill small ghost" onClick={() => setCertAsk('')}>{t.cancel}</button>
+              <button type="button" className="pill small primary" onClick={() => connect(certAsk)}>{t.err_certHostUse} {certAsk}</button>
+            </div>
+          </div>
+        )}
         {error && <p className="error">{error}</p>}
         {busy && <p className="muted">{busy === 'checking' ? t.checking : busy === 'microsoft' ? t.msWaiting : t.testing}</p>}
 

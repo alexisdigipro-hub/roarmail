@@ -125,6 +125,9 @@ export interface MailStats {
 
 export interface Address { name?: string; address: string }
 
+/** a line of a right-click menu (popMenu): null is a separator; sub opens a submenu; checked draws a tick */
+export type MenuItem = { id?: string; label: string; enabled?: boolean; checked?: boolean; sub?: MenuItem[] } | null
+
 /** Contacts (29 Oct 2026): a person in the address book; built from mail, signatures, imports and what was typed */
 export type ContactGroup = 'vip' | 'team' | 'clients' | 'crew' | 'blocked' | 'written' | 'recent' | `@${string}`
 export interface Contact {
@@ -403,7 +406,7 @@ export type MailEvent =
 export interface MailApi {
   platform: string
   autodetect(email: string): Promise<ServerConfig>
-  testAccount(cfg: ServerConfig, password: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string }>
+  testAccount(cfg: ServerConfig, password: string, approve?: string): Promise<{ ok: true; cfg: ServerConfig } | { ok: false; error: string; suggest?: string }>
   addAccount(cfg: ServerConfig, password: string): Promise<Account>
   /** Sign in with Microsoft in the browser, then the account is added (or an existing one signs in again) */
   addMicrosoft(cfg: ServerConfig): Promise<{ ok: true } | { ok: false; error: string }>
@@ -442,7 +445,7 @@ export interface MailApi {
   /** the system's emoji picker, typing into the focused field (Mac and Windows) */
   emojiPanel(): Promise<void>
   /** a message's right-click menu (the Mac's own): null is a line between groups; resolves with the picked id, or null */
-  popMenu(items: ({ id: string; label: string; enabled?: boolean } | null)[]): Promise<string | null>
+  popMenu(items: MenuItem[]): Promise<string | null>
   /** a folder's right-click menu (the Mac's own); resolves with what was picked, or null */
   folderMenu(folderId: string, labels: Record<string, string>): Promise<FolderMenuChoice | null>
   createFolder(accountId: string, parentId: string | null, name: string): Promise<void>
