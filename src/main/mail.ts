@@ -1673,7 +1673,7 @@ export class MailService {
       where a.inline = 0 and a.filename is not null and m.pending_op is null
         and m.account_id in (select id from accounts where enabled = 1) ${accountId !== 'all' ? 'and m.account_id = @acc' : ''}
         and (fold(a.filename) like @q or fold(coalesce(m.from_name, '')) like @q or fold(coalesce(m.from_email, '')) like @q or fold(m.subject) like @q)
-      order by m.date desc limit 5000`).all({ q, acc: accountId }) as Row[]
+      order by m.date desc limit 50000`).all({ q, acc: accountId }) as Row[]
     const all = rows.map((r): MailFile => ({ id: r.id, filename: r.filename, size: r.size || 0, mime: r.mime || '', kind: fileKind(r.filename, r.mime || ''),
       date: r.date, fromName: r.from_name || '', fromEmail: r.from_email || '', subject: r.subject || '', accountId: r.account_id, messageId: r.mid }))
     const counts: Record<string, number> = {}
