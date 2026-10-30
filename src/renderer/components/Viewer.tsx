@@ -15,10 +15,12 @@ export type ComposeKind = 'reply' | 'replyAll' | 'forward'
 type RowAction = 'archive' | 'trash' | 'flag' | 'unflag' | 'unseen' | 'move' | 'snooze'
 export type RoarAction = 'share' | 'task'
 
-export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule, onContact, onWriteTo, onAllMail, onFind }: {
+export function Viewer({ row, accounts, prefs, way, onCompose, onAct, onRoar, onRule, onContact, onWriteTo, onAllMail, onFind }: {
   row: MessageRow | null
   accounts: Account[]
   prefs: Settings
+  /** the arrows went down or up, or a click: the message slides in from that side */
+  way?: 'down' | 'up' | 'click'
   onCompose: (kind: ComposeKind, m: MessageFull) => void
   onAct: (action: RowAction) => void
   onRoar: (action: RoarAction, m: MessageFull) => void
@@ -84,7 +86,7 @@ export function Viewer({ row, accounts, prefs, onCompose, onAct, onRoar, onRule,
         <button className="tool" title={t.rm_task} onClick={() => last.current && onRoar('task', last.current)}><Icon name="tasks" /></button>
       </div>
 
-      <div className="read" key={key}>
+      <div className={`read in-${way || 'click'}`} key={key}>
         <h2 className="subject" onContextMenu={async (e) => {
           e.preventDefault()
           const s = row.subject || ''

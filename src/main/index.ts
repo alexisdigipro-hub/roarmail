@@ -114,8 +114,12 @@ function createWindow() {
   win.on('closed', () => { win = null })
   // full screen hides the Mac buttons, so the page drops the strip they sit in
   const fullscreen = (on: boolean) => win?.webContents.executeJavaScript(`document.documentElement.classList.toggle('fullscreen', ${on})`).catch(() => {})
-  win.on('enter-full-screen', () => fullscreen(true))
-  win.on('leave-full-screen', () => fullscreen(false))
+  win.on('enter-full-screen', () => { fullscreen(true); reflow() })
+  win.on('leave-full-screen', () => { fullscreen(false); reflow() })
+  // the window grows or shrinks: the columns settle into their new size with a short spring (Alex, 29 Oct)
+  const reflow = () => win?.webContents.executeJavaScript(`(() => { const r = document.documentElement; r.classList.remove('rm-reflow'); void r.offsetWidth;
+    r.classList.add('rm-reflow'); clearTimeout(window.__rmReflow); window.__rmReflow = setTimeout(() => r.classList.remove('rm-reflow'), 700) })()`).catch(() => {})
+  win.on('maximize', reflow); win.on('unmaximize', reflow); win.on('resized', reflow)
   win.webContents.on('did-finish-load', () => {
     if (pendingMailto) { emit(mailtoEvent(pendingMailto)); pendingMailto = null }
   })

@@ -168,6 +168,8 @@ export default function App() {
   const [editUnified, setEditUnified] = useState(false)
   // All accounts' folders in the order dragged in Edit (Alex, 29 Oct: "reorder in edit")
   const [uDrag, setUDrag] = useState('')
+  // how the reader came to the message shown: by the arrows (down / up) or a click; it slides in from that side
+  const navWay = useRef<'down' | 'up' | 'click'>('click')
   const [uDrop, setUDrop] = useState('')
   // a folder's right-click menu asks here for a name or a colour
   const [folderAsk, setFolderAsk] = useState<{ kind: 'new' | 'sub' | 'rename' | 'custom'; folder: Folder } | null>(null)
@@ -234,6 +236,7 @@ export default function App() {
   }, [inDrafts])
 
   const click = (r: MessageRow, e: MouseEvent) => {
+    navWay.current = 'click'
     const k = keyOf(r)
     if (e.metaKey || e.ctrlKey) {
       setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k)
@@ -462,7 +465,7 @@ export default function App() {
       const move = (d: number) => {
         const i = index >= 0 ? index : d > 0 ? -1 : list.length
         const n = list[Math.max(0, Math.min(list.length - 1, i + d))]
-        if (n) { setSelected([keyOf(n)]); setAnchor(keyOf(n)) }
+        if (n) { navWay.current = d > 0 ? 'down' : 'up'; setSelected([keyOf(n)]); setAnchor(keyOf(n)) }
       }
       if (k === 'ArrowDown' || k === 'j') { e.preventDefault(); move(1) }
       else if (k === 'ArrowUp' || k === 'k') { e.preventDefault(); move(-1) }
@@ -837,7 +840,7 @@ export default function App() {
           </div>
         </section>
       ) : (
-        <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs}
+        <Viewer row={inDrafts ? null : current} accounts={accounts} prefs={prefs} way={navWay.current}
           onCompose={(kind, m) => openCompose(kind, m)}
           onRoar={(kind, m) => setRoar({ kind, m })}
           onRule={(m) => {

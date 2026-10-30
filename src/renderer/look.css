@@ -858,3 +858,27 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
    it moves (29 Oct 2026, "make it lighter") */
 html[data-away] body::before { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) { body::before { animation: none !important; } }
+
+/* Motion (Alex, 29 Oct: "more animation, slides, with the arrows, and when the window grows"). All of it rests
+   under Settings > Appearance > Motion off (html[data-still]) and the system's Reduce motion. */
+@keyframes rm-in-right { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+@keyframes rm-in-down  { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: none; } }
+@keyframes rm-in-up    { from { opacity: 0; transform: translateY(-34px); } to { opacity: 1; transform: none; } }
+@keyframes rm-in-left  { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+@keyframes rm-reflow   { 0% { transform: scale(.982); filter: saturate(.85); } 60% { transform: scale(1.004); } 100% { transform: none; filter: none; } }
+html:not([data-still]) .read.in-click { animation: rm-in-right .42s var(--ease) both; }
+html:not([data-still]) .read.in-down { animation: rm-in-down .38s var(--spring) both; }
+html:not([data-still]) .read.in-up { animation: rm-in-up .38s var(--spring) both; }
+/* another folder, account or filter: the list slides in from the side the folders are on */
+html:not([data-still]) .list .rows { animation: rm-in-left .36s var(--ease) both; }
+/* the window was resized, maximised or went full screen: every column settles with a small spring */
+html:not([data-still]).rm-reflow :is(.rail, .folders, .list, .viewer) { animation: rm-reflow .6s var(--spring) both; transform-origin: center top; }
+html:not([data-still]).rm-reflow .list { animation-delay: .04s; }
+html:not([data-still]).rm-reflow .viewer { animation-delay: .08s; }
+/* the hover bar on a row and the rail's tools spring a little */
+html:not([data-still]) .msg .quick button { transition: transform .25s var(--spring), background .15s; }
+html:not([data-still]) .msg .quick button:hover { transform: translateY(-2px) scale(1.08); }
+html:not([data-still]) .rail-tools .acc:hover { transform: translateY(-2px); transition: transform .25s var(--spring); }
+@media (prefers-reduced-motion: reduce) {
+  .read, .list .rows, .rm-reflow :is(.rail, .folders, .list, .viewer) { animation: none !important; }
+}
