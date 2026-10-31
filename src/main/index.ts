@@ -580,6 +580,7 @@ app.whenReady().then(() => {
     const s = mail.settings()
     if (s.lock && s.lockAfter > 0 && powerMonitor.getSystemIdleTime() >= s.lockAfter * 60) lock()
   }, 30e3)
+  handle('mail:windowColor', (_e, color: string) => { if (/^#[0-9a-f]{6}$/i.test(String(color))) win?.setBackgroundColor(color) })
   handle('mail:pickFiles', async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : r.filePaths

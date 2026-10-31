@@ -450,7 +450,6 @@ html.resizing iframe { pointer-events: none; }
 .rt-opts input[type='checkbox'] { accent-color: var(--accent); }
 
 /* the accounts rail, open wide (29 Oct 2026): each account's name and address next to its picture; the last tool button opens and closes it */
-.rail { transition: width .2s var(--ease, ease); }
 .acc-line { flex: none; display: flex; align-items: center; gap: 12px; width: 42px; color: var(--text); text-align: left; border-radius: 999px; }
 .acc-line:hover .acc:not(.on) { transform: scale(1.06); }
 .acc-line:active .acc { transform: scale(.92); }

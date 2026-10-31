@@ -560,6 +560,8 @@ export interface MailApi {
   /** into Settings' downloads folder (returns where it went), or asks where; null = cancelled */
   saveAttachment(id: string): Promise<string | null>
   openExternal(url: string): Promise<void>
+  /** the desktop window's own background, kept in step with day and night */
+  windowColor?(color: string): Promise<void>
   refresh(accountId?: string): Promise<void>
   on(cb: (e: MailEvent) => void): () => void
 }

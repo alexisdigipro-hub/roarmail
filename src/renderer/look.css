@@ -12,14 +12,10 @@
 @keyframes rm-slide-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 @keyframes rm-badge-pop { from { transform: scale(.2); } to { transform: scale(1); } }
 @keyframes rm-drop-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
-@keyframes rm-side-in { from { opacity: 0; transform: translateX(-28px) scale(.97); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
-@keyframes rm-main-in { from { opacity: 0; transform: translateY(22px) scale(.97); filter: blur(8px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes rm-side-in { from { opacity: 0; transform: translateX(-28px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes rm-main-in { from { opacity: 0; transform: translateY(22px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes rm-row-in { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
-@keyframes rm-drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-3%, 2%, 0) scale(1.06); } }
 @keyframes rm-shake { 10%, 90% { transform: translateX(-1px); } 20%, 80% { transform: translateX(2px); } 30%, 50%, 70% { transform: translateX(-4px); } 40%, 60% { transform: translateX(4px); } }
-
-/* the backdrop glow drifts very slowly behind the glass */
-body::before { inset: -10%; animation: rm-drift 46s ease-in-out infinite alternate; }
 
 /* sheets, menus, toasts, counts */
 .sheet-wrap { animation: rm-fade .25s ease both; }
@@ -167,7 +163,6 @@ html[data-lite] * { -webkit-backdrop-filter: none !important; backdrop-filter: n
 html[data-lite] { --panel: var(--panel-2); --side: var(--panel-2); --float: var(--panel-2); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
-  body::before { animation: none; }
 }
 /* the reading text size reaches the composer too */
 .editor { font-size: var(--fs, 15.5px); }
@@ -514,7 +509,7 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 @keyframes rm-zoom-in { from { opacity: 0; transform: scale(.88); } to { opacity: 1; transform: none; } }
 @keyframes rm-hop { 40% { transform: translateY(-4px) scale(1.12); } }
 @keyframes rm-ref-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes rm-title-in { from { opacity: 0; transform: translateY(6px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes rm-title-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes rm-label-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 @keyframes rm-mark-pop { from { opacity: 0; transform: scale(.5) rotate(-12deg); } to { opacity: 1; transform: none; } }
 @keyframes rm-mark-breathe { 50% { transform: scale(1.07); filter: drop-shadow(0 0 22px color-mix(in srgb, var(--accent) 45%, transparent)); } }
@@ -526,11 +521,10 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 
 /* switching folder, account or filter: the title swaps softly, the rows come in one after another */
 .list-head h3 { animation: rm-title-in .4s var(--ease) both; }
-.rows > * { animation: rm-row-in .45s var(--ease) both; }
+.rows > :nth-child(-n + 10) { animation: rm-row-in .45s var(--ease) both; }
 .rows > :nth-child(2) { animation-delay: 22ms; } .rows > :nth-child(3) { animation-delay: 44ms; } .rows > :nth-child(4) { animation-delay: 66ms; }
 .rows > :nth-child(5) { animation-delay: 88ms; } .rows > :nth-child(6) { animation-delay: 110ms; } .rows > :nth-child(7) { animation-delay: 132ms; }
 .rows > :nth-child(8) { animation-delay: 154ms; } .rows > :nth-child(9) { animation-delay: 176ms; } .rows > :nth-child(10) { animation-delay: 198ms; }
-.rows > :nth-child(n + 11) { animation-delay: 220ms; }
 .list-empty .zero { animation: rm-mark-pop .6s cubic-bezier(.3, 1.5, .5, 1) both; }
 
 /* a row answers the mouse: its picture grows a little, a press sinks it */
@@ -854,18 +848,13 @@ html.resizing *, html.resizing *::before, html.resizing *::after { animation-pla
 .fi-row:hover .fi-acts { opacity: 1; }
 .fi-main b, .fi-main small { display: block; }
 
-/* the drifting backdrop rests when RoarMail is not in front: every glass panel above it re-blurs on each frame
-   it moves (29 Oct 2026, "make it lighter") */
-html[data-away] body::before { animation-play-state: paused !important; }
-@media (prefers-reduced-motion: reduce) { body::before { animation: none !important; } }
-
 /* Motion (Alex, 29 Oct: "more animation, slides, with the arrows, and when the window grows"). All of it rests
    under Settings > Appearance > Motion off (html[data-still]) and the system's Reduce motion. */
 @keyframes rm-in-right { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
 @keyframes rm-in-down  { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: none; } }
 @keyframes rm-in-up    { from { opacity: 0; transform: translateY(-34px); } to { opacity: 1; transform: none; } }
 @keyframes rm-in-left  { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
-@keyframes rm-reflow   { 0% { transform: scale(.982); filter: saturate(.85); } 60% { transform: scale(1.004); } 100% { transform: none; filter: none; } }
+@keyframes rm-reflow   { 0% { transform: scale(.982); } 60% { transform: scale(1.004); } 100% { transform: none; } }
 html:not([data-still]) .read.in-click { animation: rm-in-right .42s var(--ease) both; }
 html:not([data-still]) .read.in-down { animation: rm-in-down .38s var(--spring) both; }
 html:not([data-still]) .read.in-up { animation: rm-in-up .38s var(--spring) both; }
@@ -888,3 +877,13 @@ html:not([data-still]) .rail-tools .acc:hover { transform: translateY(-2px); tra
 .sheet :is(.fi-search, .ct-search) input, .sheet :is(.fi-search, .ct-search) input:focus {
   height: 100% !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; outline: 0 !important; }
 .sheet :is(.fi-search, .ct-search):focus-within { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+/* =====================================================================
+   Lighter and smoother (31 Oct 2026). As in RoarMe: the columns and small floating pieces do not blur what is behind
+   them, only a soft gradient is there; each column repaints alone; while the window changes size nothing blurs, moves
+   or casts a big shadow, so the new area is drawn at once, without lines. Only sheets keep their glass.
+   ===================================================================== */
+:is(.rail, .folders, .list, .viewer, .work-panel, .pill-group, .composer-tools, .quick, .pop, .suggest, .toast, .attach-menu) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+:is(.rail, .folders, .list, .viewer, .work-panel) { contain: layout paint style; }
+html.win-resizing *, html.win-resizing *::before, html.win-resizing *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; transition: none !important; animation-play-state: paused !important; }
+html.win-resizing :is(.rail, .folders, .list, .viewer, .work-panel) { box-shadow: none !important; }
+html.win-resizing iframe { pointer-events: none; }

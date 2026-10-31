@@ -96,10 +96,22 @@ export function applyLook(s: Settings) {
 export function applyMode(mode: Settings['appearance']) {
   const r = document.documentElement
   if (followSystem) { dark().removeEventListener('change', followSystem); followSystem = null }
-  const set = () => { r.dataset.mode = mode === 'light' || (mode === 'system' && !dark().matches) ? 'light' : 'dark' }
+  const set = () => {
+    r.dataset.mode = mode === 'light' || (mode === 'system' && !dark().matches) ? 'light' : 'dark'
+    // the window's own colour follows, so a growing window never shows the other mode at its edges
+    window.roarmail?.windowColor?.(r.dataset.mode === 'light' ? '#eceef1' : '#1b1e23')
+  }
   set()
   if (mode === 'system') { followSystem = set; dark().addEventListener('change', set) }
 }
+
+// while the window changes size nothing blurs or moves (html.win-resizing in look.css)
+let sizing: ReturnType<typeof setTimeout> | undefined
+window.addEventListener('resize', () => {
+  document.documentElement.classList.add('win-resizing')
+  clearTimeout(sizing)
+  sizing = setTimeout(() => document.documentElement.classList.remove('win-resizing'), 160)
+}, { passive: true })
 
 const calm = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
   || document.documentElement.dataset.still === '1' || document.documentElement.dataset.lite === '1'

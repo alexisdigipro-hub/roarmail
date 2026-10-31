@@ -717,6 +717,8 @@ export class MailService {
       this.recount(folderId)
       this.emit({ type: 'messages', accountId })
       this.emit({ type: 'folders', accountId })
+      // the database work shares its thread with the window: a breath between batches keeps the app answering
+      await new Promise((ok) => setTimeout(ok, 120))
     }
     return added
   }
@@ -1210,8 +1212,11 @@ export class MailService {
     if (!rows.length) return
     const byGm = this.db.prepare('select thread_id from messages where account_id = ? and gm_thrid = ? and thread_id is not null limit 1')
     const byMsgId = this.db.prepare('select thread_id from messages where account_id = ? and message_id = ? and thread_id is not null limit 1')
-    const byChild = this.db.prepare(`select thread_id from messages where account_id = ? and thread_id is not null
-      and (in_reply_to = ? or instr(refs, ?) > 0) limit 1`)
+    // a reply to this message that came first. Reading every message's references is slow, and it runs on the same
+    // thread as the window: a big batch from the download uses the direct reply only (schema009's index)
+    const byReply = this.db.prepare(`select thread_id from messages where account_id = ? and in_reply_to = ? and thread_id is not null limit 1`)
+    const byRefs = rows.length <= 20 ? this.db.prepare(`select thread_id from messages where account_id = ? and thread_id is not null
+      and instr(refs, ?) > 0 limit 1`) : null
     const newThread = this.db.prepare('insert into threads (id, account_id, gm_thrid, subject, last_date) values (?,?,?,?,?)')
     const set = this.db.prepare('update messages set thread_id = ? where id = ?')
     this.db.transaction(() => {
@@ -1224,7 +1229,8 @@ export class MailService {
             if (tid) break
           }
         }
-        if (!tid && r.message_id) tid = (byChild.get(accountId, r.message_id, r.message_id) as Row)?.thread_id
+        if (!tid && r.message_id) tid = (byReply.get(accountId, r.message_id) as Row)?.thread_id
+        if (!tid && r.message_id && byRefs) tid = (byRefs.get(accountId, r.message_id) as Row)?.thread_id
         if (!tid) { tid = uuid(); newThread.run(tid, accountId, r.gm_thrid, r.subject, r.date) }
         set.run(tid, r.id)
       }

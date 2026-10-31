@@ -28,6 +28,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
   openAttachment: call('openAttachment') as MailApi['openAttachment'],
   saveAttachment: call('saveAttachment') as MailApi['saveAttachment'],
   openExternal: call('openExternal') as MailApi['openExternal'],
+  windowColor: call('windowColor') as MailApi['windowColor'],
   refresh: call('refresh') as MailApi['refresh'],
   thread: call('thread') as MailApi['thread'],
   undo: call('undo') as MailApi['undo'],

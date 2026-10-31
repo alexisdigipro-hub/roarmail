@@ -88,7 +88,12 @@ export default function App() {
     if (s.accountId === 'all') api.unifiedFolders().then(setFolders)
     else api.folders(s.accountId).then(setFolders)
   }, [])
-  const loadRows = useCallback(() => api.messages(scopeRef.current).then(setRows), [])
+  // only the newest request may fill the list, so a slow answer never replaces a folder just opened
+  const rowsAsked = useRef(0)
+  const loadRows = useCallback(() => {
+    const n = ++rowsAsked.current
+    return api.messages(scopeRef.current).then((r) => { if (n === rowsAsked.current) setRows(r) })
+  }, [])
   const loadOutbox = useCallback(() => api.outbox().then(setOutbox), [])
 
   const flash = useCallback((tst: Toast) => {
