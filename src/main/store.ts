@@ -23,6 +23,11 @@ export function openStore(): DB {
   const db = new Database(path.join(app.getPath('userData'), 'roarmail.db'))
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  // the database shares its thread with the window: safe with WAL, commits do not wait for the disk, reads come from memory
+  db.pragma('synchronous = NORMAL')
+  db.pragma('cache_size = -32000')
+  db.pragma('temp_store = MEMORY')
+  db.pragma('mmap_size = 268435456')
   // the search index holds text without accents (Greek tonos and dialytika too): see schema005.sql
   db.function('fold', { deterministic: true }, (v: unknown) => (v == null ? null : fold(String(v))))
   const version = db.pragma('user_version', { simple: true }) as number

@@ -92,6 +92,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true,
+      v8CacheOptions: 'bypassHeatCheck', // the screens' code is kept compiled, so the window opens faster
     },
   })
   if (keptMax) win.maximize()

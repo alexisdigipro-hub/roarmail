@@ -61,6 +61,7 @@ async function fetchIcon(key: string): Promise<string | null> {
 
 const COLORS = ['#d40000', '#ff8a00', '#2f9bff', '#33c27f', '#b04cff', '#ff4fa3', '#00b8b0', '#c9a227']
 const FIRST_SYNC_LIMIT = 300
+const FLAG_WINDOW = 2000
 const PREFETCH = 40
 const UNDO_MS = 5e3
 
@@ -242,6 +243,9 @@ export class MailService {
   private state = new Map<string, { state: Account['state']; error?: string }>()
   private retry = new Map<string, NodeJS.Timeout>()
   private backfilling = new Set<string>()
+  private backfillQueue: Promise<unknown> = Promise.resolve()
+  private flagPass = new Map<string, number>()
+  private started = now()
   private tokens = new Map<string, { access: string; expires: number }>()
   private poll: NodeJS.Timeout | null = null
   private lastClean = 0
@@ -596,7 +600,11 @@ export class MailService {
   }
 
   startAll() {
-    for (const a of this.accounts()) this.startAccount(a.id)
+    // two accounts at a time: nine connecting at once is what made the first seconds heavy (31 Oct 2026)
+    const ids = this.accounts().map((a) => a.id)
+    let next = 0
+    const worker = async () => { while (next < ids.length) await this.startAccount(ids[next++]) }
+    worker(); worker()
     this.schedulePoll()
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000)
   }
@@ -629,7 +637,8 @@ export class MailService {
       }
       const sz = this.snoozedFolder(id)
       if (sz) await this.syncFolder(id, sz.id, false).catch(() => {})
-      this.backfill(id).catch(() => {})
+      // one account at a time, however many there are
+      this.backfillQueue = this.backfillQueue.then(() => this.backfill(id)).catch(() => {})
     } catch (e) {
       const code = friendly(e)
       this.setState(id, transient(code) ? 'offline' : 'error', code)
@@ -1101,11 +1110,17 @@ export class MailService {
           range = `${max + 1}:*`
         }
 
-        // flags of what we already have, and what disappeared on the server
+        // flags of what we already have, and what disappeared on the server. A folder can hold tens of thousands of
+        // messages and this runs on the window's thread (31 Oct 2026): the newest 2000 each time; the whole folder only
+        // when the server has fewer than we do, or every 6 hours; and only messages that really changed are written
         if (max != null) {
-          const min = (this.db.prepare('select min(uid) m from message_folders where folder_id = ?').get(folderId) as Row).m as number
-          const local = new Map((this.db.prepare(`select mf.uid, mf.message_id, m.pending_op from message_folders mf join messages m on m.id = mf.message_id
-            where mf.folder_id = ?`).all(folderId) as Row[]).map((r) => [r.uid, r]))
+          const known = (this.db.prepare('select count(*) n from message_folders where folder_id = ?').get(folderId) as Row).n as number
+          const whole = known <= FLAG_WINDOW || known > (mb.exists || 0) || now() - (this.flagPass.get(folderId) ?? this.started) > 6 * 36e5
+          if (whole) this.flagPass.set(folderId, now())
+          const min = (this.db.prepare(whole ? 'select min(uid) m from message_folders where folder_id = ?'
+            : `select min(uid) m from (select uid from message_folders where folder_id = ? order by uid desc limit ${FLAG_WINDOW})`).get(folderId) as Row).m as number
+          const local = new Map((this.db.prepare(`select mf.uid, mf.message_id, m.pending_op, m.seen, m.flagged, m.answered from message_folders mf
+            join messages m on m.id = mf.message_id where mf.folder_id = ? and mf.uid >= ?`).all(folderId, min) as Row[]).map((r) => [r.uid, r]))
           // flags with a change still waiting in the queue keep the local value
           const waiting = new Set((this.db.prepare(`select payload from operations where status in ('queued','running') and account_id = ?
             and kind in ('seen','unseen','flag','unflag')`).all(accountId) as Row[]).flatMap((o) => JSON.parse(o.payload).ids as string[]))
@@ -1115,11 +1130,14 @@ export class MailService {
           for await (const m of c.fetch(`${min}:${max}`, { uid: true, flags: true }, { uid: true })) {
             remote.add(m.uid)
             const l = local.get(m.uid)
-            if (l && !waiting.has(l.message_id)) updates.push([m.flags?.has('\\Seen') ? 1 : 0, m.flags?.has('\\Flagged') ? 1 : 0, m.flags?.has('\\Answered') ? 1 : 0, l.message_id])
+            if (!l || waiting.has(l.message_id)) continue
+            const seen = m.flags?.has('\\Seen') ? 1 : 0, flagged = m.flags?.has('\\Flagged') ? 1 : 0, answered = m.flags?.has('\\Answered') ? 1 : 0
+            if (seen !== l.seen || flagged !== l.flagged || answered !== l.answered) updates.push([seen, flagged, answered, l.message_id])
           }
-          this.db.transaction(() => {
+          const gone = [...local].filter(([uid, l]) => !remote.has(uid) && !l.pending_op)
+          if (updates.length || gone.length) this.db.transaction(() => {
             for (const u of updates) setFlags.run(...u)
-            for (const [uid, l] of local) if (!remote.has(uid) && !l.pending_op) this.deleteMessage(l.message_id)
+            for (const [, l] of gone) this.deleteMessage(l.message_id)
           })()
         }
 
@@ -1292,7 +1310,9 @@ export class MailService {
       : scope.sort === 'attachments' ? `att_n > 0 ${dir}, last_date desc`
       : scope.sort === 'account' ? `m.account_id ${dir}, last_date desc`
       : `last_date ${dir}`
-    const rows = this.db.prepare(`select m.*, max(m.date) as last_date, count(*) as n, sum(m.seen = 0) as unread_n,
+    // the columns a row shows, not m.*: bodies copied through the sort made this three times slower (measured on 25,000 messages)
+    const rows = this.db.prepare(`select m.id, m.account_id, m.thread_id, m.from_name, m.from_email, m.subject, m.snippet, m.date, m.seen, m.flagged, m.answered,
+        m.has_attachments, max(m.date) as last_date, count(*) as n, sum(m.seen = 0) as unread_n,
         sum(m.flagged) as flag_n, sum(m.has_attachments) as att_n, group_concat(m.id) as ids
       from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
       where ${where} and ${ON} and m.pending_op is null ${day ? 'and m.date >= @dayFrom and m.date < @dayTo' : ''}

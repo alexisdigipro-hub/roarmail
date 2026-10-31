@@ -1,6 +1,6 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, Rule, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
 import { Icon, folderIcon } from './components/Icon'
@@ -77,6 +77,7 @@ export default function App() {
   const openSearch = () => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 0) }
   const closeSearch = () => { setQuery(''); setSearchOpen(false) }
   const scopeRef = useRef(scope); scopeRef.current = scope
+  const rowActs = useRef<RowActs>(null!)
   const [intro, setIntro] = useState(true)
   const [widths, setWidth] = useWidths()
   const folderLens = useLens<HTMLDivElement>(`${scope.accountId}|${scope.folderId || ''}|${scope.role || ''}|${folders.length}`)
@@ -569,6 +570,13 @@ export default function App() {
   const waiting = outbox.filter((o) => o.status !== 'failed' && !o.scheduled && o.sendAt < Date.now() - 1000)
   const later = outbox.filter((o) => o.status !== 'failed' && o.scheduled)
 
+  rowActs.current = {
+    click, menu: rowMenu, block: async (r) => { await api.blockSender(r.fromEmail, true); act([r], 'trash') }, act: (r, a) => act([r], a),
+    snooze: (r) => openSnooze([r]), move: (r) => openMove([r]),
+    pick: (r) => { const k = keyOf(r); setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k) },
+    drag: startDrag, dragEnd: () => { dragging.current = null; setDropOn('') }, swipe: (r, side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight),
+  }
+
   return (
     <div className={`app ${intro ? 'intro' : ''}`} style={{ ['--w-folders' as any]: `${widths.folders}px`, ['--w-list' as any]: `${widths.list}px` }}>
       {/* the rail opens wide to show each account's name and address next to its picture (29 Oct 2026) */}
@@ -805,11 +813,8 @@ export default function App() {
         {/* a new folder, account or filter brings its rows in again, one after another (RoarMe's stagger) */}
         <div className="rows" key={`${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`}>
           {list.map((r) => (
-            <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))} acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined}
-              prefs={prefs} onClick={(e) => click(r, e)} onMenu={(e) => rowMenu(r, e)} onBlock={async () => { await api.blockSender(r.fromEmail, true); act([r], 'trash') }} onAct={(a) => act([r], a)} onSnooze={() => openSnooze([r])} onMove={() => openMove([r])} multi={selected.length > 1}
-              onPick={() => { const k = keyOf(r); setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k) }}
-              onDrag={(e) => startDrag(r, e)} onDragEnd={() => { dragging.current = null; setDropOn('') }}
-              onSwipe={(side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight)} />
+            <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))}
+              acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined} prefs={prefs} multi={selected.length > 1} acts={rowActs} />
           ))}
           {!list.length && (
             <div className="list-empty">
@@ -897,11 +902,27 @@ export default function App() {
 }
 
 /** one conversation in the list: hover buttons, and a two-finger swipe on the trackpad */
-function Row({ r, pic, on, multi, acc, prefs, onClick, onMenu, onBlock, onAct, onSnooze, onMove, onPick, onDrag, onDragEnd, onSwipe }: {
-  r: MessageRow; pic: string | null; on: boolean; multi: boolean; acc?: Account; prefs: Settings
-  onClick: (e: MouseEvent) => void; onMenu: (e: MouseEvent) => void; onBlock: () => void; onAct: (a: Action) => void; onSnooze: () => void; onMove: () => void; onPick: () => void
-  onDrag: (e: DragEvent) => void; onDragEnd: () => void; onSwipe: (side: 'left' | 'right') => void
-}) {
+interface RowActs {
+  click: (r: MessageRow, e: MouseEvent) => void; menu: (r: MessageRow, e: MouseEvent) => void; block: (r: MessageRow) => void
+  act: (r: MessageRow, a: Action) => void; snooze: (r: MessageRow) => void; move: (r: MessageRow) => void; pick: (r: MessageRow) => void
+  drag: (r: MessageRow, e: DragEvent) => void; dragEnd: () => void; swipe: (r: MessageRow, side: 'left' | 'right') => void
+}
+// a row draws again only when something it shows changed, not on every keystroke, toast or selection elsewhere
+const sameRow = (a: MessageRow, b: MessageRow) => a === b || (a.id === b.id && a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.date === b.date
+  && a.count === b.count && a.subject === b.subject && a.snippet === b.snippet && a.fromName === b.fromName && a.hasAttachments === b.hasAttachments && a.ids.length === b.ids.length)
+const Row = memo(RowView, (a, b) => a.on === b.on && a.multi === b.multi && a.pic === b.pic && a.acc === b.acc && a.prefs === b.prefs && sameRow(a.r, b.r))
+
+function RowView({ r, pic, on, multi, acc, prefs, acts }: { r: MessageRow; pic: string | null; on: boolean; multi: boolean; acc?: Account; prefs: Settings; acts: { current: RowActs } }) {
+  const onClick = (e: MouseEvent) => acts.current.click(r, e)
+  const onMenu = (e: MouseEvent) => acts.current.menu(r, e)
+  const onBlock = () => acts.current.block(r)
+  const onAct = (a: Action) => acts.current.act(r, a)
+  const onSnooze = () => acts.current.snooze(r)
+  const onMove = () => acts.current.move(r)
+  const onPick = () => acts.current.pick(r)
+  const onDrag = (e: DragEvent) => acts.current.drag(r, e)
+  const onDragEnd = () => acts.current.dragEnd()
+  const onSwipe = (side: 'left' | 'right') => acts.current.swipe(r, side)
   const [dx, setDx] = useState(0)
   // a picture that does not load falls back to the initials
   const [badPic, setBadPic] = useState(false)

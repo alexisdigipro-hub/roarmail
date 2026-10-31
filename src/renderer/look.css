@@ -489,16 +489,7 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 
 /* the actions on a message pop up when the mouse comes over it (29 Oct 2026): the capsule springs up from the right, its buttons follow one by one */
 .msg:hover .quick { transform-origin: right center; animation: rm-quick-in .32s var(--spring) both; }
-.msg:hover .quick button { animation: rm-quick-btn .28s var(--ease) both; }
-.msg:hover .quick button:nth-child(1) { animation-delay: .03s; }
-.msg:hover .quick button:nth-child(2) { animation-delay: .06s; }
-.msg:hover .quick button:nth-child(3) { animation-delay: .09s; }
-.msg:hover .quick button:nth-child(4) { animation-delay: .12s; }
-.msg:hover .quick button:nth-child(5) { animation-delay: .15s; }
-.msg:hover .quick button:nth-child(6) { animation-delay: .18s; }
 @keyframes rm-quick-in { from { opacity: 0; transform: translateY(6px) scale(.82); } to { opacity: 1; transform: none; } }
-@keyframes rm-quick-btn { from { opacity: 0; transform: scale(.5); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .msg:hover .quick, .msg:hover .quick button { animation: none; } }
 
 /* =====================================================================
    RoarMe's motion, everywhere in RoarMail (29 Oct 2026). Same rules as RoarMe: things arrive with a little spring,
@@ -880,9 +871,11 @@ html:not([data-still]) .rail-tools .acc:hover { transform: translateY(-2px); tra
 /* =====================================================================
    Lighter and smoother (31 Oct 2026). As in RoarMe: the columns and small floating pieces do not blur what is behind
    them, only a soft gradient is there; each column repaints alone; while the window changes size nothing blurs, moves
-   or casts a big shadow, so the new area is drawn at once, without lines. Only sheets keep their glass.
+   or casts a big shadow, so the new area is drawn at once, without lines. Nothing in the window uses blur any more (31 Oct, measured: sheets are 96% solid anyway).
    ===================================================================== */
-:is(.rail, .folders, .list, .viewer, .work-panel, .pill-group, .composer-tools, .quick, .pop, .suggest, .toast, .attach-menu) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+:is(.rail, .folders, .list, .viewer, .work-panel, .pill-group, .composer-tools, .quick, .pop, .suggest, .toast, .attach-menu, .sheet, .sheet-wrap) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+/* the columns' wide soft shadows cost a repaint of a big area and hardly show in the small gap between them */
+:is(.rail, .folders, .list, .viewer, .work-panel) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 2px 10px rgba(0, 0, 0, .12); }
 :is(.rail, .folders, .list, .viewer, .work-panel) { contain: layout paint style; }
 html.win-resizing *, html.win-resizing *::before, html.win-resizing *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; transition: none !important; animation-play-state: paused !important; }
 html.win-resizing :is(.rail, .folders, .list, .viewer, .work-panel) { box-shadow: none !important; }
