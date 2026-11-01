@@ -13,7 +13,11 @@ import { TemplatesMenu, filled, templateValues } from './Templates'
 
 /** a quoted message inside the writing window: no pictures from the network in its styles, nothing that could sit
  * over the app (security review 29 Oct 2026) */
-const tame = (html: string) => html.replace(/url\(\s*['"]?\s*(https?:)?\/\/[^)]*\)/gi, 'none').replace(/position\s*:\s*(fixed|absolute|sticky)/gi, 'position:static')
+// quoted mail can neither load anything nor cover the window: an inline style with url(, image-set, a CSS escape or a
+// position goes whole (security review 1 Nov 2026: escapes like h\74tps slipped past a narrower pattern)
+const tame = (html: string) => html
+  .replace(/\sstyle\s*=\s*("[^"]*"|'[^']*')/gi, (m) => (/url\s*\(|image-set|\\|position|@import|expression/i.test(m) ? '' : m))
+  .replace(/<(video|audio|picture|source|track)\b[^>]*>/gi, '').replace(/\sposter\s*=\s*("[^"]*"|'[^']*')/gi, '')
 
 export interface ComposeSeed {
   kind: ComposeKind | 'new' | 'draft'

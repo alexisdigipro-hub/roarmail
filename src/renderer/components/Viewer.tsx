@@ -351,7 +351,7 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
     const source = m.html || `<pre class="plain">${plain}</pre>`
     DOMPurify.removeAllHooks()
     DOMPurify.addHook('afterSanitizeAttributes', (node: Element) => {
-      if (node.tagName === 'A') { node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noreferrer') }
+      if (node.tagName === 'A' || node.tagName === 'AREA') { node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noreferrer') }
       // tracking pixels never load, not even with images shown
       if (node.tagName === 'IMG' && prefs.blockTrackers && isTracker(node)) {
         trackers++
@@ -383,7 +383,11 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
       ${prefs.plainMono ? `pre.plain{font-family:${mono};font-size:.92em}` : ''}${quotes}table{max-width:100%}</style>`
     // with pictures off, the frame itself refuses anything from the network (security review 29 Oct 2026): a <style>
     // block, an entity-hidden address, image-set() or an SVG image could otherwise still call home
-    const csp = images ? '' : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid: blob:; style-src 'unsafe-inline'; font-src data:">`
+    // with pictures on, still only the web: never file: (on Windows //host/x would be a network share that sends the
+    // person's login hash, security review 1 Nov 2026), no scripts, frames or forms
+    const csp = images
+      ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data: cid: blob:; style-src 'unsafe-inline' https:; font-src https: data:; media-src https: data:">`
+      : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid: blob:; style-src 'unsafe-inline'; font-src data:">`
     return { html: csp + css + clean, blocked, trackers }
   }, [m, images, prefs.detectLinks, prefs.blockTrackers, prefs.textSize, prefs.messageFont, prefs.monoFont, prefs.plainMono, prefs.quoteColors, prefs.quote1, prefs.quote2, prefs.quote3])
   // what Print and Save as PDF put on paper: the body exactly as shown here
@@ -401,12 +405,12 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
       doc.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit))
       // hovering a link shows where it really goes; a link that looks wrong asks first
       doc.addEventListener('mouseover', (e) => {
-        const a = (e.target as Element).closest?.('a')
+        const a = (e.target as Element).closest?.('a,area')
         setHover(a ? (prefs.stripTracking ? stripTracking(a.getAttribute('href') || '') : a.getAttribute('href') || '') : '')
       })
       doc.addEventListener('mouseleave', () => setHover(''))
       doc.addEventListener('click', (e) => {
-        const a = (e.target as Element).closest?.('a')
+        const a = (e.target as Element).closest?.('a,area')
         if (!a) return
         e.preventDefault()
         let href = a.getAttribute('href') || ''

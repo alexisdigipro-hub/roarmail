@@ -106,6 +106,7 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
   // only RoarMail's own page: a file dropped on the window (an .html from a mail) must not take it over
   const home = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href
+  win.webContents.on('will-frame-navigate', (e) => { if (!e.isMainFrame && !/^about:(srcdoc|blank)/.test(e.url)) e.preventDefault() })
   win.webContents.on('will-navigate', (e, url) => { if (url.split('#')[0] !== home) { e.preventDefault(); if (!url.startsWith('file:')) openSafe(url) } })
   const allowed = new Set(['clipboard-sanitized-write', 'fullscreen', 'local-fonts'])
   win.webContents.session.setPermissionRequestHandler((_w, p, cb) => cb(allowed.has(p)))
@@ -130,7 +131,10 @@ function createWindow() {
  * A file from a mail carries the system's "downloaded from the internet" mark (security review 29 Oct 2026), so
  * Gatekeeper on a Mac, and SmartScreen and Office's Protected View on Windows, still check it before it runs.
  */
-const RISKY = /\.(exe|com|bat|cmd|scr|pif|msi|msp|hta|js|jse|vbs|vbe|wsf|wsh|ps1|psm1|lnk|url|reg|cpl|jar|app|command|tool|pkg|mpkg|terminal|workflow|scpt|applescript|sh|dmg|iso)$/i
+// opened straight from a mail only when the type cannot run anything (security review 1 Nov 2026: a list of bad types
+// always misses one, .msc, .chm, .one, .library-ms...); macro Office files, archives and the rest are shown in their folder
+const SAFE_OPEN = /\.(pdf|png|jpe?g|gif|webp|heic|heif|tiff?|bmp|txt|rtf|csv|ics|vcf|docx|xlsx|pptx|pages|numbers|key|odt|ods|odp|mp3|m4a|wav|aiff?|flac|ogg|mp4|m4v|mov|avi|mkv|webm|fdx|fountain|fadein|srt|vtt|json|md|eml)$/i
+let picked = '' // the last folder chosen in the folder picker
 function markDownloaded(file: string) {
   try {
     if (process.platform === 'win32') fs.writeFileSync(`${file}:Zone.Identifier`, '[ZoneTransfer]\r\nZoneId=3\r\n')
@@ -459,7 +463,8 @@ app.whenReady().then(() => {
   handle('mail:makeDefaultMail', () => { app.setAsDefaultProtocolClient('mailto'); return app.isDefaultProtocolClient('mailto') })
   handle('mail:pickFolder', async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
-    return r.canceled ? null : r.filePaths[0] || null
+    picked = r.canceled ? '' : r.filePaths[0] || ''
+    return picked || null
   })
   // Settings > Rules and Settings > Templates
   handle('mail:rules', () => mail.rules())
@@ -516,7 +521,10 @@ app.whenReady().then(() => {
   handle('mail:saveSignature', (_e, sig) => mail.saveSignature(sig))
   handle('mail:deleteSignature', (_e, id) => mail.deleteSignature(id))
   handle('mail:settings', () => mail.settings())
-  handle('mail:setSetting', (_e, k, v) => { mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v); if (k === 'dockMode') applyDock(v) })
+  handle('mail:setSetting', (_e, k, v) => {
+    // the downloads folder is only one the person chose in the folder picker (or none)
+    if (k === 'downloadsFolder' && v && v !== picked) return
+    mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v); if (k === 'dockMode') applyDock(v) })
   handle('mail:snooze', (_e, ids, until) => mail.snooze(ids, until))
   handle('mail:snoozed', () => mail.snoozed())
   handle('mail:unsnooze', (_e, id) => mail.unsnooze(id))
@@ -593,7 +601,7 @@ app.whenReady().then(() => {
     fs.writeFileSync(file, a.content)
     markDownloaded(file)
     // a program or script is never started from a mail: it is shown in its folder, marked as from the internet
-    if (RISKY.test(a.filename)) { shell.showItemInFolder(file); return }
+    if (!SAFE_OPEN.test(a.filename)) { shell.showItemInFolder(file); return }
     // Mac: shown in Quick Look over the window (29 Oct 2026), which also has a button to open it in its app
     if (process.platform === 'darwin' && win) win.previewFile(file, a.filename)
     else await shell.openPath(file)
@@ -644,7 +652,10 @@ app.whenReady().then(() => {
       ],
     },
     { role: 'editMenu' },
-    { role: 'viewMenu' },
+    // no Developer Tools in the released app (security review 1 Nov 2026): they would open every secret of the window
+    app.isPackaged
+      ? { label: 'View', submenu: [{ role: 'resetZoom' as const }, { role: 'zoomIn' as const }, { role: 'zoomOut' as const }, { type: 'separator' as const }, { role: 'togglefullscreen' as const }] }
+      : { role: 'viewMenu' as const },
     { role: 'windowMenu' },
   ]))
 })

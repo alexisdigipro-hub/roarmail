@@ -165,9 +165,21 @@ function hasAttachment(node: any): boolean {
 /** a password, or a Microsoft access token (Sign in with Microsoft) */
 type Cred = string | { accessToken: string }
 
+/** a sender's file name made safe to save: no path, no control or text-direction characters (an RTL override shows
+ *  invoice‮fdp.exe as invoiceexe.pdf), no trailing dots or spaces (Windows drops them: invoice.exe. runs), no device names */
+export function safeName(name: string): string {
+  let n = name.replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').replace(/[/\\:*?"<>|]/g, '_').replace(/[. ]+$/, '').trim()
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(n)) n = '_' + n
+  return n || 'attachment'
+}
+
+/** a server with no encryption chosen: the password still never goes in the clear, STARTTLS is required (security
+ *  review 1 Nov 2026: someone on the network could strip it); only a server on this computer may be plain */
+const local = (host: string) => /^(localhost|127\.\d+\.\d+\.\d+|::1)$/i.test(host)
+
 function imapOptions(cfg: { imapHost: string; imapPort: number; imapTls: string; username: string }, cred: Cred) {
   return {
-    host: cfg.imapHost, port: cfg.imapPort, secure: cfg.imapTls === 'tls', doSTARTTLS: cfg.imapTls === 'starttls' ? true : undefined,
+    host: cfg.imapHost, port: cfg.imapPort, secure: cfg.imapTls === 'tls', doSTARTTLS: cfg.imapTls === 'starttls' || (cfg.imapTls === 'none' && !local(cfg.imapHost)) ? true : undefined,
     auth: typeof cred === 'string' ? { user: cfg.username, pass: cred } : { user: cfg.username, accessToken: cred.accessToken }, logger: false as const, emitLogs: false,
     tls: { servername: cfg.imapHost }, connectionTimeout: 20e3, greetingTimeout: 15e3, socketTimeout: 5 * 60e3,
   }
@@ -175,7 +187,7 @@ function imapOptions(cfg: { imapHost: string; imapPort: number; imapTls: string;
 
 function smtpTransport(cfg: { smtpHost: string; smtpPort: number; smtpTls: string; username: string }, cred: Cred) {
   return nodemailer.createTransport({
-    host: cfg.smtpHost, port: cfg.smtpPort, secure: cfg.smtpTls === 'tls', requireTLS: cfg.smtpTls === 'starttls',
+    host: cfg.smtpHost, port: cfg.smtpPort, secure: cfg.smtpTls === 'tls', requireTLS: cfg.smtpTls === 'starttls' || (cfg.smtpTls === 'none' && !local(cfg.smtpHost)),
     auth: typeof cred === 'string' ? { user: cfg.username, pass: cred } : { type: 'OAuth2', user: cfg.username, accessToken: cred.accessToken }, tls: { servername: cfg.smtpHost }, connectionTimeout: 20e3,
   })
 }
@@ -1459,7 +1471,7 @@ export class MailService {
       references: refs || undefined,
       html: typeof mail.html === 'string' ? mail.html : undefined, text: mail.text || undefined,
       attachments: mail.attachments
-        .map((a, i) => ({ id: `${id}:${i}`, filename: a.filename || 'attachment', mime: a.contentType, size: a.size,
+        .map((a, i) => ({ id: `${id}:${i}`, filename: safeName(a.filename || 'attachment'), mime: a.contentType, size: a.size,
           // the text/calendar alternative of an invitation is the invite card, not a file
           inline: !!(a.related || (a.contentDisposition === 'inline' && a.cid)) || (isCalendar(a) && !a.filename) }))
         .filter((a) => !a.inline),
@@ -1517,7 +1529,7 @@ export class MailService {
     const mine = this.myAddresses(row.account_id)
     const inv = text ? readInvite(text, mine) : null
     if (!text || !inv) throw new Error('no-invite')
-    if (!inv.organizer?.address) throw new Error('no-organizer')
+    if (!inv.organizer?.address || !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(inv.organizer.address)) throw new Error('no-organizer')
     const r = this.accountRow(row.account_id)
     const address = attendeeFor(text, mine)
     const alias = this.db.prepare('select name from identities where account_id = ? and lower(email) = lower(?)').get(row.account_id, address) as Row | undefined
@@ -1590,7 +1602,7 @@ export class MailService {
     // a file listed from the message's structure (Files, before the message was read) is found by its name
     const a = i.startsWith('n:') ? mail.attachments.find((x) => (x.filename || 'attachment') === i.slice(2)) : mail.attachments[Number(i)]
     if (!a) throw new Error('attachment not found')
-    return { filename: (a.filename || 'attachment').replace(/[/\\:*?"<>|]/g, '_'), content: a.content }
+    return { filename: safeName(a.filename || 'attachment'), content: a.content }
   }
 
   search(query: string, accountId?: string): MessageRow[] {
@@ -1700,7 +1712,7 @@ export class MailService {
         and m.account_id in (select id from accounts where enabled = 1) ${accountId !== 'all' ? 'and m.account_id = @acc' : ''}
         and (fold(a.filename) like @q or fold(coalesce(m.from_name, '')) like @q or fold(coalesce(m.from_email, '')) like @q or fold(m.subject) like @q)
       order by m.date desc limit 50000`).all({ q, acc: accountId }) as Row[]
-    const all = rows.map((r): MailFile => ({ id: r.id, filename: r.filename, size: r.size || 0, mime: r.mime || '', kind: fileKind(r.filename, r.mime || ''),
+    const all = rows.map((r): MailFile => ({ id: r.id, filename: safeName(r.filename || 'attachment'), size: r.size || 0, mime: r.mime || '', kind: fileKind(r.filename, r.mime || ''),
       date: r.date, fromName: r.from_name || '', fromEmail: r.from_email || '', subject: r.subject || '', accountId: r.account_id, messageId: r.mid }))
     const counts: Record<string, number> = {}
     for (const f of all) counts[f.kind] = (counts[f.kind] || 0) + 1
