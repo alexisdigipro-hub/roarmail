@@ -316,7 +316,8 @@ app.whenReady().then(() => {
   handle('mail:clearCache', () => mail.clearCache())
   handle('mail:contacts', (_e, q) => mail.contacts(q))
   handle('mail:thread', (_e, key) => mail.thread(key))
-  handle('mail:act', (_e, ids, action, target) => mail.act(ids, action, target))
+  // what is done by hand teaches RoarMail which senders you ignore (1 Nov 2026); rules and blocked senders do not
+  handle('mail:act', (_e, ids, action, target) => { try { mail.learnFromAct(ids, action, target) } catch { /* learning never stops the action */ } return mail.act(ids, action, target) })
   handle('mail:undo', (_e, token) => mail.undo(token))
   handle('mail:allowImages', (_e, s) => mail.allowImages(s))
   handle('mail:send', (_e, d, opts) => mail.send(d, opts))
@@ -531,6 +532,12 @@ app.whenReady().then(() => {
   handle('mail:refresh', (_e, id) => mail.refresh(id))
   handle('mail:openExternal', (_e, url) => openSafe(url))
   handle('mail:unsubscribe', (_e, id) => mail.unsubscribe(id))
+  // Promotions apart and learns from you (1 Nov 2026)
+  handle('mail:promotions', (_e, accountId) => mail.promotions(String(accountId)))
+  handle('mail:unsubscribeUnopened', (_e, accountId) => mail.unsubscribeUnopened(String(accountId)))
+  handle('mail:senderLearn', (_e, email) => mail.senderLearn(String(email || '')))
+  handle('mail:notPromotions', (_e, email) => mail.notPromotions(String(email || '')))
+  handle('mail:forgetLearned', () => mail.forgetLearned())
 
   // RoarMe: the account, sharing into chats, tasks and the calendar
   const roarme = new RoarMe(() => emit({ type: 'roarme' }))

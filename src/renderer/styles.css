@@ -371,6 +371,15 @@ html[data-mode='light'] .sheet-wrap { background: rgba(40, 46, 56, .25); }
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #fff; background: rgba(20, 22, 26, .88); pointer-events: none; }
 .danger-banner { color: var(--text); background: color-mix(in srgb, var(--danger) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent); }
 .danger-banner .ic { color: var(--danger); }
+/* the shield (1 Nov 2026): Careful, then one reason a line */
+.shield-banner { align-items: flex-start; }
+.shield-banner > .ic { margin-top: 2px; }
+.shield-banner .block { display: block; min-width: 0; }
+.shield-banner .block + .block { margin-top: 3px; }
+.shield-banner b.block { font-size: 13.5px; margin-bottom: 2px; color: var(--danger); }
+/* the Promotions pill above the Inbox, and Unsubscribe from unopened */
+.promo-chip { cursor: pointer; }
+.promo-chip b { font-weight: 600; }
 .unsub-row { margin: -4px 0 10px 54px; gap: 12px; }
 .tool.on-danger { color: var(--danger); }
 .link-sheet { width: min(520px, 100%); }

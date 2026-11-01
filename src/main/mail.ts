@@ -21,21 +21,12 @@ import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './micros
 import { cleanRule, plan } from './rules'
 import { readSignature, type CardFields } from './contacts'
 import { attendeeFor, buildReply, readInvite } from './ics'
+import { PERSONAL, baseDomain, shield } from './shield'
 import type {
   Account, AccountPatch, Action, Address, Contact, ContactFull, ContactPatch, Draft, MailFile, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
-  MailStats, Rule, Security, ServerConfig, Settings, Signature, SnoozedItem, Template,
+  MailStats, PromoCount, Rule, ServerConfig, Settings, Signature, SnoozedItem, Template,
 } from '../shared/api'
 
-// senders at these are people, not companies: their picture is their Gravatar
-const PERSONAL = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'yahoo.com', 'yahoo.gr', 'ymail.com',
-  'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net', 'zoho.com', 'yandex.com', 'otenet.gr', 'hol.gr', 'windowslive.com'])
-/** mail.news.example.co.uk -> example.co.uk */
-function baseDomain(host: string) {
-  const p = host.split('.').filter(Boolean)
-  if (p.length <= 2) return p.join('.')
-  const second = ['co', 'com', 'org', 'net', 'gov', 'ac', 'edu', 'gr'].includes(p[p.length - 2]) && p[p.length - 1].length === 2
-  return p.slice(second ? -3 : -2).join('.')
-}
 function iconKey(email: string): string | null {
   const m = email.match(/^[^@\s]+@([a-z0-9.-]+\.[a-z]{2,})$/)
   if (!m) return null
@@ -81,11 +72,17 @@ const SETTINGS: Settings = {
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
-  accountOrder: '',
+  accountOrder: '', promosApart: true, learnQuiet: true,
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 /** only accounts that are switched on show anywhere */
 const ON = 'f.account_id in (select id from accounts where enabled = 1)'
+// Promotions apart and learns from you (Alex, 1 Nov 2026), as SQL over a message m:
+/** a sender "Not promotions" was chosen for: their mail always stays in the Inbox */
+const KEPT = 'exists (select 1 from sender_learn k where k.email = m.from_email and k.keep = 1)'
+/** a quiet sender: ignored 3 times (deleted or archived unread; Junk counts 3), never opened, not a VIP, never written to */
+const QUIET = `(exists (select 1 from sender_learn q where q.email = m.from_email and q.ignored >= 3 and q.opened = 0 and q.keep = 0)
+  and not exists (select 1 from contacts c where c.email = m.from_email and (c.vip = 1 or c.use_count > 0)))`
 
 type Row = Record<string, any>
 /** what Move to another computer carries (exportSetup / importSetup), before index.ts encrypts it */
@@ -220,26 +217,6 @@ function friendly(e: any): string {
   return m.slice(0, 300)
 }
 const transient = (code: string) => code === 'network' || code === 'host'
-
-/** sender checks from the receiving server's Authentication-Results, and two common tricks */
-function securityOf(mail: ParsedMail, fromEmail: string): Security {
-  const raw = mail.headers.get('authentication-results') as unknown
-  const first = String(Array.isArray(raw) ? raw[0] ?? '' : raw ?? '')
-  const res = (k: string) => (first.match(new RegExp(`\\b${k}=(\\w+)`, 'i')) || [])[1]?.toLowerCase()
-  const dmarc = res('dmarc'), spf = res('spf'), dkim = res('dkim')
-  const auth: Security['auth'] = !first ? 'none'
-    : dmarc === 'fail' || (spf === 'fail' && (dkim === 'fail' || !dkim)) ? 'fail' : 'pass'
-  const warnings: Security['warnings'] = []
-  if (auth === 'fail') warnings.push('auth')
-  // a display name that is itself an address, but not the real one: "paypal@paypal.com" <x@evil.example>
-  const name = mail.from?.value?.[0]?.name || ''
-  const inName = (name.match(/[\w.+-]+@[\w-]+\.[\w.-]+/) || [])[0]?.toLowerCase()
-  if (inName && inName !== fromEmail) warnings.push('nameSpoof')
-  const replyTo = mail.replyTo?.value?.[0]?.address?.toLowerCase()
-  const dom = (a?: string) => (a || '').split('@')[1]?.split('.').slice(-2).join('.')
-  if (replyTo && fromEmail && dom(replyTo) !== dom(fromEmail)) warnings.push('replyTo')
-  return { auth, warnings, replyTo }
-}
 
 export class MailService {
   private worker = new Map<string, ImapFlow>()
@@ -1190,6 +1167,17 @@ export class MailService {
         for (let i = fresh.length - 1; i >= 0; i--) if (handled.has(fresh[i].id)) fresh.splice(i, 1)
       }
     }
+    // Promotions apart (1 Nov 2026): a list's mail and quiet senders do not notify; quiet senders never do
+    const s = this.settings()
+    const hush = s.promosApart ? this.promoSql(s) : s.learnQuiet ? `(not ${KEPT} and ${QUIET})` : ''
+    if (hush && fresh.length) {
+      const quiet = new Set<string>()
+      for (let i = 0; i < fresh.length; i += 500) {
+        const part = fresh.slice(i, i + 500).map((r) => r.id)
+        for (const r of this.db.prepare(`select m.id from messages m where m.id in (${part.map(() => '?').join(',')}) and ${hush}`).all(...part) as Row[]) quiet.add(r.id)
+      }
+      for (let i = fresh.length - 1; i >= 0; i--) if (quiet.has(fresh[i].id)) fresh.splice(i, 1)
+    }
     if (fresh.length) {
       const tid = this.db.prepare('select thread_id from messages where id = ?')
       this.notify(accountId, fresh.map((r) => ({ ...r, threadId: (tid.get(r.id) as Row)?.thread_id || null })))
@@ -1268,8 +1256,16 @@ export class MailService {
   }
 
   private recount(folderId: string) {
+    // Promotions apart (1 Nov 2026): they do not count toward the Inbox's number (the Promotions pill has its own)
+    const s = this.settings()
+    const apart = s.promosApart && (this.db.prepare('select role from folders where id = ?').get(folderId) as Row | undefined)?.role === 'inbox'
     this.db.prepare(`update folders set unread = (select count(*) from message_folders mf join messages m on m.id = mf.message_id
-      where mf.folder_id = ? and m.seen = 0 and m.pending_op is null) where id = ?`).run(folderId, folderId)
+      where mf.folder_id = ? and m.seen = 0 and m.pending_op is null${apart ? ` and not ${this.promoSql(s)}` : ''}) where id = ?`).run(folderId, folderId)
+  }
+
+  /** a promotion (1 Nov 2026): a list's mail (List-Unsubscribe) or a quiet sender's, unless the sender was kept; over a message m */
+  private promoSql(s: Settings = this.settings()) {
+    return `(not ${KEPT} and (m.list_unsubscribe is not null${s.learnQuiet ? ` or ${QUIET}` : ''}))`
   }
 
   private dropFolderMessages(folderId: string) {
@@ -1284,10 +1280,14 @@ export class MailService {
 
   /** the number on the Dock icon (Settings > General): unread in the inboxes, unread in every folder that holds mail, or none */
   badge() {
-    const mode = this.settings().dockBadge
+    const s = this.settings(), mode = s.dockBadge
     const where = mode === 'all' ? `coalesce(f.role, '') not in ('trash', 'spam', 'sent', 'drafts')` : `f.role = 'inbox'`
+    // Promotions apart (1 Nov 2026): an inbox's promotions do not count
+    const promo = !s.promosApart ? '' : mode === 'all'
+      ? ` and not (${this.promoSql(s)} and exists (select 1 from message_folders x join folders y on y.id = x.folder_id where x.message_id = m.id and y.role = 'inbox'))`
+      : ` and not ${this.promoSql(s)}`
     const n = mode === 'none' ? 0 : (this.db.prepare(`select count(distinct m.id) n from messages m join message_folders mf on mf.message_id = m.id
-      join folders f on f.id = mf.folder_id where ${where} and ${ON} and m.seen = 0 and m.pending_op is null`).get() as Row).n as number
+      join folders f on f.id = mf.folder_id where ${where} and ${ON} and m.seen = 0 and m.pending_op is null${promo}`).get() as Row).n as number
     try { app.setBadgeCount(n) } catch { /* not on this system */ }
   }
 
@@ -1309,6 +1309,12 @@ export class MailService {
     if (day) day.setHours(0, 0, 0, 0)
     // the person button: everything from or to that address, in every folder but Trash and Junk
     const who = scope.person?.toLowerCase().trim()
+    // Promotions (1 Nov 2026): the promos filter shows conversations with any; with Promotions apart the Inbox leaves out
+    // the conversations that are nothing but promotions (a real person's reply in one keeps it there)
+    const s = this.settings()
+    const apart = s.promosApart && !who && !scope.folderId && (scope.role || 'inbox') === 'inbox' && scope.filter !== 'promos'
+    const promoCol = scope.filter === 'promos' || apart ? `, sum(${this.promoSql(s)}) as promo_n` : ''
+    const promos = scope.filter === 'promos' ? 'and promo_n > 0' : apart ? 'and promo_n < n' : ''
     const where = who
       ? `(m.from_email = @who or instr(lower(m.to_json), @whoq) > 0 or instr(lower(m.cc_json), @whoq) > 0) and coalesce(f.role, '') not in ('trash', 'spam')
          ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
@@ -1325,11 +1331,11 @@ export class MailService {
     // the columns a row shows, not m.*: bodies copied through the sort made this three times slower (measured on 25,000 messages)
     const rows = this.db.prepare(`select m.id, m.account_id, m.thread_id, m.from_name, m.from_email, m.subject, m.snippet, m.date, m.seen, m.flagged, m.answered,
         m.has_attachments, max(m.date) as last_date, count(*) as n, sum(m.seen = 0) as unread_n,
-        sum(m.flagged) as flag_n, sum(m.has_attachments) as att_n, group_concat(m.id) as ids
+        sum(m.flagged) as flag_n, sum(m.has_attachments) as att_n, group_concat(m.id) as ids${promoCol}
       from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
       where ${where} and ${ON} and m.pending_op is null ${day ? 'and m.date >= @dayFrom and m.date < @dayTo' : ''}
       group by coalesce(m.thread_id, m.id)
-      having ${byDate ? (scope.oldest ? 'last_date > @cut' : 'last_date < @cut') : '1'} ${having}
+      having ${byDate ? (scope.oldest ? 'last_date > @cut' : 'last_date < @cut') : '1'} ${having} ${promos}
       order by ${order} limit @limit`)
       .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit, today: today.getTime(),
         who: who || '', whoq: who ? `"${who}"` : '', dayFrom: day?.getTime() || 0, dayTo: day ? day.getTime() + 864e5 : 0 }) as Row[]
@@ -1460,7 +1466,22 @@ export class MailService {
     const { row, mail } = await this.parsed(id)
     const fresh = this.db.prepare('select * from messages where id = ?').get(id) as Row
     if (!fresh.seen && this.settings().markRead === 'open') this.act([id], 'seen').catch(() => {})
-    const contact = this.db.prepare('select images_allowed from contacts where email = ?').get(row.from_email) as Row
+    const from = String(row.from_email || '').toLowerCase()
+    // learns from you (1 Nov 2026): a sender whose mail you open is never quiet
+    if (!fresh.seen) this.learnSender(from, 'opened', 1)
+    const contact = this.db.prepare('select images_allowed, blocked, vip, use_count from contacts where email = ?').get(row.from_email) as Row | undefined
+    // the shield: someone you wrote to (or a VIP, or yourself) is known; a first mail is from an address with nothing else here
+    const known = this.ownAddresses().has(from) || !!contact?.vip || (contact?.use_count || 0) > 0
+    const firstTime = !known && !this.db.prepare('select 1 from messages where from_email = ? and id != ? limit 1').get(from, id)
+    const authRaw = mail.headers.get('authentication-results') as unknown
+    const security = shield({
+      authResults: String(Array.isArray(authRaw) ? authRaw[0] ?? '' : authRaw ?? ''),
+      fromName: mail.from?.value?.[0]?.name || '', fromEmail: from, replyTo: mail.replyTo?.value?.[0]?.address || undefined,
+      subject: mail.subject || '', text: mail.text || '', html: typeof mail.html === 'string' ? mail.html : undefined,
+      files: mail.attachments.filter((a) => a.filename && !a.related).map((a) => String(a.filename)),
+      firstTime, known, list: !!row.list_unsubscribe,
+    })
+    if (security.files) security.files = security.files.map(safeName)
     const list = (a: any): Address[] => (a ? (Array.isArray(a) ? a : [a]).flatMap((x: any) => x.value || []) : [])
       .map((x: any) => ({ name: x.name || undefined, address: x.address || '' }))
     const refs = Array.isArray(mail.references) ? mail.references.join(' ') : mail.references
@@ -1479,7 +1500,7 @@ export class MailService {
       imagesAllowed: !!contact?.images_allowed && !this.settings().privacyMode,
       listUnsubscribe: row.list_unsubscribe || undefined,
       oneClickUnsubscribe: /one-click/i.test(String(mail.headers.get('list-unsubscribe-post') || '')),
-      security: securityOf(mail, row.from_email || ''),
+      security,
       senderBlocked: !!contact?.blocked,
       invite: this.inviteOf(row.account_id, mail),
     }
@@ -1562,15 +1583,16 @@ export class MailService {
 
   // ---------- unsubscribe and blocked senders ----------
 
-  async unsubscribe(id: string): Promise<'done' | 'sent' | 'opened' | 'none'> {
+  /** web false (Unsubscribe from unopened): a list that only offers its web page is left, not opened in the browser */
+  async unsubscribe(id: string, web = true): Promise<'done' | 'sent' | 'opened' | 'none'> {
     const { row, mail } = await this.parsed(id)
     const header = String(row.list_unsubscribe || mail.headers.get('list-unsubscribe') || '')
     const links = (header.match(/<([^>]+)>/g) || []).map((x) => x.slice(1, -1).trim())
-    const web = links.find((l) => /^https:/i.test(l))
+    const https = links.find((l) => /^https:/i.test(l))
     const mailto = links.find((l) => /^mailto:/i.test(l))
     const oneClick = /one-click/i.test(String(mail.headers.get('list-unsubscribe-post') || ''))
-    if (web && oneClick) {
-      const r = await net.fetch(web, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' })
+    if (https && oneClick) {
+      const r = await net.fetch(https, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' })
       if (r.ok) return 'done'
     }
     if (mailto) {
@@ -1582,8 +1604,107 @@ export class MailService {
         html: 'unsubscribe', text: 'unsubscribe' })
       return 'sent'
     }
-    if (web || links.find((l) => /^http:/i.test(l))) { shell.openExternal((web || links.find((l) => /^http:/i.test(l)))!); return 'opened' }
+    const page = https || links.find((l) => /^http:/i.test(l))
+    if (web && page) { shell.openExternal(page); return 'opened' }
     return 'none'
+  }
+
+  // ---------- Promotions apart, and learns from you (Alex, 1 Nov 2026): per sender, on this computer only ----------
+
+  /** the Promotions pill: unread and all promotions in this account's inbox ('all' = every inbox), and the senders never opened */
+  promotions(accountId: string): PromoCount {
+    const r = this.db.prepare(`select count(distinct m.id) as total, count(distinct case when m.seen = 0 then m.id end) as unread
+      from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
+      where coalesce(f.special, f.role) = 'inbox' and ${ON} and m.pending_op is null ${accountId === 'all' ? '' : 'and f.account_id = @account'}
+        and ${this.promoSql()}`).get({ account: accountId }) as Row | undefined
+    return { unread: r?.unread || 0, total: r?.total || 0, senders: this.unopenedSenders(accountId).length }
+  }
+
+  /** per sender whose promotions in the inbox were all left unread: their newest message that says how to unsubscribe */
+  private unopenedSenders(accountId: string): string[] {
+    const acc = (a: string) => (accountId === 'all' ? '' : `and ${a}.account_id = @account`)
+    const own = this.ownAddresses()
+    return (this.db.prepare(`select m.from_email as e, max(m.seen) as opened,
+        (select x.id from messages x where x.from_email = m.from_email and x.list_unsubscribe is not null ${acc('x')} order by x.date desc limit 1) as pick
+      from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
+      where coalesce(f.special, f.role) = 'inbox' and ${ON} and m.pending_op is null and m.from_email != '' ${acc('f')} and ${this.promoSql()}
+      group by m.from_email having opened = 0 and pick is not null`).all({ account: accountId }) as Row[])
+      .filter((r) => !own.has(String(r.e))).map((r) => String(r.pick))
+  }
+
+  /** Unsubscribe from unopened: once per such sender, one after another; a list with only a web page is left; how many went */
+  async unsubscribeUnopened(accountId: string): Promise<number> {
+    let n = 0
+    for (const id of this.unopenedSenders(accountId)) {
+      const r = await this.unsubscribe(id, false).catch(() => 'none' as const)
+      if (r === 'done' || r === 'sent') n++
+    }
+    return n
+  }
+
+  /** the addresses of your own accounts and aliases: never learned about */
+  private ownAddresses(): Set<string> {
+    return new Set((this.db.prepare('select lower(email) as e from accounts union select lower(email) from identities').all() as Row[]).map((r) => String(r.e)))
+  }
+
+  /** counts what you did with a sender's mail; when that makes them quiet, or not, the inbox numbers follow */
+  private learnSender(email: string, col: 'ignored' | 'opened', n: number) {
+    email = email.toLowerCase()
+    if (!email || !this.settings().learnQuiet || this.ownAddresses().has(email)) return
+    const get = this.db.prepare('select ignored, opened, keep from sender_learn where email = ?')
+    const quiet = (r: Row | undefined) => !!r && r.ignored >= 3 && r.opened === 0 && r.keep === 0
+    const before = quiet(get.get(email) as Row | undefined)
+    this.db.prepare(`insert into sender_learn (email, ${col}, updated) values (?, ?, ?)
+      on conflict(email) do update set ${col} = ${col} + excluded.${col}, updated = excluded.updated`).run(email, n, now())
+    if (before !== quiet(get.get(email) as Row | undefined)) this.inboxesChanged()
+  }
+
+  /** what you do by hand (the window's act; not rules, not blocked senders): unread mail deleted or archived counts 1 per
+   *  sender, a move to Junk 3 */
+  learnFromAct(ids: string[], action: Action, targetFolderId?: string) {
+    if (!ids.length || !this.settings().learnQuiet) return
+    const junk = action === 'move' && !!targetFolderId
+      && (this.db.prepare('select role from folders where id = ?').get(targetFolderId) as Row | undefined)?.role === 'spam'
+    if (action !== 'trash' && action !== 'archive' && !junk) return
+    const senders = new Set<string>()
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500)
+      for (const r of this.db.prepare(`select from_email, seen from messages where id in (${part.map(() => '?').join(',')})`).all(...part) as Row[]) {
+        if (r.from_email && (junk || !r.seen)) senders.add(String(r.from_email).toLowerCase())
+      }
+    }
+    for (const e of senders) this.learnSender(e, 'ignored', junk ? 3 : 1)
+  }
+
+  /** what was learned about a sender: quiet (counts as a promotion), kept (Not promotions) */
+  senderLearn(email: string): { quiet: boolean; keep: boolean } {
+    const e = email.toLowerCase()
+    const r = this.db.prepare('select ignored, opened, keep from sender_learn where email = ?').get(e) as Row | undefined
+    const c = this.db.prepare('select vip, use_count from contacts where email = ?').get(e) as Row | undefined
+    const quiet = !!r && this.settings().learnQuiet && r.ignored >= 3 && r.opened === 0 && r.keep === 0 && !c?.vip && !((c?.use_count || 0) > 0)
+    return { quiet, keep: !!r?.keep }
+  }
+
+  /** Not promotions: this sender's mail stays in the Inbox from now on, list or not */
+  notPromotions(email: string) {
+    const e = email.toLowerCase().trim()
+    if (!e) return
+    this.db.prepare(`insert into sender_learn (email, keep, updated) values (?, 1, ?)
+      on conflict(email) do update set keep = 1, updated = excluded.updated`).run(e, now())
+    this.inboxesChanged()
+  }
+
+  /** Forget what it learned (Settings > General): every sender back to the start, "Not promotions" too */
+  forgetLearned() {
+    this.db.prepare('delete from sender_learn').run()
+    this.inboxesChanged()
+  }
+
+  /** promotions came or went (a setting, a sender learned or kept): every inbox counts again and the lists reload */
+  private inboxesChanged() {
+    for (const f of this.db.prepare(`select id from folders where role = 'inbox'`).all() as Row[]) this.recount(f.id)
+    this.badge()
+    for (const a of this.accounts()) { this.emit({ type: 'messages', accountId: a.id }); this.emit({ type: 'folders', accountId: a.id }) }
   }
 
   /** a blocked sender's new mail goes straight to Trash */
@@ -2426,5 +2547,6 @@ export class MailService {
     this.db.prepare(`insert into settings (key, value) values (?, ?) on conflict(key) do update set value = excluded.value`).run(key, String(value))
     if (key === 'checkEvery') this.schedulePoll()
     if (key === 'dockBadge') this.badge()
+    if (key === 'promosApart' || key === 'learnQuiet') this.inboxesChanged()
   }
 }

@@ -3,7 +3,7 @@
 // images from the web stay hidden until asked for, so senders cannot track opening.
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Address, Invite, InviteAnswer, MessageFull, MessageRow, Settings } from '../../shared/api'
+import type { Account, Address, Invite, InviteAnswer, MessageFull, MessageRow, SecurityWarning, Settings } from '../../shared/api'
 import { checkLink, isTracker, stripTracking, type LinkWarning } from '../privacy'
 import { FONTS, TEXT_SIZES, fontStack } from '../look'
 import { fullDate, lang, size, t, when, type Key } from '../i18n'
@@ -141,7 +141,8 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     let timer: ReturnType<typeof setTimeout> | undefined
     window.roarmail.message(id).then((x) => {
       if (!live) return
-      setM(x); setImages(x.imagesAllowed || prefs.remoteImages); setBlocked(x.senderBlocked); onLoaded(x)
+      // the shield (1 Nov 2026): a dangerous message never loads pictures by itself, whatever the settings say
+      setM(x); setImages(x.security.level !== 'danger' && (x.imagesAllowed || prefs.remoteImages)); setBlocked(x.senderBlocked); onLoaded(x)
       // Settings > General > Mark as read: after a few seconds open (on opening is done by the engine; never = by hand)
       if (!x.seen && prefs.markRead === 'delay') timer = setTimeout(() => { if (live) window.roarmail.act([x.id], 'seen') }, 2500)
     }).catch((e) => { if (live) setError(clean(e)) })
@@ -293,7 +294,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
       ) : blocked && !images ? (
         <div className="banner"><Icon name="image" size={16} /> <span>{t.images}</span>
           <button className="pill small" onClick={() => setImages(true)}>{t.showImages}</button>
-          <button className="pill small ghost" onClick={() => { window.roarmail.allowImages(m.fromEmail); setImages(true) }}>{t.alwaysImages}</button>
+          {m.security.level !== 'danger' && <button className="pill small ghost" onClick={() => { window.roarmail.allowImages(m.fromEmail); setImages(true) }}>{t.alwaysImages}</button>}
         </div>
       ) : null} />
 
@@ -316,18 +317,39 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
   )
 }
 
+/** each warning as one short line (the shield, 1 Nov 2026) */
+function warningLine(k: SecurityWarning, m: MessageFull): ReactNode {
+  const sec = m.security
+  switch (k) {
+    case 'auth': return t.sec_auth
+    case 'nameSpoof': return t.sec_name
+    case 'replyTo': return <>{t.sec_reply} <b>{sec.replyTo}</b></>
+    case 'brand': return t.sec_brand.replace('{b}', sec.brand || '')
+    case 'lookalike': return sec.brand ? t.sec_lookalike.replace('{b}', sec.brand) : t.sec_punycode
+    case 'attachment': return <>{t.sec_file} <b>{(sec.files || []).join(', ')}</b></>
+    case 'links': return (sec.links || 1) === 1 ? t.sec_link1 : t.sec_linksN.replace('{n}', String(sec.links))
+    case 'urgent': return t.sec_urgent
+  }
+}
+
 function SecurityBanner({ m }: { m: MessageFull }) {
   const w = m.security.warnings
   if (!w.length) return null
-  const strong = w.includes('auth') || w.includes('nameSpoof')
-  return (
-    <div className={`banner ${strong ? 'danger-banner' : ''}`}>
-      <Icon name={strong ? 'shieldAlert' : 'info'} size={16} />
+  // danger: red, titled Careful, one reason a line; one milder warning keeps the soft banner
+  if (m.security.level === 'danger') return (
+    <div className="banner danger-banner shield-banner">
+      <Icon name="shieldAlert" size={16} />
       <span>
-        {w.includes('auth') && <>{t.sec_auth} </>}
-        {w.includes('nameSpoof') && <>{t.sec_name} </>}
-        {w.includes('replyTo') && <>{t.sec_reply} <b>{m.security.replyTo}</b></>}
+        <b className="block">{t.sec_careful}</b>
+        {w.map((k) => <span key={k} className="block small">{warningLine(k, m)}</span>)}
+        <span className="block small muted">{t.sec_carefulHint}</span>
       </span>
+    </div>
+  )
+  return (
+    <div className="banner">
+      <Icon name="info" size={16} />
+      <span>{w.map((k, i) => <span key={k}>{i > 0 && ' '}{warningLine(k, m)}</span>)}</span>
     </div>
   )
 }
@@ -418,13 +440,16 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
         if (!/^(https?:|mailto:)/i.test(href)) return
         if (prefs.stripTracking) href = stripTracking(href)
         const check = checkLink(href, a.textContent || '')
-        if (check.warnings.some((w) => w !== 'insecure')) setSheet(check)
+        // the shield's red banner (1 Nov 2026): every link of the message asks first, and says why
+        const why: LinkWarning[] = ['suspicious', ...check.warnings]
+        if (m.security.level === 'danger') setSheet({ ...check, warnings: why })
+        else if (check.warnings.some((w) => w !== 'insecure')) setSheet(check)
         else window.roarmail.openExternal(href)
       })
     }
     f.addEventListener('load', onLoad)
     return () => f.removeEventListener('load', onLoad)
-  }, [html, prefs.stripTracking])
+  }, [html, prefs.stripTracking, m.security.level])
 
   return (
     <>
