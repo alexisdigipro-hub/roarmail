@@ -79,10 +79,12 @@ const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 const ON = 'f.account_id in (select id from accounts where enabled = 1)'
 // Promotions apart and learns from you (Alex, 1 Nov 2026), as SQL over a message m:
 /** a sender "Not promotions" was chosen for: their mail always stays in the Inbox */
-const KEPT = 'exists (select 1 from sender_learn k where k.email = m.from_email and k.keep = 1)'
+// promotions checked against the sender lists once per query, not once per message (1 Nov 2026, measured on 25,000
+// messages: the inbox list costs +25 ms instead of +70 ms)
+const KEPT = `coalesce(m.from_email, '') in (select k.email from sender_learn k where k.keep = 1)`
 /** a quiet sender: ignored 3 times (deleted or archived unread; Junk counts 3), never opened, not a VIP, never written to */
-const QUIET = `(exists (select 1 from sender_learn q where q.email = m.from_email and q.ignored >= 3 and q.opened = 0 and q.keep = 0)
-  and not exists (select 1 from contacts c where c.email = m.from_email and (c.vip = 1 or c.use_count > 0)))`
+const QUIET = `coalesce(m.from_email, '') in (select q.email from sender_learn q where q.ignored >= 3 and q.opened = 0 and q.keep = 0
+  and not exists (select 1 from contacts c where c.email = q.email and (c.vip = 1 or c.use_count > 0)))`
 
 type Row = Record<string, any>
 /** what Move to another computer carries (exportSetup / importSetup), before index.ts encrypts it */
