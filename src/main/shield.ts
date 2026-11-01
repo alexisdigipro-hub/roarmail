@@ -94,11 +94,17 @@ export function lookalikeOf(domain: string): string | null {
   return null
 }
 
+// names that are also everyday words ("Big Apple Studio", "Nova Films", "Meta Productions", "ACS Lighting") claim the
+// brand only when the name is the brand alone or with a service word: "Apple", "Apple Support", "NOVA Team" (Alex, 1 Nov 2026)
+const LOOSE = new Set(['Apple', 'Nova', 'Meta', 'UPS', 'ACS', 'Amazon', 'Alpha Bank'])
+const SERVICE = /\b(support|security|account|accounts|team|service|services|billing|customer|care|help|notification|notifications|alert|alerts|info|no-?reply|noreply|id|official|εξυπηρετηση|ασφαλεια|λογαριασμοσ|ομαδα)\b/g
+const onlyBrand = (said: string, b: Brand) => said.replace(b.words, ' ').replace(SERVICE, ' ').replace(/[^a-z0-9\u03b1-\u03c9]+/g, '').length === 0
+
 /** the brand a sender's name (or subject) claims while the address is not that brand's */
 export function claimedBrand(name: string, subject: string, domain: string, withSubject: boolean): string | null {
   const said = fold(name), sub = fold(subject)
   domain = domain.toLowerCase()
-  return BRANDS.find((b) => !owns(b, domain) && (b.words.test(said) || (withSubject && !!b.subject?.test(sub))))?.name || null
+  return BRANDS.find((b) => !owns(b, domain) && ((b.words.test(said) && (!LOOSE.has(b.name) || onlyBrand(said, b))) || (withSubject && !!b.subject?.test(sub))))?.name || null
 }
 
 // files that can run something, or hide what they are; an archive only when the text gives its password (scanners cannot open it)

@@ -33,6 +33,10 @@ test('a brand in the name from another address is danger; from the brand itself 
   assert.equal(claimedBrand('gov.gr wallet', '', 'gov-gr.info', false), 'gov.gr')
   // ambiguous words only in the name, never in a subject
   assert.equal(claimedBrand('Nikos', 'ups and downs', 'x.gr', true), null)
+  assert.equal(claimedBrand('Big Apple Studio', '', 'bigapple.gr', false), null)
+  assert.equal(claimedBrand('Nova Films', '', 'novafilms.gr', false), null)
+  assert.equal(claimedBrand('Apple Support', '', 'secure-id.example', false), 'Apple')
+  assert.equal(claimedBrand('NOVA', '', 'promo-tv.example', false), 'Nova')
   // someone you write to may say Google
   assert.ok(!shield(mail({ fromName: 'Maria, Google', known: true })).warnings.includes('brand'))
 })
