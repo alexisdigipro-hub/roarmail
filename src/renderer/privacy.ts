@@ -40,7 +40,8 @@ export function stripTracking(href: string): string {
   } catch { return href }
 }
 
-export type LinkWarning = 'mismatch' | 'lookalike' | 'ip' | 'insecure'
+/** suspicious: the whole message looked dangerous (the shield's red banner), so every link asks first (1 Nov 2026) */
+export type LinkWarning = 'mismatch' | 'lookalike' | 'ip' | 'insecure' | 'suspicious'
 
 /** the last two parts of a host (three for co.uk-style endings), to compare sites */
 function site(host: string) {

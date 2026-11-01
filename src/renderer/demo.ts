@@ -59,7 +59,7 @@ const msgs: DemoMsg[] = [
       <img src="https://u123.ct.sendgrid.net/wf/open?upn=demo" width="1" height="1" alt=""></div>` },
   { id: 'm6', accountId: 'a1', folderId: 'a1-inbox', threadId: 't4', fromName: 'support@paypal.com', fromEmail: 'security@paypa1-alerts.net', to: [me], cc: [],
     subject: 'Ο λογαριασμός σας έχει περιοριστεί', date: now - 9 * H, seen: false, flagged: false, answered: false,
-    security: { auth: 'fail', warnings: ['auth', 'nameSpoof'] },
+    security: { auth: 'fail', warnings: ['auth', 'nameSpoof', 'brand', 'lookalike', 'links'], level: 'danger', brand: 'PayPal', links: 1 },
     html: p('<p>Εντοπίσαμε ασυνήθιστη δραστηριότητα. Επιβεβαιώστε τα στοιχεία σας εντός 24 ωρών:</p><p><a href="https://paypa1-alerts.net/verify">www.paypal.com/verify</a></p>') },
   { id: 'm7', accountId: 'a2', folderId: 'a2-inbox', threadId: 't5', fromName: 'Ελένη Δ.', fromEmail: 'eleni.d@gmail.com', to: [{ address: 'roar.demo@gmail.com' }], cc: [],
     subject: 'Φωτογραφίες από το set', date: now - 1.5 * H, seen: false, flagged: false, answered: false,
@@ -120,7 +120,8 @@ function list(scope: ListScope): MessageRow[] {
   for (const m of inScope) groups.set(m.threadId, [...(groups.get(m.threadId) || []), m])
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const keep = (r: MessageRow) => scope.filter === 'unread' ? !r.seen : scope.filter === 'flagged' ? r.flagged
-    : scope.filter === 'attachments' ? r.hasAttachments : scope.filter === 'today' ? r.date >= today.getTime() : scope.filter === 'threads' ? r.count > 1 : true
+    : scope.filter === 'attachments' ? r.hasAttachments : scope.filter === 'today' ? r.date >= today.getTime() : scope.filter === 'threads' ? r.count > 1
+    : scope.filter === 'promos' ? (groups.get(r.threadId || '') || []).some((m) => !!m.listUnsubscribe) : true
   const by = (a: MessageRow, b: MessageRow) => scope.sort === 'sender' ? (a.fromName || a.fromEmail).localeCompare(b.fromName || b.fromEmail)
     : scope.sort === 'subject' ? a.subject.localeCompare(b.subject) : scope.sort === 'unread' ? Number(a.seen) - Number(b.seen)
     : scope.sort === 'attachments' ? Number(b.hasAttachments) - Number(a.hasAttachments) : scope.sort === 'account' ? a.accountId.localeCompare(b.accountId) : b.date - a.date
@@ -133,7 +134,7 @@ function full(m: DemoMsg): MessageFull {
     ...row(m), to: m.to, cc: m.cc, messageId: `<${m.id}@demo>`, html: m.html,
     attachments: (m.attachments || []).map((a, i) => ({ id: `${m.id}:${i}`, filename: a.filename, mime: a.mime, size: a.size, inline: false })),
     inlineImages: {}, imagesAllowed: false, listUnsubscribe: m.listUnsubscribe, oneClickUnsubscribe: m.oneClick,
-    security: m.security || { auth: 'pass', warnings: [] }, senderBlocked: false, invite: m.invite || null,
+    security: m.security || { auth: 'pass', warnings: [], level: 'ok' }, senderBlocked: false, invite: m.invite || null,
   }
 }
 
@@ -292,6 +293,14 @@ export function createDemo(): MailApi & { update: any } {
     undo: async (token) => { const p = pending.get(token); if (!p) return false; clearTimeout(p.timer); pending.delete(token); recount(); changed(); return true },
     allowImages: async () => {},
     unsubscribe: async () => 'done',
+    promotions: async (accountId) => {
+      const p = msgs.filter((m) => m.listUnsubscribe && role(m.folderId) === 'inbox' && (accountId === 'all' || m.accountId === accountId))
+      return { unread: p.filter((m) => !m.seen).length, total: p.length, senders: new Set(p.filter((m) => !m.seen).map((m) => m.fromEmail)).size }
+    },
+    unsubscribeUnopened: async () => 0,
+    senderLearn: async () => ({ quiet: false, keep: false }),
+    notPromotions: async () => {},
+    forgetLearned: async () => {},
     blockSender: async () => {},
     blockedSenders: async () => [],
     lockState: async () => ({ available: false, enabled: false, locked: false, method: 'none' }),

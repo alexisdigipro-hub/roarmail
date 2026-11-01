@@ -31,7 +31,7 @@ const BY_DOMAIN: Record<string, Preset> = {
 }
 
 const tlsOf = (socketType: string): ServerConfig['imapTls'] =>
-  /ssl|tls/i.test(socketType) ? 'tls' : /starttls/i.test(socketType) ? 'starttls' : 'none'
+  /starttls/i.test(socketType) ? 'starttls' : /ssl|tls/i.test(socketType) ? 'tls' : 'none'
 
 async function ispdb(domain: string): Promise<Preset | null> {
   try {

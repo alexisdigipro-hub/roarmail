@@ -170,6 +170,16 @@ function General({ s, set }: { s: Settings; set: Set }) {
           <Choice value={s.checkEvery} onChange={(v) => set('checkEvery', v)}
             options={[[1, t.g_every1], [5, t.g_every5], [15, t.g_every15], [30, t.g_every30], [60, t.g_every60], [0, t.g_manually]]} />
         </Line>
+        {/* Promotions apart and learns from you (Alex, 1 Nov 2026), all on this computer */}
+        <Toggle label={t.pm_apart} hint={t.pm_apartHint} on={s.promosApart} set={(v) => set('promosApart', v)} />
+        <Toggle label={t.pm_learn} hint={t.pm_learnHint} on={s.learnQuiet} set={(v) => set('learnQuiet', v)} />
+        <Line label={t.pm_forget} hint={t.pm_forgetHint}>
+          <button className="pill small ghost" onClick={async () => {
+            if (!confirm(t.pm_forgetQ)) return
+            await window.roarmail.forgetLearned()
+            window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: t.pm_forgotten }))
+          }}>{t.pm_forgetBtn}</button>
+        </Line>
       </Group>
       <Notify s={s} set={set} />
       <Group title={t.mv_title} note={t.mv_note}><div className="set-row block"><MoveSetup /></div></Group>

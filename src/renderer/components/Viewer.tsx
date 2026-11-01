@@ -3,7 +3,7 @@
 // images from the web stay hidden until asked for, so senders cannot track opening.
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Address, Invite, InviteAnswer, MessageFull, MessageRow, Settings } from '../../shared/api'
+import type { Account, Address, Invite, InviteAnswer, MessageFull, MessageRow, SecurityWarning, Settings } from '../../shared/api'
 import { checkLink, isTracker, stripTracking, type LinkWarning } from '../privacy'
 import { FONTS, TEXT_SIZES, fontStack } from '../look'
 import { fullDate, lang, size, t, when, type Key } from '../i18n'
@@ -141,7 +141,8 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     let timer: ReturnType<typeof setTimeout> | undefined
     window.roarmail.message(id).then((x) => {
       if (!live) return
-      setM(x); setImages(x.imagesAllowed || prefs.remoteImages); setBlocked(x.senderBlocked); onLoaded(x)
+      // the shield (1 Nov 2026): a dangerous message never loads pictures by itself, whatever the settings say
+      setM(x); setImages(x.security.level !== 'danger' && (x.imagesAllowed || prefs.remoteImages)); setBlocked(x.senderBlocked); onLoaded(x)
       // Settings > General > Mark as read: after a few seconds open (on opening is done by the engine; never = by hand)
       if (!x.seen && prefs.markRead === 'delay') timer = setTimeout(() => { if (live) window.roarmail.act([x.id], 'seen') }, 2500)
     }).catch((e) => { if (live) setError(clean(e)) })
@@ -293,7 +294,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
       ) : blocked && !images ? (
         <div className="banner"><Icon name="image" size={16} /> <span>{t.images}</span>
           <button className="pill small" onClick={() => setImages(true)}>{t.showImages}</button>
-          <button className="pill small ghost" onClick={() => { window.roarmail.allowImages(m.fromEmail); setImages(true) }}>{t.alwaysImages}</button>
+          {m.security.level !== 'danger' && <button className="pill small ghost" onClick={() => { window.roarmail.allowImages(m.fromEmail); setImages(true) }}>{t.alwaysImages}</button>}
         </div>
       ) : null} />
 
@@ -316,18 +317,39 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
   )
 }
 
+/** each warning as one short line (the shield, 1 Nov 2026) */
+function warningLine(k: SecurityWarning, m: MessageFull): ReactNode {
+  const sec = m.security
+  switch (k) {
+    case 'auth': return t.sec_auth
+    case 'nameSpoof': return t.sec_name
+    case 'replyTo': return <>{t.sec_reply} <b>{sec.replyTo}</b></>
+    case 'brand': return t.sec_brand.replace('{b}', sec.brand || '')
+    case 'lookalike': return sec.brand ? t.sec_lookalike.replace('{b}', sec.brand) : t.sec_punycode
+    case 'attachment': return <>{t.sec_file} <b>{(sec.files || []).join(', ')}</b></>
+    case 'links': return (sec.links || 1) === 1 ? t.sec_link1 : t.sec_linksN.replace('{n}', String(sec.links))
+    case 'urgent': return t.sec_urgent
+  }
+}
+
 function SecurityBanner({ m }: { m: MessageFull }) {
   const w = m.security.warnings
   if (!w.length) return null
-  const strong = w.includes('auth') || w.includes('nameSpoof')
-  return (
-    <div className={`banner ${strong ? 'danger-banner' : ''}`}>
-      <Icon name={strong ? 'shieldAlert' : 'info'} size={16} />
+  // danger: red, titled Careful, one reason a line; one milder warning keeps the soft banner
+  if (m.security.level === 'danger') return (
+    <div className="banner danger-banner shield-banner">
+      <Icon name="shieldAlert" size={16} />
       <span>
-        {w.includes('auth') && <>{t.sec_auth} </>}
-        {w.includes('nameSpoof') && <>{t.sec_name} </>}
-        {w.includes('replyTo') && <>{t.sec_reply} <b>{m.security.replyTo}</b></>}
+        <b className="block">{t.sec_careful}</b>
+        {w.map((k) => <span key={k} className="block small">{warningLine(k, m)}</span>)}
+        <span className="block small muted">{t.sec_carefulHint}</span>
       </span>
+    </div>
+  )
+  return (
+    <div className="banner">
+      <Icon name="info" size={16} />
+      <span>{w.map((k, i) => <span key={k}>{i > 0 && ' '}{warningLine(k, m)}</span>)}</span>
     </div>
   )
 }
@@ -351,7 +373,7 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
     const source = m.html || `<pre class="plain">${plain}</pre>`
     DOMPurify.removeAllHooks()
     DOMPurify.addHook('afterSanitizeAttributes', (node: Element) => {
-      if (node.tagName === 'A') { node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noreferrer') }
+      if (node.tagName === 'A' || node.tagName === 'AREA') { node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noreferrer') }
       // tracking pixels never load, not even with images shown
       if (node.tagName === 'IMG' && prefs.blockTrackers && isTracker(node)) {
         trackers++
@@ -383,7 +405,11 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
       ${prefs.plainMono ? `pre.plain{font-family:${mono};font-size:.92em}` : ''}${quotes}table{max-width:100%}</style>`
     // with pictures off, the frame itself refuses anything from the network (security review 29 Oct 2026): a <style>
     // block, an entity-hidden address, image-set() or an SVG image could otherwise still call home
-    const csp = images ? '' : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid: blob:; style-src 'unsafe-inline'; font-src data:">`
+    // with pictures on, still only the web: never file: (on Windows //host/x would be a network share that sends the
+    // person's login hash, security review 1 Nov 2026), no scripts, frames or forms
+    const csp = images
+      ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data: cid: blob:; style-src 'unsafe-inline' https:; font-src https: data:; media-src https: data:">`
+      : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: cid: blob:; style-src 'unsafe-inline'; font-src data:">`
     return { html: csp + css + clean, blocked, trackers }
   }, [m, images, prefs.detectLinks, prefs.blockTrackers, prefs.textSize, prefs.messageFont, prefs.monoFont, prefs.plainMono, prefs.quoteColors, prefs.quote1, prefs.quote2, prefs.quote3])
   // what Print and Save as PDF put on paper: the body exactly as shown here
@@ -401,12 +427,12 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
       doc.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit))
       // hovering a link shows where it really goes; a link that looks wrong asks first
       doc.addEventListener('mouseover', (e) => {
-        const a = (e.target as Element).closest?.('a')
+        const a = (e.target as Element).closest?.('a,area')
         setHover(a ? (prefs.stripTracking ? stripTracking(a.getAttribute('href') || '') : a.getAttribute('href') || '') : '')
       })
       doc.addEventListener('mouseleave', () => setHover(''))
       doc.addEventListener('click', (e) => {
-        const a = (e.target as Element).closest?.('a')
+        const a = (e.target as Element).closest?.('a,area')
         if (!a) return
         e.preventDefault()
         let href = a.getAttribute('href') || ''
@@ -414,13 +440,16 @@ function Body({ m, images, prefs, renderBanner, shown }: { m: MessageFull; image
         if (!/^(https?:|mailto:)/i.test(href)) return
         if (prefs.stripTracking) href = stripTracking(href)
         const check = checkLink(href, a.textContent || '')
-        if (check.warnings.some((w) => w !== 'insecure')) setSheet(check)
+        // the shield's red banner (1 Nov 2026): every link of the message asks first, and says why
+        const why: LinkWarning[] = ['suspicious', ...check.warnings]
+        if (m.security.level === 'danger') setSheet({ ...check, warnings: why })
+        else if (check.warnings.some((w) => w !== 'insecure')) setSheet(check)
         else window.roarmail.openExternal(href)
       })
     }
     f.addEventListener('load', onLoad)
     return () => f.removeEventListener('load', onLoad)
-  }, [html, prefs.stripTracking])
+  }, [html, prefs.stripTracking, m.security.level])
 
   return (
     <>

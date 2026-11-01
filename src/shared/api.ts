@@ -189,12 +189,26 @@ export interface MessageFull extends MessageRow {
   invite?: Invite | null
 }
 
-/** what the reader warns about: failed sender checks, a display name posing as another address, replies going elsewhere */
+/** what the reader warns about: failed sender checks, a display name posing as another address, replies going elsewhere;
+ *  since 1 Nov 2026 also a brand from the wrong address, an address made to look like a brand's, a dangerous file,
+ *  links that show one site and open another, and a first mail that pushes (password, payment, "urgent") */
+export type SecurityWarning = 'auth' | 'nameSpoof' | 'replyTo' | 'brand' | 'lookalike' | 'attachment' | 'links' | 'urgent'
 export interface Security {
   auth: 'pass' | 'fail' | 'none'
-  warnings: ('auth' | 'nameSpoof' | 'replyTo')[]
+  warnings: SecurityWarning[]
   replyTo?: string
+  /** danger: the red "Careful" banner, every link asks first, no pictures from the web; notice: one milder warning */
+  level: 'ok' | 'notice' | 'danger'
+  /** the brand the mail claims to be, or whose address it imitates */
+  brand?: string
+  /** the files that could run something or hide what they are */
+  files?: string[]
+  /** how many links show one site and open another */
+  links?: number
 }
+
+/** the Promotions pill above the Inbox (1 Nov 2026): unread and all promotions there, and the senders never opened */
+export interface PromoCount { unread: number; total: number; senders: number }
 
 /** what the list shows: one folder, or the unified inbox (accountId 'all') */
 export interface ListScope {
@@ -210,7 +224,8 @@ export interface ListScope {
   /** the person button: all mail from or to this address, in every folder but Trash and Junk */
   person?: string
 }
-export type ListFilter = 'unread' | 'flagged' | 'attachments' | 'today' | 'threads'
+/** promos: mail from lists (List-Unsubscribe) and quiet senders, kept apart from the Inbox (1 Nov 2026) */
+export type ListFilter = 'unread' | 'flagged' | 'attachments' | 'today' | 'threads' | 'promos'
 export type ListSort = 'date' | 'sender' | 'subject' | 'unread' | 'attachments' | 'account'
 
 export interface Draft {
@@ -351,6 +366,10 @@ export interface Settings {
   unifiedOrder: string
   /** the accounts' order down the rail, dragged by hand (account ids, comma separated; new ones go last) */
   accountOrder: string
+  /** Settings > General > Inboxes (1 Nov 2026): mail from lists and quiet senders stays out of the Inbox, under Promotions */
+  promosApart: boolean
+  /** a sender whose mail you delete or archive unread 3 times, and never open, becomes quiet (counted on this computer) */
+  learnQuiet: boolean
   /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
   autoUpdate: boolean
 }
@@ -495,6 +514,16 @@ export interface MailApi {
   allowImages(sender: string): Promise<void>
   /** one-click (RFC 8058) when offered, else a mail to the list's address, else the web page */
   unsubscribe(messageId: string): Promise<'done' | 'sent' | 'opened' | 'none'>
+  /** the Promotions pill: counts in the inbox of this account ('all' = every inbox) */
+  promotions(accountId: string): Promise<PromoCount>
+  /** Unsubscribe from unopened: once per sender whose promotions there were never opened, one after another; how many went */
+  unsubscribeUnopened(accountId: string): Promise<number>
+  /** what RoarMail learned about a sender: quiet (counts as a promotion), kept (Not promotions) */
+  senderLearn(email: string): Promise<{ quiet: boolean; keep: boolean }>
+  /** Not promotions: this sender's mail stays in the Inbox from now on */
+  notPromotions(email: string): Promise<void>
+  /** Forget what it learned: every sender back to the start */
+  forgetLearned(): Promise<void>
   blockSender(email: string, blocked: boolean): Promise<void>
   blockedSenders(): Promise<string[]>
   lockState(): Promise<LockState>
