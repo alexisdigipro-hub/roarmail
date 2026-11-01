@@ -1,9 +1,10 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, Rule, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
 import { Icon, folderIcon } from './components/Icon'
+import { arrive, leave } from './motion'
 import { AddAccount } from './components/AddAccount'
 import { Viewer, initials, tint, type ComposeKind } from './components/Viewer'
 import { Composer, type ComposeSeed } from './components/Composer'
@@ -170,6 +171,15 @@ export default function App() {
   }, [query, scope.accountId, prefs.onlineSearch])
 
   const list = results ?? rows
+  // new mail in the same list (or rows back from Undo) drops in; another folder brings its whole list in instead
+  const listKey = `${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`
+  const shown = useRef<{ key: string; keys: Set<string> }>({ key: '', keys: new Set() })
+  useLayoutEffect(() => {
+    const keys = new Set(list.map(keyOf))
+    const was = shown.current
+    if (was.key === listKey && was.keys.size) arrive(list.filter((r) => !was.keys.has(keyOf(r))).map(keyOf))
+    shown.current = { key: listKey, keys }
+  }, [list, listKey])
   const senderPic = useSenderIcons(list.slice(0, 150).map((r) => r.fromEmail), prefs.senderPictures && prefs.listAvatars)
   const [editUnified, setEditUnified] = useState(false)
   // All accounts' folders in the order dragged in Edit (Alex, 29 Oct: "reorder in edit")
@@ -194,9 +204,12 @@ export default function App() {
       const first = list.findIndex((r) => keys.includes(keyOf(r)))
       const rest = list.filter((r) => !keys.includes(keyOf(r)))
       const next = rest[Math.min(first, rest.length - 1)]
-      setRows((rs) => rs.filter((r) => !keys.includes(keyOf(r))))
-      setResults((rs) => rs && rs.filter((r) => !keys.includes(keyOf(r))))
+      // the next one opens at once; the rows slide out and the list closes up behind them
       setSelected(next ? [keyOf(next)] : [])
+      leave(keys).then(() => {
+        setRows((rs) => rs.filter((r) => !keys.includes(keyOf(r))))
+        setResults((rs) => rs && rs.filter((r) => !keys.includes(keyOf(r))))
+      })
     } else {
       const patch = action === 'seen' ? { seen: true } : action === 'unseen' ? { seen: false } : action === 'flag' ? { flagged: true } : { flagged: false }
       const upd = (rs: MessageRow[]) => rs.map((r) => (keys.includes(keyOf(r)) ? { ...r, ...patch } : r))
@@ -436,8 +449,8 @@ export default function App() {
     const ids = targets.flatMap((r) => r.ids)
     const first = list.findIndex((r) => keys.includes(keyOf(r)))
     const rest = list.filter((r) => !keys.includes(keyOf(r)))
-    setRows((rs) => rs.filter((r) => !keys.includes(keyOf(r))))
     setSelected(rest[Math.min(first, rest.length - 1)] ? [keyOf(rest[Math.min(first, rest.length - 1)])] : [])
+    leave(keys).then(() => setRows((rs) => rs.filter((r) => !keys.includes(keyOf(r)))))
     try {
       const token = await api.snooze(ids, until)
       flash({ text: until ? `${t.snoozedToast} ${short(until)}` : t.setAside, undo: token ? () => { api.undo(token).then(() => loadRows()) } : undefined })
@@ -811,7 +824,7 @@ export default function App() {
           <span style={{ transform: `rotate(${pull * 3}deg)`, opacity: pulled && !pull ? 1 : Math.min(1, pull / PULL_AT) }}><Icon name="refresh" size={18} /></span>
         </div>
         {/* a new folder, account or filter brings its rows in again, one after another (RoarMe's stagger) */}
-        <div className="rows" key={`${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`}>
+        <div className="rows" key={listKey}>
           {list.map((r) => (
             <Row key={keyOf(r)} r={r} pic={accounts.find((a) => a.email.toLowerCase() === r.fromEmail)?.avatar || senderPic(r.fromEmail)} on={selected.includes(keyOf(r))}
               acc={scope.accountId === 'all' && prefs.accountColours ? accountOf(r.accountId) : undefined} prefs={prefs} multi={selected.length > 1} acts={rowActs} />
@@ -947,7 +960,7 @@ function RowView({ r, pic, on, multi, acc, prefs, acts }: { r: MessageRow; pic: 
   const armed = Math.abs(dx) >= LIMIT && side !== 'none'
 
   return (
-    <div className={`swipe ${dx ? 'moving' : ''}`} onWheel={onWheel} draggable onDragStart={onDrag} onDragEnd={onDragEnd}>
+    <div className={`swipe ${dx ? 'moving' : ''}`} data-k={keyOf(r)} onWheel={onWheel} draggable onDragStart={onDrag} onDragEnd={onDragEnd}>
       {dx !== 0 && (
         <div className={`swipe-under ${side} ${armed ? 'armed' : ''} ${dx < 0 ? 'left' : 'right'}`}>
           <Icon name={side === 'archive' ? 'archive' : side === 'trash' ? 'trash' : side === 'flag' ? 'star' : 'dot'} size={18} />
