@@ -71,12 +71,21 @@ jobs:
             esac
           done
           ls -la
+      # Latest only when this is the highest version: a rebuild of an older one published later took the Latest mark from
+      # 0.24.0 (1 Nov 2026), so the site's download links and the updater pointed back to 0.23.3
+      - id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cur=$(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name 2>/dev/null | sed 's/^desktop-v//' || true)
+          new='${{ steps.v.outputs.version }}'
+          if [ -z "$cur" ] || [ "$(printf '%s\n%s\n' "$cur" "$new" | sort -V | tail -1)" = "$new" ]; then echo "make=true"; else echo "make=false"; fi >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
           # always a desktop-vX.Y.Z tag: the app's updater only takes those (a run from the Actions tab made desktop-build-N, which no app picked up)
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-v{0}', steps.v.outputs.version) }}
           name: RoarMail ${{ steps.v.outputs.version }} beta · desktop-v${{ steps.v.outputs.version }}
-          make_latest: true
+          make_latest: ${{ steps.latest.outputs.make }}
           body: |
             RoarMail ${{ steps.v.outputs.version }} beta for Mac and Windows. TheMadlions Lab, Experiment 03.
 
