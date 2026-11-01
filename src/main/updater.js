@@ -34,7 +34,20 @@ const newer = (a, b) => {
 const SUFFIX = () => (process.platform === 'win32' ? 'Windows-Setup.exe' : process.arch === 'arm64' ? 'Mac-arm64.dmg' : 'Mac-x64.dmg')
 const dir = () => path.join(app.getPath('userData'), 'updates')
 
+// the newest by version number, not the one GitHub calls Latest: a rebuild of an older version published after a
+// newer one became "Latest" (1 Nov 2026: 0.23.3 after 0.24.0), and every copy would have waited on it. The releases
+// feed lists the recent ones; the release page stays as the fallback.
+async function newestInFeed() {
+  const r = await net.fetch(`https://github.com/${REPO}/releases.atom`, { headers: { 'User-Agent': 'RoarMail', Accept: 'application/atom+xml' } })
+  if (!r.ok) throw new Error(`GitHub ${r.status}`)
+  const xml = await r.text()
+  let best = ''
+  for (const m of xml.matchAll(/\/releases\/tag\/desktop-v(\d+\.\d+\.\d+)\b/g)) if (!best || newer(m[1], best)) best = m[1]
+  return best ? { tag: `desktop-v${best}`, version: best } : { tag: '', version: '' }
+}
+
 async function latest() {
+  try { const n = await newestInFeed(); if (n.tag) return n } catch { /* the release page below */ }
   const r = await net.fetch(`https://github.com/${REPO}/releases/latest`, { headers: { 'User-Agent': 'RoarMail', Accept: 'text/html' } })
   if (!r.ok) throw new Error(`GitHub ${r.status}`)
   const html = await r.text()
@@ -126,7 +139,10 @@ function install(relaunch) {
 // waits for RoarMail to close, puts the new RoarMail.app in place of the old (the old stays if anything fails), opens it
 const MAC_SWAP = `#!/bin/bash
 PID="$1"; DMG="$2"; APP="$3"; RELAUNCH="$4"
-for i in $(seq 1 100); do kill -0 "$PID" 2>/dev/null || break; sleep 0.2; done
+for i in $(seq 1 300); do kill -0 "$PID" 2>/dev/null || break; sleep 0.2; done
+# never swap the app under a copy that is still running (1 Nov 2026: a copy that took long to close kept running on
+# the new files and opened a blank window): after a minute it is stopped
+if kill -0 "$PID" 2>/dev/null; then kill -9 "$PID" 2>/dev/null; sleep 1; fi
 MNT="$(mktemp -d /tmp/roarmail-update.XXXXXX)"
 if hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG" >/dev/null 2>&1; then
   SRC="$(ls -d "$MNT"/*.app 2>/dev/null | head -1)"

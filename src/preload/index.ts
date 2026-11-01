@@ -5,7 +5,7 @@ import type { MailApi, MailEvent } from '../shared/api'
 
 const call = (name: string) => (...args: unknown[]) => ipcRenderer.invoke(`mail:${name}`, ...args)
 
-const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
+const api: MailApi & { update: Record<string, (...a: any[]) => any>; rescue: (what: 'retry' | 'download' | 'quit') => void } = {
   platform: process.platform,
   autodetect: call('autodetect') as MailApi['autodetect'],
   testAccount: call('testAccount') as MailApi['testAccount'],
@@ -127,6 +127,8 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any> } = {
     ipcRenderer.on('mail:event', h)
     return () => { ipcRenderer.removeListener('mail:event', h) }
   },
+  // the rescue page (main process, showRescue): Try again, Download, Quit
+  rescue: (what: 'retry' | 'download' | 'quit') => ipcRenderer.send('mail:rescue', what),
   update: {
     state: () => ipcRenderer.invoke('mail:update-state'),
     install: () => ipcRenderer.invoke('mail:update-install'),

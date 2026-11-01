@@ -79,6 +79,99 @@ function keepBounds(w: BrowserWindow) {
   w.on('resize', save); w.on('move', save); w.on('maximize', save); w.on('unmaximize', save); w.on('close', save)
 }
 
+/*
+ * The window never stays blank (Alex, 1 Nov 2026: "a person who sees this will not know to download it, and will give
+ * up"). The screens are checked 15 s after they load: if nothing is on them (or they failed to load, or stopped), the
+ * cache is cleared and they load once more; if that fails too, a page of RoarMail's own says so, looks for a newer
+ * version at once and restarts into it as soon as it is downloaded, with Try again and Download buttons. Start-up
+ * errors of the mail engine lead to the same page.
+ */
+let rescueTries = 0
+let rescuing = false
+const SCREENS = () => path.join(__dirname, 'renderer', 'index.html')
+function watchScreens(w: BrowserWindow) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const onRescuePage = () => w.webContents.getURL().startsWith('data:')
+  w.webContents.on('did-finish-load', () => {
+    clearTimeout(timer)
+    if (onRescuePage()) return
+    timer = setTimeout(async () => {
+      if (w.isDestroyed() || onRescuePage()) return
+      const ok = await w.webContents.executeJavaScript(`!!(document.getElementById('root') && document.getElementById('root').firstElementChild)`).catch(() => false)
+      if (ok) rescueTries = 0
+      else recoverScreens(w, 'The window stayed empty.')
+    }, 15e3)
+  })
+  // -3 is a load that was replaced by another one, not a failure
+  w.webContents.on('did-fail-load', (_e, code, desc, _url, isMain) => { if (isMain && code !== -3 && !onRescuePage()) recoverScreens(w, `The screens did not load (${desc}).`) })
+  w.webContents.on('render-process-gone', (_e, d) => { if (!quitting && d.reason !== 'clean-exit') recoverScreens(w, `The screens stopped (${d.reason}).`) })
+}
+async function recoverScreens(w: BrowserWindow, why: string) {
+  if (w.isDestroyed() || quitting) return
+  rescueTries++
+  if (rescueTries === 1) {
+    await w.webContents.session.clearCache().catch(() => {})
+    await w.webContents.session.clearCodeCaches({}).catch(() => {})
+    w.loadFile(SCREENS()).catch(() => {})
+    return
+  }
+  showRescue(w, why)
+}
+function showRescue(w: BrowserWindow, why: string) {
+  if (w.isDestroyed()) return
+  rescuing = true
+  w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(rescueHtml(why))}`).catch(() => {})
+  w.show()
+  updater.check().catch(() => {})
+}
+ipcMain.on('mail:rescue', async (_e, what: string) => {
+  if (what === 'retry' && win && !win.isDestroyed()) {
+    rescuing = false
+    rescueTries = 1 // one more failure goes straight back to this page
+    await win.webContents.session.clearCache().catch(() => {})
+    await win.webContents.session.clearCodeCaches({}).catch(() => {})
+    win.loadFile(SCREENS()).catch(() => {})
+  } else if (what === 'download') shell.openExternal('https://themadlions.com/lab/roarmail/').catch(() => {})
+  else if (what === 'quit') { quitting = true; app.quit() }
+})
+function rescueHtml(why: string) {
+  const el = app.getLocale().toLowerCase().startsWith('el')
+  const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+  const T = el
+    ? { title: 'Το RoarMail δεν άνοιξε σωστά', body: 'Ψάχνουμε τώρα νεότερη έκδοση. Μόλις κατέβει, το RoarMail ξεκινά ξανά μόνο του. Τα mail και οι λογαριασμοί σου είναι ασφαλή σε αυτόν τον υπολογιστή.', retry: 'Δοκίμασε ξανά', download: 'Κατέβασε την τελευταία έκδοση', checking: 'Ψάχνω νεότερη έκδοση…', downloading: 'Κατεβάζω το RoarMail', ready: 'Έτοιμο. Το RoarMail ξεκινά ξανά…', none: 'Δεν υπάρχει ακόμα νεότερη έκδοση. Πάτα Κατέβασε για να το εγκαταστήσεις ξανά.', error: 'Δεν βρέθηκε ενημέρωση. Πάτα Κατέβασε.' }
+    : { title: 'RoarMail did not open properly', body: 'Looking for a newer version now. As soon as it is downloaded, RoarMail starts again by itself. Your mail and accounts are safe on this computer.', retry: 'Try again', download: 'Download the latest version', checking: 'Looking for a newer version…', downloading: 'Downloading RoarMail', ready: 'Ready. RoarMail is starting again…', none: 'No newer version yet. Press Download to install it again.', error: 'No update found. Press Download.' }
+  const dark = nativeTheme.shouldUseDarkColors
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>RoarMail</title><style>
+html,body{margin:0;height:100%;font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${dark ? '#1b1e23' : '#eceef1'};color:${dark ? '#eef0f3' : '#1b1f25'};-webkit-app-region:drag}
+main{height:100%;display:grid;place-items:center;padding:24px;box-sizing:border-box}
+.card{max-width:460px;text-align:center;padding:36px 32px;border-radius:12px;background:${dark ? 'rgba(255,255,255,.05)' : 'rgba(255,255,255,.75)'};border:1px solid ${dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.06)'};-webkit-app-region:no-drag}
+.mark{font-size:30px;letter-spacing:.04em;margin-bottom:14px}.mark b{font-weight:300}.mark i{font-style:normal;font-weight:700;color:#d40000}
+h1{font-size:19px;margin:0 0 8px}p{margin:0 0 18px;opacity:.8}#st{font-size:13px;opacity:.75;min-height:20px;margin-bottom:18px}
+.row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+button{font:inherit;font-size:14px;border:0;border-radius:999px;padding:9px 18px;cursor:pointer;background:${dark ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.06)'};color:inherit}
+button.main{background:#d40000;color:#fff;box-shadow:0 0 18px rgba(212,0,0,.35)}button:hover{filter:brightness(1.1)}
+small{display:block;margin-top:18px;font-size:11px;opacity:.45}
+</style></head><body><main><div class="card">
+<div class="mark"><b>ROAR</b><i>MAIL</i></div><h1>${T.title}</h1><p>${T.body}</p><div id="st">${T.checking}</div>
+<div class="row"><button class="main" id="dl">${T.download}</button><button id="again">${T.retry}</button></div>
+<small>${esc(why)} · ${esc(app.getVersion())}</small></div></main>
+<script>
+const T = ${JSON.stringify(T)}, r = window.roarmail, st = document.getElementById('st')
+document.getElementById('dl').onclick = () => r && r.rescue ? r.rescue('download') : window.open('https://themadlions.com/lab/roarmail/')
+document.getElementById('again').onclick = () => r && r.rescue && r.rescue('retry')
+const show = (s) => {
+  if (!s) return
+  if (s.status === 'checking') st.textContent = T.checking
+  else if (s.status === 'downloading') st.textContent = T.downloading + ' ' + (s.version || '') + ' · ' + (s.progress || 0) + '%'
+  else if (s.status === 'ready' || s.status === 'installing') st.textContent = T.ready
+  else if (s.status === 'error') st.textContent = T.error
+  else if (s.checkedAt) st.textContent = T.none
+}
+if (r && r.update) { r.update.on(show); r.update.state().then(show).catch(() => {}) }
+</script></body></html>`
+}
+
 function createWindow() {
   const mac = process.platform === 'darwin'
   const { maximized: keptMax, ...kept } = savedBounds()
@@ -97,6 +190,7 @@ function createWindow() {
   })
   if (keptMax) win.maximize()
   keepBounds(win)
+  watchScreens(win)
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   // opened at login: stay in the menu bar until asked
   // (a Mac login item gets no arguments: a start in the first two minutes after the computer starts counts as one)
@@ -179,6 +273,9 @@ app.on('before-quit', () => { quitting = true })
 
 app.whenReady().then(() => {
   app.setName('RoarMail')
+  // updates come first, so even a copy whose mail engine cannot start can still update itself (1 Nov 2026);
+  // on the rescue page a downloaded update installs at once
+  updater.start(ipcMain, () => { quitting = true }, (s: { status: string }) => { if (rescuing && s.status === 'ready') updater.restart(() => { quitting = true }) })
   const startMailto = process.argv.find((a) => a.toLowerCase().startsWith('mailto:'))
   if (startMailto) pendingMailto = startMailto
   const startLink = process.argv.find(isLink)
@@ -637,7 +734,6 @@ app.whenReady().then(() => {
   mail.startAll()
   mail.badge()
   powerMonitor.on('resume', () => setTimeout(() => mail.reconnectAll(), 3e3))
-  updater.start(ipcMain, () => { quitting = true })
   // Settings > Updates > Update by itself: a downloaded update installs when RoarMail is not being used
   // (window closed or in the background and nobody at the computer for two minutes), then RoarMail opens again
   setInterval(() => {
@@ -665,6 +761,10 @@ app.whenReady().then(() => {
       : { role: 'viewMenu' as const },
     { role: 'windowMenu' },
   ]))
+}).catch((e) => {
+  // the mail engine could not start (a damaged database, a missing file): the window says so and can update itself
+  console.error('RoarMail start-up failed', e)
+  try { if (!win) createWindow(); if (win) showRescue(win, `Start-up failed: ${String(e?.message || e).slice(0, 200)}`) } catch { /* nothing more to show */ }
 })
 
 /**
