@@ -300,6 +300,9 @@ export function Composer({ seed, accounts, onClose, onSent }: {
       window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: t.tp_saved }))
     } catch (e) { setError(roarError(e)) }
   }
+  // a white page behind the text, in dark mode only (Alex, 2 Nov 2026: signatures and pasted mail made for white stay readable)
+  const [paper, setPaper] = useState(() => { try { return localStorage.getItem('roarmail.paper') === '1' } catch { return false } })
+  const togglePaper = () => setPaper((v) => { try { localStorage.setItem('roarmail.paper', v ? '0' : '1') } catch { /* this run only */ } return !v })
   const toggleFmt = () => setFmtBar((v) => { try { localStorage.setItem('roarmail.fmtbar', v ? '0' : '1') } catch { /* this run only */ } return !v })
 
   // the corner handle: the window stays centred, so it grows twice as fast as the pointer moves
@@ -367,12 +370,13 @@ export function Composer({ seed, accounts, onClose, onSent }: {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send() }
       if (e.key === 'Escape') { e.preventDefault(); asking ? setAsking(false) : close() }
     }}>
-      <div className="sheet composer" style={{ width: box.w, height: box.h }} onInput={() => { dirty.current = true }}>
+      <div className={`sheet composer ${paper ? 'paper' : ''}`} style={{ width: box.w, height: box.h }} onInput={() => { dirty.current = true }}>
         <div className="composer-head">
           <b>{title}</b>
           <span className="grow" />
           <div className="composer-tools">
             <button className={`tool ${fmtBar ? 'on-filter' : ''}`} title={t.fm_bar} onClick={toggleFmt}><Icon name="aa" /></button>
+            <button className={`tool paper-btn ${paper ? 'on-filter' : ''}`} title={t.fm_paper} onMouseDown={(e) => e.preventDefault()} onClick={togglePaper}><Icon name="paper" /></button>
             <button className="tool" title={t.emoji} onMouseDown={(e) => e.preventDefault()} onClick={() => { body.current?.focus(); window.roarmail.emojiPanel() }}><Icon name="emoji" /></button>
             <span className="sep" />
             {/* the paperclip offers both: attach to the message, or send through RoarTransfer as one link (29 Oct 2026) */}

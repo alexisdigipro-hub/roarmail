@@ -873,3 +873,14 @@ html:not([data-still]) .msg .star, html:not([data-still]) .msg .dot { animation:
 html:not([data-still]) .msg .quick button:active { transform: scale(.86); }
 .pop { animation-duration: .24s; }
 @media (prefers-reduced-motion: reduce) { .swipe.fresh .msg, .msg .star, .msg .dot { animation: none !important; } }
+
+/* the white page behind the text (Alex, 2 Nov 2026): a button in the composer's top row, dark mode only. The text area
+   turns into a white sheet with dark text, so signatures and pasted mail made for white read as they will be received */
+html:not([data-mode='dark']) .composer .paper-btn { display: none; }
+html[data-mode='dark'] .composer.paper .editor {
+  background: #fff; color: #1b1f25; caret-color: #1b1f25; color-scheme: light;
+  margin: 8px 14px 10px; border-radius: 12px; box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 10px 30px rgba(0, 0, 0, .35);
+}
+html[data-mode='dark'] .composer.paper .editor a { color: #0b57d0; }
+html[data-mode='dark'] .composer.paper .editor blockquote { border-left-color: #d0d4da; color: #5a6270; }
+html[data-mode='dark'] .composer.paper .editor hr { border-color: #e2e5ea; }
