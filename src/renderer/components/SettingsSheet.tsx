@@ -856,6 +856,7 @@ function Privacy({ s, set }: { s: Settings; set: Set }) {
       {/* Block (2 Nov 2026): addresses, names from any address and whole domains, all to Junk; the shield's sure catches too */}
       <Group title={t.blockedSenders} note={!blocked.length ? t.noneBlocked : t.bl_note}>
         <Toggle label={t.bl_danger} hint={t.bl_dangerHint} on={s.junkDanger} set={(v) => set('junkDanger', v)} />
+        <Toggle label={t.bl_share} hint={t.bl_shareHint} on={s.shareBlocks} set={(v) => set('shareBlocks', v)} />
         {blocked.map((b) => (
           <Line key={`${b.kind}:${b.value}`} label={<span className="ellipsis">{b.kind === 'domain' ? `@${b.label}` : b.label}{b.kind !== 'email' && <span className="muted"> · {b.kind === 'name' ? t.bl_kindName : t.bl_kindDomain}</span>}</span>}>
             <button className="pill small ghost" onClick={async () => { await window.roarmail.unblock({ kind: b.kind, value: b.value }); setBlocked(blocked.filter((x) => x !== b)) }}>{t.unblock}</button>

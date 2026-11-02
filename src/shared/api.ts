@@ -375,6 +375,9 @@ export interface Settings {
   learnQuiet: boolean
   /** Settings > Privacy (2 Nov 2026): new mail the shield is sure is phishing goes straight to Junk */
   junkDanger: boolean
+  /** Settings > Privacy (2 Nov 2026): the shared spam list. Fingerprints of what you block go to RoarMe's project, and
+   *  senders at least 3 RoarMail users blocked go to Junk here too */
+  shareBlocks: boolean
   /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
   autoUpdate: boolean
 }
