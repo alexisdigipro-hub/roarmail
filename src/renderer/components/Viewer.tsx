@@ -175,7 +175,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     else if (pick === 'copyName') navigator.clipboard.writeText(a.name ? `${a.name} <${email}>` : email)
     else if (pick === 'card') { if (a.name && !known?.name) await window.roarmail.saveContact(email, { name: a.name }); onContact?.(email) }
     else if (pick === 'all') onAllMail?.(email)
-    else if (pick === 'block') { await window.roarmail.blockSender(email, !known?.blocked); toast(known?.blocked ? `${t.unblock}: ${email}` : t.blockedNote) }
+    else if (pick === 'block') { await window.roarmail.blockSender(email, !known?.blocked, a.name || undefined); toast(known?.blocked ? `${t.unblock}: ${email}` : t.blockedNote) }
   }
   // the message's ⋯ and right-click on its head: one native menu in groups (Alex, 29 Oct: tidy the menus)
   const moreMenu = async (e: ReactMouseEvent) => {
@@ -268,9 +268,10 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
           <button className={`tool small ${blocked ? 'on-danger' : ''}`} title={blocked ? t.unblockSender : t.blockSender}
             onClick={() => {
               if (!blocked && !confirm(`${t.blockQ}\n\n${m.fromEmail}`)) return
-              window.roarmail.blockSender(m.fromEmail, !blocked); setBlocked(!blocked); setNote(blocked ? '' : t.blockedNote)
-              // blocking also puts this message in the Trash (Alex, 29 Oct)
-              if (!blocked) window.roarmail.act([m.id], 'trash').catch(() => {})
+              // the address and the name from any address; the message goes to Junk (2 Nov 2026), unblocking takes both off
+              window.roarmail.blockSender(m.fromEmail, !blocked, m.fromName || undefined)
+                .then(() => { if (!blocked) window.roarmail.act([m.id], 'junk').catch(() => {}) }).catch(() => {})
+              setBlocked(!blocked); setNote(blocked ? '' : t.blockedNote)
             }}><Icon name="block" size={16} /></button>
           <button className="tool small" title={t.mm_more} onClick={(e) => moreMenu(e)}><Icon name="more" size={16} /></button>
         </div>

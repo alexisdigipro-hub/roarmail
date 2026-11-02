@@ -50,7 +50,7 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
     else if (id === 'vip') { await window.roarmail.saveContact(c.email, { vip: !c.vip }); load() }
     else if (id?.startsWith('tag:')) { const g = id.slice(4); await window.roarmail.saveContact(c.email, { groups: c.groups.includes(g) ? c.groups.filter((x) => x !== g) : [...c.groups, g] }); load() }
     else if (id === 'company') setGroup(`@${c.email.split('@')[1]}`)
-    else if (id === 'block') { await window.roarmail.blockSender(c.email, !c.blocked); load() }
+    else if (id === 'block') { await window.roarmail.blockSender(c.email, !c.blocked, c.name || undefined); load() }
   }
   const load = () => window.roarmail.contactList(q, group).then((l) => { setList(l); if (!pick && l[0]) setPick(l[0].email) })
   useEffect(() => { const h = setTimeout(load, q ? 160 : 0); return () => clearTimeout(h) }, [q, group])
@@ -127,7 +127,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
         <button className="pill small" onClick={() => onAllMail(email)}><Icon name="target" size={14} /> {t.ct_allMail}</button>
         {c.phone && <button className="pill small" title={t.ct_copyPhone} onClick={() => navigator.clipboard.writeText(c.phone)}><Icon name="phone" size={14} /> {c.phone}</button>}
         <button className={`pill small ${c.vip ? 'on-vip' : ''}`} onClick={() => save({ vip: !c.vip })}><Icon name="star" size={14} filled={c.vip} /> VIP</button>
-        <button className="pill small danger-text" onClick={async () => { await window.roarmail.blockSender(email, !c.blocked); setC({ ...c, blocked: !c.blocked }); onChanged() }}>
+        <button className="pill small danger-text" onClick={async () => { await window.roarmail.blockSender(email, !c.blocked, c.name || undefined); setC({ ...c, blocked: !c.blocked }); onChanged() }}>
           <Icon name="block" size={14} /> {c.blocked ? t.unblockSender : t.blockSender}</button>
       </div>
       <div className="ct-tags">

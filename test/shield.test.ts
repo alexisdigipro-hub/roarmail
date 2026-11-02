@@ -1,7 +1,7 @@
 // The shield: phishing and dangerous mail caught in the reader (node --test test/)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { claimedBrand, distance, lookalikeOf, mismatchedLinks, riskyFiles, shield, urgent, type ShieldInput } from '../src/main/shield.ts'
+import { blockNameKey, blockableDomain, blockableName, claimedBrand, distance, emailDomain, lookalikeOf, mismatchedLinks, riskyFiles, shield, urgent, type ShieldInput } from '../src/main/shield.ts'
 
 const mail = (o: Partial<ShieldInput> = {}): ShieldInput => ({
   authResults: 'mx.google.com; spf=pass smtp.mailfrom=studio-north.gr; dkim=pass; dmarc=pass', fromName: 'Μαρία Παπαδοπούλου',
@@ -91,4 +91,26 @@ test('a first mail that pushes is a notice; with another warning, danger; a news
   assert.equal(shield(mail({ subject: 'Urgent', firstTime: true, known: false, replyTo: 'x@other.example' })).level, 'danger')
   const news = shield(mail({ list: true, replyTo: 'x@other.example', html: '<a href="https://click.mailer.example/a">filmgear.com</a>' }))
   assert.equal(news.level, 'notice')
+})
+
+test('Block: names are folded, generic names and addresses are never kept', () => {
+  assert.equal(blockNameKey('  "Derilo"   Shop '), 'derilo shop')
+  assert.equal(blockNameKey('ΝΤΕΡΙΛΟ'), blockNameKey('Ντερίλο'))
+  assert.ok(blockableName('Derilo'))
+  assert.ok(blockableName('Ντερίλο'))
+  assert.ok(!blockableName('Support'))
+  assert.ok(!blockableName('no-reply'))
+  assert.ok(!blockableName('x@y.com'))
+  assert.ok(!blockableName('ab'))
+  assert.ok(!blockableName(''))
+})
+
+test('Block: a whole domain, never a mailbox provider', () => {
+  assert.equal(emailDomain('Promo@Deals-XYZ.com'), 'deals-xyz.com')
+  assert.ok(blockableDomain('deals-xyz.com'))
+  assert.ok(blockableDomain('mail.deals-xyz.co.uk'))
+  assert.ok(!blockableDomain('gmail.com'))
+  assert.ok(!blockableDomain('outlook.com'))
+  assert.ok(!blockableDomain('localhost'))
+  assert.ok(!blockableDomain(''))
 })

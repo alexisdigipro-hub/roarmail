@@ -20,6 +20,7 @@ import { Splitter, useWidths } from './components/Splitter'
 import { StatsSheet } from './components/Stats'
 import { actionSound, playNewMail, setActionSounds } from './sounds'
 import { useSenderIcons } from './senders'
+import { blockableDomain, emailDomain } from '../main/shield'
 
 const api = window.roarmail
 const keyOf = (r: MessageRow) => r.threadId || r.id
@@ -206,7 +207,7 @@ export default function App() {
     if (!targets.length) return
     const ids = targets.flatMap((r) => r.ids)
     const keys = targets.map(keyOf)
-    if (action === 'archive' || action === 'trash' || action === 'move') {
+    if (action === 'archive' || action === 'trash' || action === 'move' || action === 'junk') {
       // the selection moves on to the next conversation, like Airmail
       const first = list.findIndex((r) => keys.includes(keyOf(r)))
       const rest = list.filter((r) => !keys.includes(keyOf(r)))
@@ -227,11 +228,23 @@ export default function App() {
       const token = await api.act(ids, action, folderId)
       if (token) {
         actionSound(action === 'archive' ? 'archive' : action === 'trash' ? 'trash' : 'archive')
-        const word = action === 'archive' ? t.archived : action === 'move' ? t.moved : folderRole === 'trash' ? t.deleted : t.trashed
+        const word = action === 'archive' ? t.archived : action === 'move' ? t.moved : action === 'junk' ? t.junked : folderRole === 'trash' ? t.deleted : t.trashed
         flash({ text: targets.length > 1 ? `${word} · ${targets.length}` : word, undo: () => { api.undo(token).then((ok) => { if (ok) { loadRows(); setSelected(keys) } }) } })
       }
     } catch (e) { flash({ text: clean(e) }); loadRows() }
   }, [list, folderRole])
+
+  // Block (2 Nov 2026): the address and the sender's name from any address; the mail goes to Junk, not Trash.
+  // The block runs first: what it already moved is not moved twice, the rest (another folder, a selection) goes after
+  const blockAndJunk = useCallback(async (targets: MessageRow[], report = false) => {
+    const senders = new Map<string, string>()
+    for (const x of targets) if (x.fromEmail) senders.set(x.fromEmail.toLowerCase(), x.fromName || '')
+    let named = ''
+    for (const [email, name] of senders) if (await api.blockSender(email, true, name).catch(() => false)) named = named || name
+    await act(targets, 'junk')
+    const one = targets[0]
+    flash({ text: report ? t.bl_reported : named ? `${t.bl_named} ${named}` : `${t.bl_done} ${one?.fromName || one?.fromEmail || ''}`, ms: 5000 })
+  }, [act])
 
   const openSnooze = useCallback((targets: MessageRow[]) => { if (targets.length) setSnoozing(targets.map(keyOf)) }, [])
 
@@ -381,8 +394,10 @@ export default function App() {
         ...(promoRow ? [{ id: 'notPromo', label: t.pm_notPromo }] : []),
         null,
         { id: 'block', label: blocked ? t.unblockSender : t.blockSender },
+        ...(blockableDomain(emailDomain(r.fromEmail)) ? [{ id: 'blockDomain', label: `${t.bl_domain} @${emailDomain(r.fromEmail)}` }] : []),
       ] },
       null,
+      { id: 'spam', label: targets.length > 1 ? `${t.bl_report} (${targets.length})` : t.bl_report },
       { id: 'trash', label: targets.length > 1 ? `${t.trashIt} (${targets.length})` : t.trashIt },
     ])
     if (!pick) return
@@ -398,8 +413,14 @@ export default function App() {
       else if (pick === 'archive' || pick === 'trash') act(targets, pick)
       else if (pick === 'move') openMove(targets)
       else if (pick === 'snooze') openSnooze(targets)
-      // blocking also puts the message itself in the Trash (Alex, 29 Oct), with Undo like any delete
-      else if (pick === 'block') { await api.blockSender(r.fromEmail, !blocked); if (blocked) flash({ text: `${t.unblock}: ${r.fromEmail}`, ms: 3500 }); else act([r], 'trash') }
+      // blocking also moves the message (Alex, 29 Oct), to Junk since 2 Nov 2026; unblocking takes the name off too
+      else if (pick === 'block') { if (blocked) { await api.blockSender(r.fromEmail, false, r.fromName); flash({ text: `${t.unblock}: ${r.fromEmail}`, ms: 3500 }) } else blockAndJunk([r]) }
+      else if (pick === 'spam') blockAndJunk(targets, true)
+      else if (pick === 'blockDomain') {
+        const d = emailDomain(r.fromEmail)
+        if (await api.blockDomain(d, true)) { await act([r], 'junk'); flash({ text: `${t.bl_domainDone} @${d}`, ms: 5000 }) }
+        else flash({ text: t.bl_domainNo, ms: 5000 })
+      }
       else if (pick === 'contact') setContactsAt(r.fromEmail)
       else if (pick === 'notPromo') { await api.notPromotions(r.fromEmail); flash({ text: `${t.pm_kept} ${r.fromName || r.fromEmail}`, ms: 3500 }) }
       else if (pick === 'rule') {
@@ -607,7 +628,7 @@ export default function App() {
   const later = outbox.filter((o) => o.status !== 'failed' && o.scheduled)
 
   rowActs.current = {
-    click, menu: rowMenu, block: async (r) => { await api.blockSender(r.fromEmail, true); act([r], 'trash') }, act: (r, a) => act([r], a),
+    click, menu: rowMenu, block: (r) => { blockAndJunk([r]) }, act: (r, a) => act([r], a),
     snooze: (r) => openSnooze([r]), move: (r) => openMove([r]),
     pick: (r) => { const k = keyOf(r); setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k) },
     drag: startDrag, dragEnd: () => { dragging.current = null; setDropOn('') }, swipe: (r, side) => swipe(r, side === 'left' ? prefs.swipeLeft : prefs.swipeRight),
@@ -1022,7 +1043,7 @@ function RowView({ r, pic, on, multi, acc, prefs, acts }: { r: MessageRow; pic: 
           <button title={r.seen ? t.markUnread : t.markRead} onClick={() => onAct(r.seen ? 'unseen' : 'seen')}><Icon name="dot" size={15} filled={!r.seen} /></button>
           <button title={r.flagged ? t.unflag : t.flag} onClick={() => onAct(r.flagged ? 'unflag' : 'flag')}><Icon name="star" size={15} filled={r.flagged} /></button>
           <button title={t.moveTo} onClick={() => onMove()}><Icon name="folder" size={15} /></button>
-          {/* Block sender in place of Archive and Snooze (Alex, 29 Oct): blocks, and the message goes to the Trash */}
+          {/* Block sender in place of Archive and Snooze (Alex, 29 Oct): blocks, and the message goes to Junk (2 Nov) */}
           {r.fromEmail && <button title={t.blockSender} onClick={() => onBlock()}><Icon name="block" size={15} /></button>}
           <button title={t.trashIt} onClick={() => onAct('trash')}><Icon name="trash" size={15} /></button>
         </div>
