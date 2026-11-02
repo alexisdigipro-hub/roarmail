@@ -72,7 +72,7 @@ const SETTINGS: Settings = {
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
-  accountOrder: '', promosApart: true, learnQuiet: true, junkDanger: true,
+  accountOrder: '', promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true,
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 /** only accounts that are switched on show anywhere */
@@ -222,6 +222,9 @@ const transient = (code: string) => code === 'network' || code === 'host'
 
 export class MailService {
   private worker = new Map<string, ImapFlow>()
+  private communityTimer: ReturnType<typeof setInterval> | null = null
+  /** the shared spam list's fingerprints, kept in memory (community_blocks) */
+  private communitySet: Set<string> | null = null
   /** new mail's Authentication-Results, read once by the shield at arrival */
   private authFresh = new Map<string, string>()
   private queue = new Map<string, Promise<unknown>>()
@@ -602,6 +605,11 @@ export class MailService {
     worker(); worker()
     this.schedulePoll()
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000)
+    // the shared spam list: half a minute after start, then every 6 hours
+    if (!this.communityTimer) {
+      setTimeout(() => this.refreshCommunity().catch(() => {}), 30e3)
+      this.communityTimer = setInterval(() => this.refreshCommunity().catch(() => {}), 6 * 36e5)
+    }
   }
 
   /** Settings > General > Check for new messages: every N minutes, or only when asked (no live inbox either) */
@@ -1162,7 +1170,7 @@ export class MailService {
     if (folder.role === 'inbox') {
       // blocked senders (the address, their name from any address, a whole domain) and mail the shield calls dangerous
       // go to Junk, not Trash, so the mail server learns too (Alex, 2 Nov 2026)
-      const gone = new Set([...this.blockedIn(folderId), ...this.dangerous(arrived)])
+      const gone = new Set([...this.blockedIn(folderId), ...this.dangerous(arrived), ...this.community(arrived)])
       if (gone.size) {
         for (let i = fresh.length - 1; i >= 0; i--) if (gone.has(fresh[i].id)) fresh.splice(i, 1)
         this.act([...gone], 'junk', undefined, true).catch(() => {})
@@ -1732,6 +1740,10 @@ export class MailService {
     }
     if (!blocked && who) this.db.prepare(`delete from block_rules where kind = 'name' and value = ?`).run(blockNameKey(who))
     if (blocked) this.sweepBlocked()
+    // the shared list: the address, and the name when it was blocked (or taken off with the unblock)
+    const shared: { kind: string; value: string }[] = [{ kind: 'email', value: e }]
+    if (byName || (!blocked && blockableName(who))) shared.push({ kind: 'name', value: who })
+    this.shareBlocks(shared, blocked).catch(() => {})
     return byName
   }
 
@@ -1742,6 +1754,7 @@ export class MailService {
     if (on) this.db.prepare(`insert into block_rules (kind, value, label, created) values ('domain', ?, ?, ?) on conflict(kind, value) do nothing`).run(d, d, now())
     else this.db.prepare(`delete from block_rules where kind = 'domain' and value = ?`).run(d)
     if (on) this.sweepBlocked()
+    this.shareBlocks([{ kind: 'domain', value: d }], on).catch(() => {})
     return true
   }
 
@@ -1757,6 +1770,84 @@ export class MailService {
   unblock(item: { kind: string; value: string }) {
     if (item.kind === 'email') this.db.prepare('update contacts set blocked = 0 where email = ?').run(String(item.value).toLowerCase())
     else this.db.prepare('delete from block_rules where kind = ? and value = ?').run(item.kind, item.value)
+    if (['email', 'domain', 'name'].includes(item.kind)) this.shareBlocks([item], false).catch(() => {})
+  }
+
+  // ---------- the shared spam list (Alex, 2 Nov 2026: what one RoarMail user blocks, the others do not get either) ----------
+  // Only fingerprints go out (SHA-256 of 'email:x@y.com', 'domain:y.com', 'name:derilo'), with a fingerprint of this
+  // copy's random id; RoarMe's project counts one only when 3 different copies blocked it (a name: 5). Settings >
+  // Privacy > Share blocks turns both ways off. supabase/roarmail-spam.sql
+
+  private static SB_URL = 'https://bzmjhbnwhdwmncxkqkdl.supabase.co'
+  private static SB_KEY = 'sb_publishable_7mQ3e0NH5lCmdoIKx2-FUA_EgCoXx9X'
+  private static sha = (x: string) => createHash('sha256').update(x).digest('hex')
+  /** a block as the shared list fingerprints it (the same folding as Block itself) */
+  private static print(kind: string, value: string) {
+    const v = kind === 'name' ? blockNameKey(value) : String(value || '').toLowerCase().trim().replace(/^@/, '')
+    return MailService.sha(`${kind}:${v}`)
+  }
+
+  /** this copy's fingerprint: a random id made once, never sent as it is */
+  private reporter() {
+    let id = (this.db.prepare(`select value from settings where key = 'installId'`).get() as Row | undefined)?.value as string | undefined
+    if (!id) { id = uuid(); this.db.prepare(`insert into settings (key, value) values ('installId', ?) on conflict(key) do nothing`).run(id) }
+    return MailService.sha(`roarmail:${id}`)
+  }
+
+  private async rpc(fn: string, body: unknown): Promise<any> {
+    const r = await net.fetch(`${MailService.SB_URL}/rest/v1/rpc/${fn}`, {
+      method: 'POST', body: JSON.stringify(body),
+      headers: { apikey: MailService.SB_KEY, Authorization: `Bearer ${MailService.SB_KEY}`, 'Content-Type': 'application/json' },
+    })
+    if (!r.ok) throw new Error(`shared list ${r.status}`)
+    return r.json()
+  }
+
+  /** tell the shared list about blocks (on) or unblocks (off) */
+  private async shareBlocks(items: { kind: string; value: string }[], on: boolean) {
+    if (!this.settings().shareBlocks) return
+    const list = items.filter((i) => i.value && (i.kind === 'email' || (i.kind === 'domain' && blockableDomain(i.value)) || (i.kind === 'name' && blockableName(i.value))))
+    for (let i = 0; i < list.length; i += 50) {
+      await this.rpc('roarmail_spam_report', { p_reporter: this.reporter(), p_on: on, p_items: list.slice(i, i + 50).map((x) => ({ kind: x.kind, hash: MailService.print(x.kind, x.value) })) })
+    }
+  }
+
+  /** download the shared list; the first time, this copy's own blocks go up too */
+  async refreshCommunity() {
+    if (!this.settings().shareBlocks) return
+    if (!(this.db.prepare(`select 1 from settings where key = 'sharedOnce'`).get())) {
+      const mine = this.blockList().map((b) => ({ kind: b.kind as string, value: b.kind === 'name' ? b.label : b.value }))
+      await this.shareBlocks(mine, true)
+      this.db.prepare(`insert into settings (key, value) values ('sharedOnce', '1') on conflict(key) do nothing`).run()
+    }
+    const rows = await this.rpc('roarmail_spam_list', {}) as { hash: string; kind: string }[]
+    if (!Array.isArray(rows)) return
+    const ins = this.db.prepare('insert or ignore into community_blocks (hash, kind) values (?, ?)')
+    this.db.transaction(() => {
+      this.db.prepare('delete from community_blocks').run()
+      for (const r of rows) if (/^[0-9a-f]{64}$/.test(r.hash)) ins.run(r.hash, r.kind)
+    })()
+    this.communitySet = null
+  }
+
+  /** new mail from a sender on the shared list: to Junk, never from people you know or a sender you kept */
+  private community(ids: string[]): string[] {
+    if (!ids.length || !this.settings().shareBlocks) return []
+    if (!this.communitySet) this.communitySet = new Set((this.db.prepare('select hash from community_blocks').all() as Row[]).map((r) => r.hash as string))
+    const set = this.communitySet
+    if (!set.size) return []
+    const out: string[] = []
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500)
+      for (const r of this.db.prepare(`select id, from_name, from_email from messages where id in (${part.map(() => '?').join(',')})`).all(...part) as Row[]) {
+        const from = String(r.from_email || '').toLowerCase()
+        if (!from || this.isKnown(from) || this.senderLearn(from).keep) continue
+        const dom = emailDomain(from)
+        if (set.has(MailService.print('email', from)) || (blockableDomain(dom) && set.has(MailService.print('domain', dom)))
+          || (blockableName(r.from_name || '') && set.has(MailService.print('name', r.from_name)))) out.push(r.id)
+      }
+    }
+    return out
   }
 
   /** someone you wrote to, a VIP or yourself: a name or the shield never sends them to Junk */
@@ -2647,5 +2738,6 @@ export class MailService {
     if (key === 'checkEvery') this.schedulePoll()
     if (key === 'dockBadge') this.badge()
     if (key === 'promosApart' || key === 'learnQuiet') this.inboxesChanged()
+    if (key === 'shareBlocks') { if (String(value) === 'true') this.refreshCommunity().catch(() => {}); else { this.db.prepare('delete from community_blocks').run(); this.communitySet = null } }
   }
 }
