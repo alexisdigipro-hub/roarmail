@@ -2,7 +2,7 @@
 // sliding to the open one), the page on the right with a big title. Appearance carries RoarMe's look settings.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, Folder, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
+import type { Account, BlockItem, Folder, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
 import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
@@ -829,10 +829,10 @@ function Fonts({ s, set }: { s: Settings; set: Set }) {
 /** Privacy: privacy mode first, then the single switches, the lock and blocked senders */
 function Privacy({ s, set }: { s: Settings; set: Set }) {
   const [lock, setLock] = useState<LockState | null>(null)
-  const [blocked, setBlocked] = useState<string[]>([])
+  const [blocked, setBlocked] = useState<BlockItem[]>([])
   useEffect(() => {
     window.roarmail.lockState().then(setLock)
-    window.roarmail.blockedSenders().then(setBlocked)
+    window.roarmail.blockList().then(setBlocked)
   }, [])
   return (
     <div className="stack">
@@ -853,10 +853,12 @@ function Privacy({ s, set }: { s: Settings; set: Set }) {
           </Line>
         )}
       </Group>
-      <Group title={t.blockedSenders} note={!blocked.length ? t.noneBlocked : undefined}>
-        {blocked.map((e) => (
-          <Line key={e} label={<span className="ellipsis">{e}</span>}>
-            <button className="pill small ghost" onClick={async () => { await window.roarmail.blockSender(e, false); setBlocked(blocked.filter((x) => x !== e)) }}>{t.unblock}</button>
+      {/* Block (2 Nov 2026): addresses, names from any address and whole domains, all to Junk; the shield's sure catches too */}
+      <Group title={t.blockedSenders} note={!blocked.length ? t.noneBlocked : t.bl_note}>
+        <Toggle label={t.bl_danger} hint={t.bl_dangerHint} on={s.junkDanger} set={(v) => set('junkDanger', v)} />
+        {blocked.map((b) => (
+          <Line key={`${b.kind}:${b.value}`} label={<span className="ellipsis">{b.kind === 'domain' ? `@${b.label}` : b.label}{b.kind !== 'email' && <span className="muted"> · {b.kind === 'name' ? t.bl_kindName : t.bl_kindDomain}</span>}</span>}>
+            <button className="pill small ghost" onClick={async () => { await window.roarmail.unblock({ kind: b.kind, value: b.value }); setBlocked(blocked.filter((x) => x !== b)) }}>{t.unblock}</button>
           </Line>
         ))}
       </Group>

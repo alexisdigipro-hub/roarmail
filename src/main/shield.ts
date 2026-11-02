@@ -202,3 +202,34 @@ export function shield(x: ShieldInput): Security {
   const level: Security['level'] = strong || (warnings.length >= 2 && !usual) ? 'danger' : warnings.length ? 'notice' : 'ok'
   return { auth, warnings, replyTo, level, brand: claimed, files: files.length ? files : undefined, links: links || undefined }
 }
+
+// ---------- Block by name and by domain (Alex, 2 Nov 2026: "the same name from another address, straight to Spam") ----------
+
+/** names any company sends under: blocking one of these would catch everyone's mail, so they are never kept as a name */
+const GENERIC_NAMES = new Set(['info', 'support', 'help', 'helpdesk', 'newsletter', 'news', 'noreply', 'no reply', 'no-reply', 'donotreply',
+  'do not reply', 'team', 'the team', 'admin', 'administrator', 'service', 'services', 'customer service', 'customer support', 'customer care',
+  'notifications', 'notification', 'alerts', 'alert', 'hello', 'hi', 'contact', 'sales', 'marketing', 'billing', 'accounts', 'account',
+  'security', 'mailer-daemon', 'mail delivery system', 'postmaster', 'office', 'reception', 'hr', 'jobs', 'careers', 'press', 'media',
+  'πληροφοριες', 'εξυπηρετηση πελατων', 'γραμματεια', 'λογιστηριο'])
+
+/** a sender's name as Block keeps it: lower case, no accents, no quotes, single spaces */
+export function blockNameKey(name: string): string {
+  return fold(String(name || '')).replace(/["'`«»“”‘’]/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/** a name worth blocking: not empty, not an address, not one every company uses, at least 3 letters */
+export function blockableName(name: string): boolean {
+  const k = blockNameKey(name)
+  if (k.length < 3 || /@/.test(k) || GENERIC_NAMES.has(k)) return false
+  return /[a-zα-ω]/.test(k)
+}
+
+/** the part after @, lower case */
+export const emailDomain = (email: string) => String(email || '').toLowerCase().split('@')[1]?.trim() || ''
+
+/** a domain a whole block may cover: a real one, never a mailbox provider people use (gmail.com, outlook.com...) */
+export function blockableDomain(domain: string): boolean {
+  const d = String(domain || '').toLowerCase().trim()
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) return false
+  return !PERSONAL.has(d) && !PERSONAL.has(baseDomain(d))
+}

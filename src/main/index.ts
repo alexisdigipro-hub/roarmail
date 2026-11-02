@@ -673,8 +673,11 @@ app.whenReady().then(() => {
     const files = withFiles ? await Promise.all(m.attachments.map(async (a) => { const x = await mail.attachment(a.id); return { name: x.filename, type: a.mime, content: x.content } })) : []
     return roarme.share(roomId, { subject: m.subject, from: m.fromName ? `${m.fromName} <${m.fromEmail}>` : m.fromEmail, date: m.date, snippet: m.snippet || (m.text || '').slice(0, 600), messageId: m.messageId }, note || '', files)
   })
-  handle('mail:blockSender', (_e, email, blocked) => mail.blockSender(email, blocked))
+  handle('mail:blockSender', (_e, email, blocked, name) => mail.blockSender(String(email || ''), !!blocked, typeof name === 'string' ? name : undefined))
   handle('mail:blockedSenders', () => mail.blockedSenders())
+  handle('mail:blockDomain', (_e, domain, on) => mail.blockDomain(String(domain || ''), !!on))
+  handle('mail:blockList', () => mail.blockList())
+  handle('mail:unblock', (_e, item) => mail.unblock({ kind: String(item?.kind || ''), value: String(item?.value || '') }))
 
   const lockState = (): LockState => ({ available: lockAvailable(), enabled: mail.settings().lock && lockAvailable(), locked, method: lockAvailable() ? 'touchid' : 'none' })
   const setLocked = (v: boolean) => { locked = v; emit({ type: 'lock', locked: v }) }

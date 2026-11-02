@@ -21,9 +21,9 @@ import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './micros
 import { cleanRule, plan } from './rules'
 import { readSignature, type CardFields } from './contacts'
 import { attendeeFor, buildReply, readInvite } from './ics'
-import { PERSONAL, baseDomain, shield } from './shield'
+import { PERSONAL, baseDomain, blockNameKey, blockableDomain, blockableName, emailDomain, shield } from './shield'
 import type {
-  Account, AccountPatch, Action, Address, Contact, ContactFull, ContactPatch, Draft, MailFile, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
+  Account, AccountPatch, Action, Address, BlockItem, Contact, ContactFull, ContactPatch, Draft, MailFile, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   MailStats, PromoCount, Rule, ServerConfig, Settings, Signature, SnoozedItem, Template,
 } from '../shared/api'
 
@@ -72,7 +72,7 @@ const SETTINGS: Settings = {
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
-  accountOrder: '', promosApart: true, learnQuiet: true,
+  accountOrder: '', promosApart: true, learnQuiet: true, junkDanger: true,
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 /** only accounts that are switched on show anywhere */
@@ -222,6 +222,8 @@ const transient = (code: string) => code === 'network' || code === 'host'
 
 export class MailService {
   private worker = new Map<string, ImapFlow>()
+  /** new mail's Authentication-Results, read once by the shield at arrival */
+  private authFresh = new Map<string, string>()
   private queue = new Map<string, Promise<unknown>>()
   // the foreground lane (29 Oct 2026, "deleting is slow"): opening a message gets its own connection, so it never
   // waits behind background sync, prefetch or listing files on the worker
@@ -251,6 +253,8 @@ export class MailService {
 
   constructor(private db: DB, private emit: (e: MailEvent) => void, private notify: (accountId: string, rows: MessageRow[]) => void) {
     fs.mkdirSync(mailDir(), { recursive: true })
+    // Block by name (2 Nov 2026): the sender's name as block_rules keeps it
+    db.function('blockname', { deterministic: true }, (v: unknown) => blockNameKey(String(v ?? '')))
     // anything cut off by a crash or quit goes back in the queue
     db.prepare(`update operations set status = 'queued' where status = 'running'`).run()
     db.prepare(`update outbox set status = 'queued' where status = 'sending'`).run()
@@ -1133,7 +1137,7 @@ export class MailService {
         }
 
         if (range) {
-          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe', 'list-id'] }
+          const query: Row = { uid: true, envelope: true, flags: true, bodyStructure: true, internalDate: true, size: true, headers: ['references', 'list-unsubscribe', 'list-id', 'authentication-results'] }
           if (gmail) query.threadId = true
           const batch: Row[] = []
           for await (const m of c.fetch(range, query as any, { uid: true })) {
@@ -1156,16 +1160,17 @@ export class MailService {
     this.emit({ type: 'folders', accountId })
     if (folder.role === 'inbox') this.badge()
     if (folder.role === 'inbox') {
-      const blocked = this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id join contacts c on c.email = m.from_email
-        where mf.folder_id = ? and c.blocked = 1 and m.pending_op is null`).all(folderId) as Row[]
-      if (blocked.length) {
-        const gone = new Set(blocked.map((b) => b.id))
+      // blocked senders (the address, their name from any address, a whole domain) and mail the shield calls dangerous
+      // go to Junk, not Trash, so the mail server learns too (Alex, 2 Nov 2026)
+      const gone = new Set([...this.blockedIn(folderId), ...this.dangerous(arrived)])
+      if (gone.size) {
         for (let i = fresh.length - 1; i >= 0; i--) if (gone.has(fresh[i].id)) fresh.splice(i, 1)
-        this.act([...gone], 'trash').catch(() => {})
+        this.act([...gone], 'junk', undefined, true).catch(() => {})
       }
       // Settings > Rules on what just arrived; mail a rule moved or marked read does not notify
-      if (arrived.length) {
-        const handled = this.applyRules(arrived).quiet
+      const kept = arrived.filter((id) => !gone.has(id))
+      if (kept.length) {
+        const handled = this.applyRules(kept).quiet
         for (let i = fresh.length - 1; i >= 0; i--) if (handled.has(fresh[i].id)) fresh.splice(i, 1)
       }
     }
@@ -1217,6 +1222,9 @@ export class MailService {
         }
         ins.run(row)
         link.run(row.id, folderId, m.uid)
+        // the shield at arrival reads it once (only new mail asks the server for it)
+        const auth = header('authentication-results')
+        if (auth) { this.authFresh.set(row.id, auth); if (this.authFresh.size > 2000) this.authFresh.delete(this.authFresh.keys().next().value!) }
         if (row.has_attachments) this.indexStructure(row.id, m.bodyStructure)
         if (row.from_email) contact.run(row.from_email, row.from_name || null, row.date)
         out.push(toRow(row))
@@ -1665,8 +1673,8 @@ export class MailService {
    *  sender, a move to Junk 3 */
   learnFromAct(ids: string[], action: Action, targetFolderId?: string) {
     if (!ids.length || !this.settings().learnQuiet) return
-    const junk = action === 'move' && !!targetFolderId
-      && (this.db.prepare('select role from folders where id = ?').get(targetFolderId) as Row | undefined)?.role === 'spam'
+    const junk = action === 'junk' || (action === 'move' && !!targetFolderId
+      && (this.db.prepare('select role from folders where id = ?').get(targetFolderId) as Row | undefined)?.role === 'spam')
     if (action !== 'trash' && action !== 'archive' && !junk) return
     const senders = new Set<string>()
     for (let i = 0; i < ids.length; i += 500) {
@@ -1709,11 +1717,95 @@ export class MailService {
     for (const a of this.accounts()) { this.emit({ type: 'messages', accountId: a.id }); this.emit({ type: 'folders', accountId: a.id }) }
   }
 
-  /** a blocked sender's new mail goes straight to Trash */
-  blockSender(email: string, blocked: boolean) {
-    this.db.prepare(`insert into contacts (email, blocked) values (?, ?) on conflict(email) do update set blocked = excluded.blocked`).run(email.toLowerCase(), blocked ? 1 : 0)
+  /** a blocked sender's mail goes straight to Junk; with their name (2 Nov 2026), the same name from any other address too.
+   *  Unblocking takes the name off as well. Returns whether the name was blocked */
+  blockSender(email: string, blocked: boolean, name?: string): boolean {
+    const e = String(email || '').toLowerCase().trim()
+    if (!e) return false
+    const stored = (this.db.prepare('select name from contacts where email = ?').get(e) as Row | undefined)?.name as string | undefined
+    this.db.prepare(`insert into contacts (email, blocked) values (?, ?) on conflict(email) do update set blocked = excluded.blocked`).run(e, blocked ? 1 : 0)
+    const who = String(name || stored || '').trim()
+    let byName = false
+    if (blocked && blockableName(who) && !this.isKnown(e)) {
+      this.db.prepare(`insert into block_rules (kind, value, label, created) values ('name', ?, ?, ?) on conflict(kind, value) do nothing`).run(blockNameKey(who), who, now())
+      byName = true
+    }
+    if (!blocked && who) this.db.prepare(`delete from block_rules where kind = 'name' and value = ?`).run(blockNameKey(who))
+    if (blocked) this.sweepBlocked()
+    return byName
   }
 
+  /** Block everyone at a domain (deals-xyz.com), never a mailbox provider like gmail.com; false when it cannot be */
+  blockDomain(domain: string, on: boolean): boolean {
+    const d = String(domain || '').toLowerCase().trim().replace(/^@/, '')
+    if (on && !blockableDomain(d)) return false
+    if (on) this.db.prepare(`insert into block_rules (kind, value, label, created) values ('domain', ?, ?, ?) on conflict(kind, value) do nothing`).run(d, d, now())
+    else this.db.prepare(`delete from block_rules where kind = 'domain' and value = ?`).run(d)
+    if (on) this.sweepBlocked()
+    return true
+  }
+
+  /** Settings > Privacy: every blocked address, name and domain */
+  blockList(): BlockItem[] {
+    const out: BlockItem[] = (this.db.prepare(`select email, name from contacts where blocked = 1 order by email`).all() as Row[])
+      .map((r) => ({ kind: 'email', value: r.email, label: r.email }))
+    for (const r of this.db.prepare(`select kind, value, label from block_rules order by kind, label`).all() as Row[]) out.push({ kind: r.kind, value: r.value, label: r.label || r.value })
+    return out
+  }
+
+  /** Unblock from Settings: an address, a name or a domain */
+  unblock(item: { kind: string; value: string }) {
+    if (item.kind === 'email') this.db.prepare('update contacts set blocked = 0 where email = ?').run(String(item.value).toLowerCase())
+    else this.db.prepare('delete from block_rules where kind = ? and value = ?').run(item.kind, item.value)
+  }
+
+  /** someone you wrote to, a VIP or yourself: a name or the shield never sends them to Junk */
+  private isKnown(email: string) {
+    const c = this.db.prepare('select vip, use_count from contacts where email = ?').get(email) as Row | undefined
+    return this.ownAddresses().has(email) || !!c?.vip || (c?.use_count || 0) > 0
+  }
+
+  /** the messages in an inbox that a block catches: the address, the name (not from people you know), the domain */
+  private blockedIn(folderId: string): string[] {
+    return (this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id
+      where mf.folder_id = ? and m.pending_op is null and coalesce(m.from_email, '') != '' and (
+        m.from_email in (select email from contacts where blocked = 1)
+        or exists (select 1 from block_rules b where b.kind = 'domain'
+          and (substr(m.from_email, instr(m.from_email, '@') + 1) = b.value or m.from_email like '%.' || b.value))
+        or (exists (select 1 from block_rules b where b.kind = 'name' and b.value = blockname(m.from_name))
+          and not exists (select 1 from contacts c where c.email = m.from_email and (c.vip = 1 or c.use_count > 0)))
+      )`).all(folderId) as Row[]).map((r) => r.id as string)
+  }
+
+  /** new mail the shield is sure about (a brand from the wrong address, a lookalike address, a name posing as another
+   *  address, a first mail whose sender checks failed): straight to Junk, never from people you know (2 Nov 2026) */
+  private dangerous(ids: string[]): string[] {
+    if (!ids.length || !this.settings().junkDanger) return []
+    const out: string[] = []
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500)
+      const rows = this.db.prepare(`select id, from_name, from_email, reply_to, subject, list_unsubscribe from messages where id in (${part.map(() => '?').join(',')})`).all(...part) as Row[]
+      for (const r of rows) {
+        const from = String(r.from_email || '').toLowerCase()
+        if (!from || this.isKnown(from)) continue
+        const firstTime = !this.db.prepare('select 1 from messages where from_email = ? and id != ? limit 1').get(from, r.id)
+        const sec = shield({ authResults: this.authFresh.get(r.id) || '', fromName: r.from_name || '', fromEmail: from, replyTo: r.reply_to || undefined,
+          subject: r.subject || '', text: '', files: [], firstTime, known: false, list: !!r.list_unsubscribe })
+        const sure = sec.warnings.some((w) => w === 'brand' || w === 'lookalike' || w === 'nameSpoof') || (sec.auth === 'fail' && firstTime)
+        if (sure) out.push(r.id)
+      }
+    }
+    return out
+  }
+
+  /** after a new block: what is already in the inboxes from them goes to Junk too */
+  private sweepBlocked() {
+    const ids: string[] = []
+    for (const f of this.db.prepare(`select f.id from folders f where f.role = 'inbox' and ${ON}`).all() as Row[]) ids.push(...this.blockedIn(f.id))
+    if (ids.length) this.act(ids, 'junk', undefined, true).catch(() => {})
+  }
+
+  /** the addresses blocked one by one (the window marks Block / Unblock with it) */
   blockedSenders(): string[] {
     return (this.db.prepare('select email from contacts where blocked = 1 order by email').all() as Row[]).map((r) => r.email)
   }
@@ -1942,8 +2034,10 @@ export class MailService {
   async act(ids: string[], action: Action, targetFolderId?: string, immediate = false): Promise<string | null> {
     if (!ids.length) return null
     const marks = ids.map(() => '?').join(',')
+    // a message already on its way somewhere (a block's sweep, an earlier click) is not moved twice
+    const moving = action !== 'seen' && action !== 'unseen' && action !== 'flag' && action !== 'unflag'
     const rows = this.db.prepare(`select m.id, m.account_id, f.id as folder_id, f.path, f.role, mf.uid from messages m
-      join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id where m.id in (${marks})`).all(...ids) as Row[]
+      join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id where m.id in (${marks})${moving ? ' and m.pending_op is null' : ''}`).all(...ids) as Row[]
     const groups = new Map<string, { accountId: string; folderId: string; path: string; role: string | null; uids: number[]; ids: string[] }>()
     for (const r of rows) {
       if (!groups.has(r.folder_id)) groups.set(r.folder_id, { accountId: r.account_id, folderId: r.folder_id, path: r.path, role: r.role, uids: [], ids: [] })
@@ -1971,11 +2065,14 @@ export class MailService {
         for (const g of groups.values()) {
           let target: Row | undefined
           if (action === 'move') target = this.db.prepare('select * from folders where id = ? and account_id = ?').get(targetFolderId, g.accountId) as Row
+          // Junk (2 Nov 2026): the account's Junk folder, its Trash when it has none
+          else if (action === 'junk') target = this.folderByRole(g.accountId, 'spam') || this.folderByRole(g.accountId, 'trash')
           else target = this.folderByRole(g.accountId, action === 'archive' ? 'archive' : 'trash')
           if (action === 'move' && !target) continue
           if (target && target.id === g.folderId) continue
           // trash in Trash deletes for good; archive with no Archive folder makes one when the op runs
-          const kind: MoveKind = action === 'trash' && g.role === 'trash' ? 'delete' : action === 'move' ? 'move' : action
+          const kind: MoveKind = action === 'junk' ? (target?.role === 'spam' ? 'move' : 'trash')
+            : action === 'trash' && g.role === 'trash' ? 'delete' : action === 'move' ? 'move' : action
           const opId = uuid()
           accounts.add(g.accountId)
           tokens.push(opId)

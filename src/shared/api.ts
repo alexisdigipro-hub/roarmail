@@ -207,6 +207,9 @@ export interface Security {
   links?: number
 }
 
+/** a block in Settings > Privacy: an address, a sender's name (from any address) or a whole domain */
+export interface BlockItem { kind: 'email' | 'name' | 'domain'; value: string; label: string }
+
 /** the Promotions pill above the Inbox (1 Nov 2026): unread and all promotions there, and the senders never opened */
 export interface PromoCount { unread: number; total: number; senders: number }
 
@@ -370,6 +373,8 @@ export interface Settings {
   promosApart: boolean
   /** a sender whose mail you delete or archive unread 3 times, and never open, becomes quiet (counted on this computer) */
   learnQuiet: boolean
+  /** Settings > Privacy (2 Nov 2026): new mail the shield is sure is phishing goes straight to Junk */
+  junkDanger: boolean
   /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
   autoUpdate: boolean
 }
@@ -405,7 +410,7 @@ export interface RoarWork {
   hub: { linked: boolean; tasks: { id: string; title: string; due?: string; status?: string; project?: string; projectId?: string }[]; events: { id: string; title?: string; typeLabel?: string; date: string; endDate?: string; start?: string; project?: string; location?: string; color?: string }[] }
 }
 
-export type Action = 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash' | 'move'
+export type Action = 'seen' | 'unseen' | 'flag' | 'unflag' | 'archive' | 'trash' | 'move' | 'junk'
 
 export type MailEvent =
   | { type: 'accounts' }
@@ -524,8 +529,15 @@ export interface MailApi {
   notPromotions(email: string): Promise<void>
   /** Forget what it learned: every sender back to the start */
   forgetLearned(): Promise<void>
-  blockSender(email: string, blocked: boolean): Promise<void>
+  /** Block (2 Nov 2026): the address, and with a name the same name from any address; their mail goes to Junk.
+   *  Resolves true when the name was blocked too */
+  blockSender(email: string, blocked: boolean, name?: string): Promise<boolean>
   blockedSenders(): Promise<string[]>
+  /** Block everyone at a domain (never gmail.com and the like); false when that domain cannot be blocked */
+  blockDomain(domain: string, on: boolean): Promise<boolean>
+  /** Settings > Privacy: every blocked address, name and domain */
+  blockList(): Promise<BlockItem[]>
+  unblock(item: { kind: BlockItem['kind']; value: string }): Promise<void>
   lockState(): Promise<LockState>
   unlock(): Promise<boolean>
   lockNow(): Promise<void>
