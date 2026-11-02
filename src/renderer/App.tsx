@@ -274,16 +274,32 @@ export default function App() {
     setSelected([keyOf(r)]); setAnchor(keyOf(r))
   }, [inDrafts])
 
+  // Shift selects from the first to the last (Alex, 2 Nov 2026). The start is the last row clicked; when that row has
+  // left the list (archived, deleted, another folder) or none was clicked, the open or selected one, else the top row
+  const tip = useRef<string | null>(null)
+  const startKey = () => {
+    const keys = list.map(keyOf)
+    if (anchor && keys.includes(anchor)) return anchor
+    return selected.find((k) => keys.includes(k)) ?? keys[0] ?? null
+  }
+  const selectTo = (k: string) => {
+    const from = startKey()
+    if (!from) return
+    const a = list.findIndex((x) => keyOf(x) === from), b = list.findIndex((x) => keyOf(x) === k)
+    if (a < 0 || b < 0) return
+    const [lo, hi] = a < b ? [a, b] : [b, a]
+    setSelected(list.slice(lo, hi + 1).map(keyOf)); setAnchor(from); tip.current = k
+  }
   const click = (r: MessageRow, e: MouseEvent) => {
     navWay.current = 'click'
     const k = keyOf(r)
     if (e.metaKey || e.ctrlKey) {
-      setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k)
-    } else if (e.shiftKey && anchor) {
-      const a = list.findIndex((x) => keyOf(x) === anchor), b = list.indexOf(r)
-      const [lo, hi] = a < b ? [a, b] : [b, a]
-      setSelected(list.slice(lo, hi + 1).map(keyOf))
-    } else openRow(r)
+      setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k])); setAnchor(k); tip.current = k
+    } else if (e.shiftKey) {
+      // no text gets selected on the way
+      window.getSelection()?.removeAllRanges()
+      selectTo(k)
+    } else { openRow(r); tip.current = k }
   }
 
   // drag mail onto a folder (Alex, 21 Oct 2026): the selection if the row is in it, else that row
@@ -524,6 +540,16 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'a' && !el.closest?.('.read')) { e.preventDefault(); setSelected(list.map(keyOf)); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const k = e.key
+      // Shift + arrows: the selection grows or shrinks from where it started, one row at a time
+      if (e.shiftKey && (k === 'ArrowDown' || k === 'ArrowUp') && list.length) {
+        e.preventDefault()
+        const keys = list.map(keyOf)
+        const from = tip.current && keys.includes(tip.current) && selected.includes(tip.current) ? tip.current : startKey()
+        const i = from ? keys.indexOf(from) : -1
+        const n = keys[Math.max(0, Math.min(keys.length - 1, i + (k === 'ArrowDown' ? 1 : -1)))]
+        if (n) selectTo(n)
+        return
+      }
       const move = (d: number) => {
         const i = index >= 0 ? index : d > 0 ? -1 : list.length
         const n = list[Math.max(0, Math.min(list.length - 1, i + d))]
@@ -550,7 +576,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [list, index, current, chosen, compose, adding, moving, snoozing, roar, settingsOpen, scope, act, openCompose, openMove, openSnooze, toast, inDrafts, openRow])
+  }, [list, index, current, chosen, selected, anchor, compose, adding, moving, snoozing, roar, settingsOpen, scope, act, openCompose, openMove, openSnooze, toast, inDrafts, openRow])
 
   const title = useMemo(() => {
     if (results) return t.searchResults
