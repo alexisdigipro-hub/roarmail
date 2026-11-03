@@ -198,7 +198,7 @@ export function WorkPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <aside className="work-panel">
-      <div className="row work-head"><b className="roar-wm small"><span>ROAR</span>ME</b><span className="grow">{t.rm_work}</span>
+      <div className="row work-head"><b className="roar-wm small"><span>ROAR</span> ACCOUNT</b><span className="grow">{t.rm_work}</span>
         <button className="tool small" title={t.refresh} onClick={load}><Icon name="refresh" size={15} /></button>
         <button className="tool small" title={t.done} onClick={onClose}><Icon name="close" size={15} /></button></div>
       {!status ? <div className="spinner" /> : !ready ? <RoarMeAccount compact /> : !work ? (error ? <p className="error">{error}</p> : <div className="spinner" />) : (
@@ -245,7 +245,8 @@ export function WorkPanel({ onClose }: { onClose: () => void }) {
               ))}
             </>
           )}
-          <button className="pill small ghost open-roarme" onClick={() => api().roarmeOpen({})}>{t.rm_openRoarMe}</button>
+          {/* the Roar Account's own page, not RoarMe (Alex, 3 Nov 2026: "Open my account") */}
+          <button className="pill small ghost open-roarme" onClick={() => api().openExternal('https://themadlions.com/account/')}>{t.ra_open}</button>
         </div>
       )}
     </aside>
