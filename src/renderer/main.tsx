@@ -8,6 +8,7 @@ import './styles.css'
 import './look.css'
 import App from './App'
 import { ComposeWindow } from './ComposeWindow'
+import { PanelWindow, type PanelKind } from './PanelWindow'
 
 // a file dropped anywhere outside a drop area is not opened as a page in the window (security review 29 Oct 2026)
 document.addEventListener('dragover', (e) => e.preventDefault())
@@ -36,4 +37,6 @@ class Guard extends Component<{ children: ReactNode }, { broke: string }> {
 
 // a message being written in its own window (index.html#compose=<id>), else the whole app
 const composeId = (location.hash.match(/^#compose=([0-9a-f]+)$/) || [])[1]
-createRoot(document.getElementById('root')!).render(<Guard>{composeId ? <ComposeWindow id={composeId} /> : <App />}</Guard>)
+// Settings, Files, Contacts or Statistics in its own window (index.html#panel=<kind>&id=<id>)
+const panel = location.hash.match(/^#panel=(settings|files|contacts|stats)&id=([0-9a-f]+)$/)
+createRoot(document.getElementById('root')!).render(<Guard>{composeId ? <ComposeWindow id={composeId} /> : panel ? <PanelWindow kind={panel[1] as PanelKind} id={panel[2]} /> : <App />}</Guard>)
