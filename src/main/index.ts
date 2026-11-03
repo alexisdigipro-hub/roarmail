@@ -11,6 +11,7 @@ import { MailService } from './mail'
 import { autodetect } from './autodetect'
 import { readCsv, readVcf } from './contacts'
 import { RoarMe } from './roarme'
+import { RoarAccount } from './account'
 import type { LockState, MailEvent, MenuItem, MessageRow, NewMailSound, RoarTransferFile } from '../shared/api'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const updater = require('./updater.js')
@@ -25,6 +26,7 @@ let openLink: (url: string) => void = (url) => { pendingLink = url }
 let shownOnce = false
 let locked = false
 let tray: Tray | null = null
+let roarAccount: RoarAccount | null = null
 let background = false // keep running in the menu bar / tray when the window closes
 
 // App lock (Touch ID on a Mac). While locked the main process answers nothing but these, so a locked
@@ -673,7 +675,7 @@ app.whenReady().then(() => {
   handle('mail:setSetting', (_e, k, v) => {
     // the downloads folder is only one the person chose in the folder picker (or none)
     if (k === 'downloadsFolder' && v && v !== picked) return
-    mail.setSetting(k, v); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v); if (k === 'dockMode') applyDock(v) })
+    mail.setSetting(k, v); if (k === 'syncSetup') roarAccount?.nudge(); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v); if (k === 'dockMode') applyDock(v) })
   handle('mail:snooze', (_e, ids, until) => mail.snooze(ids, until))
   handle('mail:snoozed', () => mail.snoozed())
   handle('mail:unsnooze', (_e, id) => mail.unsnooze(id))
@@ -688,7 +690,15 @@ app.whenReady().then(() => {
   handle('mail:forgetLearned', () => mail.forgetLearned())
 
   // RoarMe: the account, sharing into chats, tasks and the calendar
-  const roarme = new RoarMe(() => emit({ type: 'roarme' }))
+  const roarme = new RoarMe(() => { emit({ type: 'roarme' }); roarAccount?.nudge() })
+  // the Roar Account (3 Nov 2026): RoarMail's setup synced to every computer signed in, and the ✦ AI
+  roarAccount = new RoarAccount(mail, roarme, () => emit({ type: 'roarSync' }))
+  roarAccount.start()
+  handle('mail:syncState', () => roarAccount!.syncState())
+  handle('mail:syncNow', () => roarAccount!.syncNow())
+  handle('mail:aiStatus', () => roarAccount!.aiStatus())
+  handle('mail:aiSetKey', (_e, provider, key) => roarAccount!.aiSetKey(provider === 'openai' ? 'openai' : 'claude', String(key || '')))
+  handle('mail:ai', (_e, req) => roarAccount!.ai(req))
   handle('mail:roarmeStatus', () => roarme.status())
   handle('mail:roarmeSignIn', (_e, email, pass) => roarme.signIn(email, pass))
   handle('mail:roarmeVerify', (_e, code) => roarme.verify(code))

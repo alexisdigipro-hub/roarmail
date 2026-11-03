@@ -8,7 +8,7 @@ import { Icon } from './Icon'
 import { clean as roarError, useRoarMe } from './RoarMe'
 import type { ComposeKind } from './Viewer'
 import { TimePicker } from './TimePicker'
-import { FONTS } from '../look'
+import { SAFE_FONTS, knownLocalFonts, localStack, mailFontStack, readLocalFonts, withMailFont } from '../mailfonts'
 import { TemplatesMenu, filled, templateValues } from './Templates'
 
 /** a quoted message inside the writing window: no pictures from the network in its styles, nothing that could sit
@@ -156,9 +156,14 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
     return { inReplyTo: m.messageId, references: [m.references, m.messageId].filter(Boolean).join(' ') || undefined, replyToMessageId: m.id }
   }
 
+  // the font new mail is written in (Settings > Fonts > New messages, 3 Nov 2026): shown while writing, sent around the text
+  const [mailFont, setMailFont] = useState('')
+  useEffect(() => { window.roarmail.settings().then((x) => setMailFont(mailFontStack(x.composeFont || ''))).catch(() => {}) }, [])
+  // the fonts of this computer in the Font menu, once read (reading them needs a click: "Your fonts…")
+  const [localFonts, setLocalFonts] = useState<string[]>(knownLocalFonts)
   const draft = (): Draft => ({
     id: draftId.current, accountId, identityId: identityId || undefined, to, cc, bcc, subject,
-    html: body.current?.innerHTML || '', text: body.current?.innerText || '',
+    html: withMailFont(body.current?.innerHTML || '', mailFont), text: body.current?.innerText || '',
     ...replyMeta(), replacesMessageId: seed.draft?.replacesMessageId, attachments: files,
     priority: priority === 'normal' ? undefined : priority,
   })
@@ -305,6 +310,61 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
   // a white page behind the text, in dark mode only (Alex, 2 Nov 2026: signatures and pasted mail made for white stay readable)
   const [paper, setPaper] = useState(() => { try { return localStorage.getItem('roarmail.paper') === '1' } catch { return false } })
   const togglePaper = () => setPaper((v) => { try { localStorage.setItem('roarmail.paper', v ? '0' : '1') } catch { /* this run only */ } return !v })
+  // the ✦ AI (3 Nov 2026): tell it what you want, it writes into the message (or changes the text selected); with
+  // RoarMail AI through the Roar Account, or the person's own Claude / ChatGPT key (Settings > Roar Account)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiAsk, setAiAsk] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const aiSel = useRef<Range | null>(null)
+  const canAi = !!window.roarmail.ai
+  /** what the person wrote themselves: everything above the signature, the quote and the RoarTransfer cards */
+  const ownRange = (): Range | null => {
+    const el = body.current
+    if (!el) return null
+    const r = document.createRange()
+    r.setStart(el, 0)
+    let stop = [...el.childNodes].find((n) => n instanceof HTMLElement && (n.hasAttribute(SIG) || n.tagName === 'BLOCKQUOTE' || n.hasAttribute('data-roarmail-transfer') || /----------/.test(n.textContent || ''))) as Node | undefined
+    // the empty lines placed before the signature stay
+    while (stop && stop.previousSibling && stop.previousSibling.nodeName === 'BR') stop = stop.previousSibling
+    if (stop) r.setEndBefore(stop); else r.setEnd(el, el.childNodes.length)
+    return r
+  }
+  const openAi = () => {
+    // a selection inside the message is what the AI changes; it is remembered before the panel takes the focus
+    const sel = window.getSelection()
+    const r = sel && sel.rangeCount ? sel.getRangeAt(0) : null
+    aiSel.current = r && !r.collapsed && body.current?.contains(r.commonAncestorContainer) ? r.cloneRange() : null
+    setAiOpen((v) => !v); setError('')
+  }
+  const runAi = async (instruction: string) => {
+    if (!instruction.trim() || aiBusy) return
+    const target = aiSel.current || ownRange()
+    if (!target) return
+    const text = target.toString().trim()
+    const src = seed.kind !== 'new' && seed.kind !== 'draft' ? seed.source : undefined
+    const me = accounts.find((a) => a.id === accountId)
+    setAiBusy(true); setError('')
+    try {
+      const out = await window.roarmail.ai!({
+        instruction, text, selection: !!aiSel.current,
+        thread: src ? (src.text || (src.html || '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+\n/g, '\n')).slice(0, 12000) : undefined,
+        threadFrom: src ? (src.fromName || src.fromEmail) : undefined,
+        to, subject, me: me ? `${me.displayName || ''} <${me.email}>`.trim() : undefined,
+      })
+      if (!out) throw new Error('empty')
+      const html = out.split(/\n{2,}/).map((p) => `<div>${esc(p.trim()).replace(/\n/g, '<br>')}</div>`).join('<div><br></div>') + (aiSel.current ? '' : '<div><br></div>')
+      // replaced with the editor's own command, so Cmd+Z brings the text back
+      body.current?.focus()
+      const sel = window.getSelection()
+      sel?.removeAllRanges(); sel?.addRange(target)
+      document.execCommand('insertHTML', false, html)
+      dirty.current = true
+      setAiOpen(false); setAiAsk(''); aiSel.current = null
+    } catch (e: any) {
+      const m = String(e?.message || e)
+      setError(/ai-signin/.test(m) ? t.ai_signin : /ai-limit/.test(m) ? t.ai_limit : /ai-nokey/.test(m) ? t.ai_nokey : /ai-badkey/.test(m) ? t.ai_badkey : roarError(e))
+    } finally { setAiBusy(false) }
+  }
   const toggleFmt = () => setFmtBar((v) => { try { localStorage.setItem('roarmail.fmtbar', v ? '0' : '1') } catch { /* this run only */ } return !v })
 
   // the corner handle: the window stays centred, so it grows twice as fast as the pointer moves
@@ -385,6 +445,29 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
           <b>{title}</b>
           <span className="grow" />
           <div className="composer-tools">
+            {canAi && (
+              <span className="attach-wrap">
+                <button className={`tool ai-btn ${aiOpen ? 'on-filter' : ''}`} title={t.ai_btn} onMouseDown={(e) => e.preventDefault()} onClick={openAi}><Icon name="spark" /></button>
+                {aiOpen && (
+                  <div className="attach-menu ai-menu" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setAiOpen(false) } }}>
+                    <textarea autoFocus rows={3} value={aiAsk} placeholder={t.ai_ph} disabled={aiBusy}
+                      onChange={(e) => setAiAsk(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); runAi(aiAsk) } }} />
+                    <div className="ai-chips">
+                      <small className="muted">{aiSel.current ? t.ai_onSel : t.ai_onAll}</small>
+                      {([['ai_shorter', 'Make it shorter'], ['ai_formal', 'Make it more formal'], ['ai_friendly', 'Make it friendlier'], ['ai_fix', 'Fix spelling and grammar, change nothing else'],
+                        ['ai_en', 'Translate it into English'], ['ai_el', 'Translate it into Greek']] as const).map(([k, ask]) => (
+                        <button key={k} className="chip" disabled={aiBusy} onClick={() => runAi(ask)}>{t[k]}</button>
+                      ))}
+                    </div>
+                    <div className="row end">
+                      <button className="pill small primary" disabled={aiBusy || !aiAsk.trim()} onClick={() => runAi(aiAsk)}>
+                        <Icon name="spark" size={14} /> {aiBusy ? t.ai_busy : t.ai_write}</button>
+                    </div>
+                  </div>
+                )}
+              </span>
+            )}
             <button className={`tool ${fmtBar ? 'on-filter' : ''}`} title={t.fm_bar} onClick={toggleFmt}><Icon name="aa" /></button>
             <button className={`tool paper-btn ${paper ? 'on-filter' : ''}`} title={t.fm_paper} onMouseDown={(e) => e.preventDefault()} onClick={togglePaper}><Icon name="paper" /></button>
             <button className="tool" title={t.emoji} onMouseDown={(e) => e.preventDefault()} onClick={() => { body.current?.focus(); window.roarmail.emojiPanel() }}><Icon name="emoji" /></button>
@@ -445,9 +528,19 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
               <option value="" disabled>{t.fm_style}</option>
               {BLOCKS.map(([k, label]) => <option key={k} value={k}>{t[label as keyof typeof t] as string}</option>)}
             </select>
-            <select title={t.font} defaultValue="" onChange={(e) => { exec('fontName', e.target.value); e.target.value = '' }}>
+            {/* fonts everyone has first, then this computer's (they arrive only where the reader has them too) */}
+            <select title={t.font} defaultValue="" onChange={(e) => {
+              const v = e.target.value; e.target.value = ''
+              if (v === '__local') { readLocalFonts().then((f) => { setLocalFonts(f); if (!f.length) setError(t.f_noComputer) }).catch(() => setError(t.f_noComputer)); return }
+              exec('fontName', v)
+            }}>
               <option value="" disabled>{t.font}</option>
-              {FONTS.map(([k, label, fam]) => <option key={k} value={fam} style={{ fontFamily: fam }}>{label}</option>)}
+              <optgroup label={t.fm_safe}>
+                {SAFE_FONTS.map(([n, stack]) => <option key={n} value={stack} style={{ fontFamily: stack }}>{n}</option>)}
+              </optgroup>
+              {localFonts.length > 0
+                ? <optgroup label={t.fm_yours}>{localFonts.map((f) => <option key={f} value={localStack(f)} style={{ fontFamily: localStack(f) }}>{f}</option>)}</optgroup>
+                : <option value="__local">{t.fm_loadYours}</option>}
             </select>
             <select className="narrow" title={t.fm_size} defaultValue="" onChange={(e) => { exec('fontSize', e.target.value); e.target.value = '' }}>
               <option value="" disabled>{t.fm_size}</option>
@@ -500,7 +593,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
             )}
           </div>
         )}
-        <div className="editor" ref={body} contentEditable suppressContentEditableWarning spellCheck />
+        <div className="editor" ref={body} contentEditable suppressContentEditableWarning spellCheck style={mailFont ? { fontFamily: mailFont } : undefined} />
         {files.length > 0 && (
           <div className="files">
             {files.map((f) => {

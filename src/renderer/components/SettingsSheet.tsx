@@ -2,7 +2,8 @@
 // sliding to the open one), the page on the right with a big title. Appearance carries RoarMe's look settings.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
-import type { Account, BlockItem, Folder, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
+import { SAFE_FONTS, knownLocalFonts, localStack, mailFontStack } from '../mailfonts'
+import type { Account, AiStatus, BlockItem, Folder, SyncState, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
 import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
@@ -17,9 +18,9 @@ const MAC = window.roarmail.platform === 'darwin'
 
 // Eight pages in one list (Alex, 29 Oct: "too many and a bit confusing, tidy them"; it was 17 in five groups).
 // Everything is still there: what belonged together now shares a page, and nothing shows in two places.
-export type Page = 'general' | 'mail' | 'writing' | 'rules' | 'look' | 'accounts' | 'privacy' | 'about'
+export type Page = 'general' | 'roar' | 'mail' | 'writing' | 'rules' | 'look' | 'accounts' | 'privacy' | 'about'
 const PAGES: [Page, string][] = [
-  ['general', 'gear'], ['mail', 'unread'], ['writing', 'compose'], ['rules', 'funnel'],
+  ['general', 'gear'], ['roar', 'roar'], ['mail', 'unread'], ['writing', 'compose'], ['rules', 'funnel'],
   ['look', 'palette'], ['accounts', 'inbox'], ['privacy', 'shield'], ['about', 'info'],
 ]
 const title = (p: Page) => t[`pg_${p}` as Key]
@@ -86,6 +87,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
             </Tabs>}
             {page === 'rules' && <RulesPage accounts={accounts} seed={start?.page === 'rules' ? start.rule : null} />}
             {prefs && page === 'general' && <General s={prefs} set={set} />}
+            {prefs && page === 'roar' && <RoarAccountPage s={prefs} set={set} />}
             {prefs && page === 'mail' && <Mail s={prefs} set={set} />}
             {prefs && page === 'look' && <Tabs tabs={[['theme', title2('theme')], ['list', title2('list')], ['fonts', title2('fonts')]]}>
               {(k) => k === 'theme' ? <Theme s={prefs} set={set} /> : k === 'list' ? <ListPage s={prefs} set={set} /> : <Fonts s={prefs} set={set} />}
@@ -400,8 +402,6 @@ function Accounts({ sigs, onAdd }: { accounts: Account[]; sigs: Signature[]; onA
         <button className="acct-chip add" onClick={onAdd} title={t.addAccount}><Icon name="plus" size={14} /></button>
       </div>
       {a && <AccountDetail key={a.id} a={a} sigs={sigs} />}
-      <h4 className="set-sub">RoarMe</h4>
-      <RoarMeAccount />
     </div>
   )
 }
@@ -758,7 +758,7 @@ const QUOTE_COLORS: [string, Key][] = [
 
 /** Apple Mail's "Fonts & Colours": the list, messages and fixed width; quoted text coloured by level */
 function Fonts({ s, set }: { s: Settings; set: Set }) {
-  const [local, setLocal] = useState<string[] | null>(null)
+  const [local, setLocal] = useState<string[] | null>(() => { const k = knownLocalFonts(); return k.length ? k : null })
   const [noLocal, setNoLocal] = useState(false)
   // the fonts installed on this computer (Cera GR and the rest), asked for when the person wants them
   const loadLocal = async () => {
@@ -795,6 +795,20 @@ function Fonts({ s, set }: { s: Settings; set: Set }) {
           <Choice value={s.textSize} onChange={(v) => set('textSize', v)} options={TEXT_SIZES.map((n, i) => [i, String(n)])} />
         </Line>
         <Line label={t.f_mono}>{picker('monoFont')}</Line>
+        {/* the font mail you write is sent in (3 Nov 2026): the ones everyone has first, then this computer's */}
+        <Line label={t.f_compose} hint={t.f_composeHint}>
+          <select value={s.composeFont} style={{ fontFamily: mailFontStack(s.composeFont) || undefined }} onChange={(e) => set('composeFont', e.target.value)}>
+            <option value="">{t.fm_default}</option>
+            <optgroup label={t.fm_safe}>
+              {SAFE_FONTS.map(([n, stack]) => <option key={n} value={`safe:${n}`} style={{ fontFamily: stack }}>{n}</option>)}
+            </optgroup>
+            {(local || (s.composeFont.startsWith('local:') ? [s.composeFont.slice(6)] : [])).length > 0 && (
+              <optgroup label={t.fm_yours}>
+                {(local || [s.composeFont.slice(6)]).map((f) => <option key={f} value={`local:${f}`} style={{ fontFamily: localStack(f) }}>{f}</option>)}
+              </optgroup>
+            )}
+          </select>
+        </Line>
         {!local && !noLocal && <Line label={<span className="muted">{t.f_computerHint}</span>}><button className="pill small" onClick={loadLocal}>{t.f_showComputer}</button></Line>}
         <Toggle label={t.f_plainMono} on={s.plainMono} set={(v) => set('plainMono', v)} />
       </Group>
@@ -821,6 +835,67 @@ function Fonts({ s, set }: { s: Settings; set: Set }) {
             </div>
           </div>
         )}
+      </Group>
+    </div>
+  )
+}
+
+const ACCOUNT_PAGE = 'https://themadlions.com/account/'
+const AI_KEYS = { claude: 'https://console.anthropic.com/settings/keys', openai: 'https://platform.openai.com/api-keys' }
+
+/** the Roar Account (3 Nov 2026): one account for every Roar app; here its sign-in, the sync of RoarMail's setup and the AI */
+function RoarAccountPage({ s, set }: { s: Settings; set: Set }) {
+  const api = window.roarmail
+  const [sync, setSync] = useState<SyncState | null>(null)
+  const [ai, setAi] = useState<AiStatus | null>(null)
+  const [key, setKey] = useState('')
+  const [keyErr, setKeyErr] = useState('')
+  useEffect(() => {
+    const load = () => { api.syncState?.().then(setSync).catch(() => {}); api.aiStatus?.().then(setAi).catch(() => {}) }
+    load()
+    return api.on((e) => { if (e.type === 'roarSync' || e.type === 'roarme') load() })
+  }, [])
+  const ago = (at: number) => { const m = Math.round((Date.now() - at) / 60e3); return m < 1 ? t.ra_justNow : `${m} ${t.minutes}` }
+  const own = s.aiProvider === 'claude' || s.aiProvider === 'openai' ? s.aiProvider : null
+  const hasKey = own ? !!ai?.[own] : false
+  return (
+    <div className="stack">
+      <p className="muted small">{t.ra_intro}</p>
+      <RoarMeAccount />
+      <Line label={<span className="muted">{t.ra_manage}</span>}>
+        <button className="pill small" onClick={() => api.openExternal(ACCOUNT_PAGE)}>{t.ra_open}</button>
+        <button className="pill small ghost" onClick={() => api.openExternal(`${ACCOUNT_PAGE}?signup`)}>{t.ra_create}</button>
+      </Line>
+      <Group title={t.ra_sync} note={t.ra_syncNote}>
+        <Toggle label={t.ra_syncOn} hint={t.ra_syncHint} on={s.syncSetup} set={(v) => set('syncSetup', v)} />
+        {s.syncSetup && (
+          <Line label={<span className="muted">{!sync?.signedIn ? t.ra_signInFirst : sync.error ? `${t.ra_syncErr} ${sync.error}` : sync.at ? `${t.ra_synced} · ${ago(sync.at)}` : t.ra_syncing}</span>}>
+            <button className="pill small" disabled={!sync?.signedIn} onClick={async () => setSync(await api.syncNow!())}>{t.ra_syncNow}</button>
+          </Line>
+        )}
+        {!!sync?.added && <p className="muted small">{t.ra_added.replace('{n}', String(sync.added))}</p>}
+      </Group>
+      <Group title={t.ra_ai} note={t.ra_aiNote}>
+        <Line label={t.ra_aiWho}>
+          <Choice value={s.aiProvider} onChange={(v) => { set('aiProvider', v); setKey(''); setKeyErr('') }}
+            options={[['roar', t.ra_aiRoar], ['claude', t.ra_aiClaude], ['openai', t.ra_aiOpenai]]} />
+        </Line>
+        {s.aiProvider === 'roar' && <p className="muted small">{ai?.signedIn ? t.ra_aiRoarHint : t.ra_aiRoarSignIn}</p>}
+        {own && (
+          <Line label={hasKey ? t.ra_keySaved : t.ra_keyAdd} hint={t.ra_keyHint}>
+            {hasKey
+              ? <button className="pill small ghost danger" onClick={async () => setAi(await api.aiSetKey!(own, ''))}>{t.ra_keyRemove}</button>
+              : <>
+                <input type="password" value={key} placeholder={own === 'claude' ? 'sk-ant-…' : 'sk-…'} onChange={(e) => { setKey(e.target.value); setKeyErr('') }} />
+                <button className="pill small primary" disabled={key.trim().length < 20} onClick={async () => {
+                  if (own === 'claude' ? !/^sk-ant-/.test(key.trim()) : !/^sk-/.test(key.trim())) { setKeyErr(t.ra_keyWrong); return }
+                  setAi(await api.aiSetKey!(own, key)); setKey('')
+                }}>{t.save}</button>
+                <button className="pill small ghost" onClick={() => api.openExternal(AI_KEYS[own])}>{t.ra_keyGet}</button>
+              </>}
+          </Line>
+        )}
+        {keyErr && <p className="error">{keyErr}</p>}
       </Group>
     </div>
   )

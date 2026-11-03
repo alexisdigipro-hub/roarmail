@@ -210,6 +210,11 @@ export interface Security {
 /** a block in Settings > Privacy: an address, a sender's name (from any address) or a whole domain */
 export interface BlockItem { kind: 'email' | 'name' | 'domain'; value: string; label: string }
 
+/** the Roar Account's sync of RoarMail's setup (Settings > Roar Account) */
+export interface SyncState { on: boolean; signedIn: boolean; at: number; error: string; /** accounts that came from another computer and need their password here */ added?: number }
+export type AiProvider = 'roar' | 'claude' | 'openai'
+export interface AiStatus { provider: AiProvider; claude: boolean; openai: boolean; signedIn?: boolean }
+
 /** the Promotions pill above the Inbox (1 Nov 2026): unread and all promotions there, and the senders never opened */
 export interface PromoCount { unread: number; total: number; senders: number }
 
@@ -316,6 +321,8 @@ export interface Settings {
   listSize: number
   /** the font of messages without their own (plain text and simple mail) */
   messageFont: string
+  /** Settings > Fonts > New messages (3 Nov 2026): the font mail you write starts in and is sent in ('safe:Arial', 'local:Futura', '' for none) */
+  composeFont: string
   monoFont: string
   /** plain text messages in the fixed-width font */
   plainMono: boolean
@@ -378,6 +385,13 @@ export interface Settings {
   /** Settings > Privacy (2 Nov 2026): the shared spam list. Fingerprints of what you block go to RoarMe's project, and
    *  senders at least 3 RoarMail users blocked go to Junk here too */
   shareBlocks: boolean
+  /** Settings > Roar Account (3 Nov 2026): RoarMail's setup kept in the Roar Account and brought to every computer signed in */
+  syncSetup: boolean
+  /** the ✦ button's AI: RoarMail AI through the Roar Account, or the person's own Claude or ChatGPT key */
+  aiProvider: AiProvider
+  /** the model for an own key ('' = RoarMail's choice) */
+  aiClaudeModel: string
+  aiOpenaiModel: string
   /** Settings > Updates: a downloaded update installs by itself when RoarMail is not in use */
   autoUpdate: boolean
 }
@@ -425,6 +439,8 @@ export type MailEvent =
   | { type: 'compose'; to: string; subject?: string; body?: string }
   /** a message window was closed by the system (red button, Cmd+W): the page keeps the draft, then closes */
   | { type: 'composeCloseAsk' }
+  /** the Roar Account's sync changed state (Settings > Roar Account) */
+  | { type: 'roarSync' }
   /** a message window sent or saved: the main window shows its toast (Undo send, Draft saved) */
   | { type: 'composeDone'; outboxId?: string; at?: number; saved?: boolean }
   | { type: 'outbox' }
@@ -612,6 +628,12 @@ export interface MailApi {
   windowColor?(color: string): Promise<void>
   refresh(accountId?: string): Promise<void>
   on(cb: (e: MailEvent) => void): () => void
+  /** the Roar Account (3 Nov 2026): sync of RoarMail's setup, and the ✦ AI in a new message */
+  syncState?(): Promise<SyncState>
+  syncNow?(): Promise<SyncState>
+  aiStatus?(): Promise<AiStatus>
+  aiSetKey?(provider: 'claude' | 'openai', key: string): Promise<AiStatus>
+  ai?(req: import('./aiPrompt').AiRequest): Promise<string>
   /** a new message in a window of its own (3 Nov 2026; the desktop app only, the web demo keeps it in the window) */
   composeWindow?(seed: unknown): Promise<void>
   composeSeed?(id: string): Promise<unknown>

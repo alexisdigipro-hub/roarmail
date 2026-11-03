@@ -16,7 +16,7 @@ import type { Settings } from '../shared/api'
 export const LOOK_DEFAULTS = {
   theme: 'simba', accent: 'red', font: 'system', density: 'standard', radius: 12,
   motion: true, focusRings: false, glass: true, textSize: 2, lite: false,
-  listFont: 'system', listSize: 14, messageFont: 'system', monoFont: 'mono', plainMono: false,
+  listFont: 'system', listSize: 14, messageFont: 'system', composeFont: '', monoFont: 'mono', plainMono: false,
   quoteColors: true, quote1: '#6d5dfc', quote2: '#1fa3b8', quote3: '#3fae49',
 } as const satisfies Partial<Settings>
 
@@ -29,7 +29,7 @@ export const GENERAL_DEFAULTS = {
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '', accountOrder: '',
-  promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true,
+  promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true, syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '',
 } as const satisfies Partial<Settings>
 
 /** a font setting as CSS: one of FONTS, or a font installed on this computer ('local:<family>') */

@@ -49,7 +49,7 @@ export function RoarMeAccount({ compact }: { compact?: boolean }) {
   }
   return (
     <form className="roarme-card" onSubmit={(e) => { e.preventDefault(); status.needsMfa ? run(() => api().roarmeVerify(code)) : run(() => api().roarmeSignIn(email, pass)) }}>
-      <div className="row roarme-head"><b className="roar-wm"><span>ROAR</span>ME</b><span className="muted small grow">{t.rm_why}</span></div>
+      <div className="row roarme-head"><b className="roar-wm"><span>ROAR</span> ACCOUNT</b><span className="muted small grow">{t.rm_why}</span></div>
       {status.needsMfa ? (
         <label>{t.rm_code}<input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={code} onChange={(e) => setCode(e.target.value)} placeholder="123 456" /></label>
       ) : (
