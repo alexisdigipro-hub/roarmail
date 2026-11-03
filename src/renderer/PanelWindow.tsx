@@ -39,7 +39,8 @@ export function PanelWindow({ kind, id }: { kind: PanelKind; id: string }) {
   if (kind === 'files') {
     return <FilesSheet accounts={accounts} onClose={close}
       onPerson={(person) => toMain({ do: 'scope', accountId: 'all', person })}
-      onCard={(email) => api.panelWindow?.('contacts', { email })} />
+      onCard={(email) => api.panelWindow?.('contacts', { email })}
+      onOpenMail={(f) => toMain({ do: 'openMail', id: f.messageId, subject: f.subject })} />
   }
   if (kind === 'contacts') {
     return <ContactsSheet key={round} start={(seed as { email?: string } | null)?.email || undefined} pictures={prefs.senderPictures} onClose={close}

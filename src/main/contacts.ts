@@ -17,13 +17,24 @@ function tail(text: string): string[] {
   return own.slice(-14).filter((l) => !NOTICE.test(l) && l.length < 140)
 }
 
+/** a short label a signature carries (a role, a company), not a piece of a sentence (3 Nov 2026: "and I'm on the
+ *  Enterprise team at Higgsfield. * a priority queue…" had become a role and a company) */
+export function fieldLike(s: string): boolean {
+  const v = s.trim()
+  if (!v || v.length > 50 || v.split(/\s+/).length > 6) return false
+  if (/[.!?…]\s|[.!?…]$|[*#>]|\b(i'?m|i am|we are|we'?re|please|thanks|thank you|hi|hello|dear)\b/i.test(v)) return false
+  // a sentence's middle starts lower case; a role or company does not (Greek or Latin)
+  return !/^(and|or|but|so|to|of|on|in|at|with|for|the|a)\b/.test(v)
+}
+
 /** what a signature tells about its sender; name is how they sign, email their address */
 export function readSignature(text: string, name: string, email: string): CardFields {
   const out: CardFields = {}
   const lines = tail(text)
   if (!lines.length) return out
   const first = (name || '').split(/\s+/)[0]?.toLowerCase()
-  const at = first ? lines.findIndex((l) => l.toLowerCase().includes(first) && l.length < 90) : -1
+  // the line that starts with their name and is short, as a signature line is (a sentence that mentions it is not)
+  const at = first ? lines.findIndex((l) => l.toLowerCase().startsWith(first) && l.length < 70 && !/[.!?]\s/.test(l)) : -1
   const from = at >= 0 ? lines.slice(at) : lines.slice(-8)
   for (const l of from) {
     if (!out.phone) { const label = /\b(t|tel|m|mob|mobile|phone|τηλ|κιν|κινητό)\b\.?:?/i.test(l); const m = l.match(PHONE); if (m && (label || m[0].replace(/\D/g, '').length >= 10) && !l.includes('@')) out.phone = m[0].replace(/[^\d+ ]/g, ' ').replace(/\s+/g, ' ').trim() }
@@ -39,6 +50,7 @@ export function readSignature(text: string, name: string, email: string): CardFi
     if (!out.title && next[0]) out.title = next.shift()
     if (next[0]) out.company = next[0]
   }
+  for (const k of ['title', 'company'] as const) if (out[k] && !fieldLike(out[k]!)) delete out[k]
   if (!out.company) {
     const d = email.split('@')[1] || ''
     if (d && !FREE.test(d)) { const base = d.split('.').slice(-2, -1)[0] || ''; if (base.length > 2) out.company = base.charAt(0).toUpperCase() + base.slice(1) }

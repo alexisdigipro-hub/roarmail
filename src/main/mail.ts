@@ -19,7 +19,7 @@ import { fold, now, uuid } from './store'
 import { seal, open } from './vault'
 import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './microsoft'
 import { cleanRule, plan } from './rules'
-import { readSignature, type CardFields } from './contacts'
+import { fieldLike, readSignature, type CardFields } from './contacts'
 import { attendeeFor, buildReply, readInvite } from './ics'
 import { PERSONAL, baseDomain, blockNameKey, blockableDomain, blockableName, emailDomain, shield } from './shield'
 import type {
@@ -260,6 +260,16 @@ export class MailService {
 
   constructor(private db: DB, private emit: (e: MailEvent) => void, private notify: (accountId: string, rows: MessageRow[]) => void) {
     fs.mkdirSync(mailDir(), { recursive: true })
+    // a role or company read from a signature that was really a piece of a sentence goes (3 Nov 2026); typed ones stay
+    try {
+      const fix = db.prepare('update contacts set title = case when ? then null else title end, company = case when ? then null else company end where email = ?')
+      for (const c of db.prepare(`select email, title, company, edited from contacts where title is not null or company is not null`).all() as Row[]) {
+        const ed = String(c.edited || '').split(',')
+        const badT = !!c.title && !ed.includes('title') && !fieldLike(String(c.title))
+        const badC = !!c.company && !ed.includes('company') && !fieldLike(String(c.company))
+        if (badT || badC) fix.run(badT ? 1 : 0, badC ? 1 : 0, c.email)
+      }
+    } catch { /* the next start tries again */ }
     // Block by name (2 Nov 2026): the sender's name as block_rules keeps it
     db.function('blockname', { deterministic: true }, (v: unknown) => blockNameKey(String(v ?? '')))
     // anything cut off by a crash or quit goes back in the queue
@@ -424,8 +434,11 @@ export class MailService {
     const T = b.tables
     T.accounts = T.accounts.map(({ secret: _s, updated_at: _u, ...a }) => a)
     T.settings = T.settings.filter((x) => !LOCAL_ONLY.has(String(x.key)))
-    T.contacts = (T.contacts || []).filter((c) => c.vip || c.blocked || c.images_allowed)
-      .map((c) => ({ email: c.email, name: c.name ?? null, vip: c.vip ? 1 : 0, blocked: c.blocked ? 1 : 0, images_allowed: c.images_allowed ? 1 : 0 }))
+    // the people who matter (3 Nov 2026: one contact list in the Roar Account for every Roar app): marked, in a group, edited
+    // or written to, with their card; never every sender
+    T.contacts = (T.contacts || []).filter((c) => c.vip || c.blocked || c.images_allowed || (c.groups || '') !== '' || (c.edited || '') !== '' || (c.use_count || 0) > 0)
+      .map((c) => ({ email: c.email, name: c.name ?? null, vip: c.vip ? 1 : 0, blocked: c.blocked ? 1 : 0, images_allowed: c.images_allowed ? 1 : 0,
+        title: c.title ?? null, company: c.company ?? null, phone: c.phone ?? null, website: c.website ?? null, notes: c.notes || '', groups: c.groups || '', use_count: c.use_count || 0 }))
     T.block_rules = (this.db.prepare('select kind, value, label from block_rules order by kind, value').all() as Row[])
     return { ...b, at: 0 }
   }
@@ -497,6 +510,10 @@ export class MailService {
           on conflict(email) do update set name = coalesce(contacts.name, excluded.name), use_count = max(contacts.use_count, excluded.use_count),
           vip = max(contacts.vip, excluded.vip), blocked = max(contacts.blocked, excluded.blocked), images_allowed = max(contacts.images_allowed, excluded.images_allowed)`)
           .run(c.email, c.name ?? null, c.last_used ?? null, c.use_count || 0, c.vip ? 1 : 0, c.blocked ? 1 : 0, c.images_allowed ? 1 : 0)
+        // the card from the other computer fills what is empty here (3 Nov 2026)
+        this.db.prepare(`update contacts set title = coalesce(title, ?), company = coalesce(company, ?), phone = coalesce(phone, ?), website = coalesce(website, ?),
+          notes = case when coalesce(notes, '') = '' then ? else notes end, groups = case when coalesce(groups, '') = '' then ? else groups end where email = ?`)
+          .run(c.title ?? null, c.company ?? null, c.phone ?? null, c.website ?? null, c.notes || '', c.groups || '', c.email)
       }
     })()
     for (const id of restartAll ? ids.values() : fresh) { this.stopAccount(id); this.state.delete(id); if ((this.db.prepare('select enabled from accounts where id = ?').get(id) as Row)?.enabled) this.startAccount(id) }
@@ -2034,7 +2051,11 @@ export class MailService {
     const own = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e))
     const q = `%${fold(query.trim().toLowerCase())}%`
     // a group, an address ending ("@madlions.com": everyone at one company), people you write to, or the last 30 days
-    const where = group === 'vip' ? 'and c.vip = 1' : group === 'blocked' ? 'and c.blocked = 1'
+    // People (3 Nov 2026): the ones you write to, marked, put in a group or edited, never a machine's address
+    const machine = `c.email not glob '*[nN][oO]*[rR][eE][pP][lL][yY]*' and c.email not like '%notification%' and c.email not like 'mailer-daemon%'
+      and c.email not like '%bounce%' and c.email not like 'unsubscribe%' and c.email not like '%newsletter%' and c.email not like '%donotreply%'`
+    const where = group === 'people' ? `and c.blocked = 0 and (c.vip = 1 or c.groups != '' or c.edited != '' or c.use_count > 0) and ${machine}`
+      : group === 'vip' ? 'and c.vip = 1' : group === 'blocked' ? 'and c.blocked = 1'
       : group === 'written' ? 'and c.use_count > 0 and c.blocked = 0'
       : group === 'recent' ? `and c.blocked = 0 and last > ${Date.now() - 30 * 864e5}`
       : group.startsWith('@') ? `and c.blocked = 0 and c.email like '%' || @group`
@@ -2043,8 +2064,7 @@ export class MailService {
         max(coalesce(c.last_used, 0), coalesce((select max(date) from messages m where m.from_email = c.email), 0)) as last
       from contacts c
       where (fold(c.email) like @q or fold(coalesce(c.name, '')) like @q or fold(coalesce(c.company, '')) like @q) ${where}
-        and (c.vip = 1 or c.groups != '' or c.edited != '' or c.use_count > 0 or c.email not glob '*[nN][oO]*[rR][eE][pP][lL][yY]*'
-          and c.email not like '%notification%' and c.email not like 'mailer-daemon%' and c.email not like '%bounce%')
+        and (c.vip = 1 or c.groups != '' or c.edited != '' or c.use_count > 0 or ${machine})
       order by c.vip desc, (c.use_count > 0) desc, last desc limit 400`).all({ q, group }) as Row[]
     return rows.filter((r) => !own.has(r.email)).map(contactOf)
   }

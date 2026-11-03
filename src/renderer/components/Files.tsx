@@ -10,8 +10,10 @@ const KINDS: FileKind[] = ['pdf', 'image', 'video', 'audio', 'script', 'doc', 's
 const size = (n: number) => (n > 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
 const ICON: Record<FileKind, string> = { pdf: 'template', image: 'image', video: 'target', audio: 'bell', script: 'compose', doc: 'template', sheet: 'chart', slides: 'chart', archive: 'archive', other: 'clip' }
 
-export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
+export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: {
   accounts: Account[]; onClose: () => void; onPerson: (email: string) => void; onCard: (email: string) => void
+  /** the mail a file came in, opened in the main window (3 Nov 2026) */
+  onOpenMail?: (f: MailFile) => void
 }) {
   const [q, setQ] = useState('')
   const [kind, setKind] = useState<FileKind | ''>('')
@@ -30,6 +32,12 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
   const total = res ? Object.values(res.counts).reduce((a, b) => a + b, 0) : 0
   const accOf = (id: string) => accounts.find((a) => a.id === id)
 
+  // the mail a file came in goes to the Trash, to make room (Alex, 3 Nov 2026); its files leave the list at once
+  const delMail = async (f: MailFile) => {
+    if (!confirm(t.fi_delQ.replace('{s}', f.subject || t.noSubject))) return
+    await window.roarmail.act([f.messageId], 'trash').catch(() => {})
+    setRes((r) => r && { ...r, files: r.files.filter((x) => x.messageId !== f.messageId) })
+  }
   const menu = async (e: RMouseEvent, f: MailFile) => {
     e.preventDefault()
     const id = await window.roarmail.popMenu([
@@ -37,14 +45,19 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
       { id: 'save', label: t.fl_saveAs },
       { id: 'name', label: t.fl_copyName },
       null,
+      ...(onOpenMail ? [{ id: 'openMail', label: t.fi_openMail }] : []),
       { id: 'mail', label: t.fi_mailWith },
       { id: 'card', label: t.ct_card },
+      null,
+      { id: 'delMail', label: t.fi_delMail },
     ])
     if (id === 'open') window.roarmail.openAttachment(f.id)
     else if (id === 'save') window.roarmail.saveAttachment(f.id)
     else if (id === 'name') navigator.clipboard.writeText(f.filename)
     else if (id === 'mail') onPerson(f.fromEmail)
     else if (id === 'card') onCard(f.fromEmail)
+    else if (id === 'openMail') onOpenMail?.(f)
+    else if (id === 'delMail') delMail(f)
   }
 
   return (
@@ -84,7 +97,9 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard }: {
                 <span className="muted small fi-date">{when(f.date)}</span>
                 <span className="fi-acc">{accOf(f.accountId) && <i className="acc-dot" style={{ background: accOf(f.accountId)!.color }} title={accOf(f.accountId)!.email} />}</span>
                 <span className="fi-acts">
+                  {onOpenMail && <button className="tool small" title={t.fi_openMail} onClick={() => onOpenMail(f)}><Icon name="unread" size={15} /></button>}
                   <button className="tool small" title={t.save} onClick={() => window.roarmail.saveAttachment(f.id)}><Icon name="download" size={15} /></button>
+                  <button className="tool small fi-del" title={t.fi_delMail} onClick={() => delMail(f)}><Icon name="trash" size={15} /></button>
                   <button className="tool small" title={t.mm_more} onClick={(e) => menu(e, f)}><Icon name="more" size={15} /></button>
                 </span>
               </div>

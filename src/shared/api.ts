@@ -129,7 +129,7 @@ export interface Address { name?: string; address: string }
 export type MenuItem = { id?: string; label: string; enabled?: boolean; checked?: boolean; sub?: MenuItem[] } | null
 
 /** Contacts (29 Oct 2026): a person in the address book; built from mail, signatures, imports and what was typed */
-export type ContactGroup = 'vip' | 'team' | 'clients' | 'crew' | 'blocked' | 'written' | 'recent' | `@${string}`
+export type ContactGroup = 'people' | 'vip' | 'team' | 'clients' | 'crew' | 'blocked' | 'written' | 'recent' | `@${string}`
 export interface Contact {
   email: string; name: string; phone: string; company: string; title: string; website: string; notes: string
   groups: string[]; vip: boolean; blocked: boolean
@@ -215,6 +215,7 @@ export type PanelAction =
   | { do: 'scope'; accountId: string; person?: string; role?: FolderRole }
   | { do: 'addAccount' }
   | { do: 'contacts'; email?: string }
+  | { do: 'openMail'; id: string; subject: string }
 
 /** the Roar Account's sync of RoarMail's setup (Settings > Roar Account) */
 export interface SyncState { on: boolean; signedIn: boolean; at: number; error: string; /** accounts that came from another computer and need their password here */ added?: number }

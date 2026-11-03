@@ -8,7 +8,9 @@ import { useLens } from '../look'
 import { Icon } from './Icon'
 import { initials, tint } from './Viewer'
 
-const GROUPS: ContactGroup[] = ['vip', 'team', 'clients', 'crew', 'written', 'recent', 'blocked']
+// tidied (Alex, 3 Nov 2026: "everything together confuses me"): People first, the groups in one menu, Everyone, Blocked
+const TABS: (ContactGroup | '')[] = ['people', 'vip', 'team', '', 'blocked']
+const GROUP_TAGS: ContactGroup[] = ['team', 'clients', 'crew', 'written', 'recent']
 const TAGS = ['team', 'clients', 'crew']
 const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
 
@@ -21,11 +23,15 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
   onWrite: (email: string) => void; onAllMail: (email: string) => void
 }) {
   const [q, setQ] = useState('')
-  const [group, setGroup] = useState<ContactGroup | ''>('')
+  const [group, setGroup] = useState<ContactGroup | ''>('people')
+  // several picked with Cmd / Shift (Alex, 3 Nov 2026: "I can only block them one by one")
+  const [sel, setSel] = useState<string[]>([])
+  const anchor = useRef('')
   const [list, setList] = useState<Contact[] | null>(null)
   const [pick, setPick] = useState(start || '')
   const [note, setNote] = useState('')
-  const seg = useLens<HTMLDivElement>(group.startsWith('@') ? 'company' : group || 'all')
+  const tabOf = (g: ContactGroup | '') => g.startsWith('@') ? 'company' : GROUP_TAGS.includes(g as ContactGroup) ? 'team' : g || 'all'
+  const seg = useLens<HTMLDivElement>(tabOf(group))
   // the companies (Alex, 29 Oct: "everyone with the same @madlions.com, and others like it")
   const [domains, setDomains] = useState<{ domain: string; count: number }[]>([])
   useEffect(() => { window.roarmail.contactDomains().then(setDomains).catch(() => {}) }, [])
@@ -52,7 +58,38 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
     else if (id === 'company') setGroup(`@${c.email.split('@')[1]}`)
     else if (id === 'block') { await window.roarmail.blockSender(c.email, !c.blocked, c.name || undefined); load() }
   }
-  const load = () => window.roarmail.contactList(q, group).then((l) => { setList(l); if (!pick && l[0]) setPick(l[0].email) })
+  const bulkMenu = async () => {
+    const id = await window.roarmail.popMenu([
+      { id: 'block', label: `${t.ct_blockAll} (${sel.length})` },
+      { id: 'vip', label: 'VIP' },
+      { label: t.mn_groups, sub: TAGS.map((g) => ({ id: `tag:${g}`, label: t[`ct_g_${g}` as Key] })) },
+    ])
+    if (id) bulk(id)
+  }
+  const load = () => window.roarmail.contactList(q, group).then((l) => { setList(l); setSel((s) => s.filter((e) => l.some((c) => c.email === e))); if (!pick && l[0]) setPick(l[0].email) })
+  const click = (c: Contact, e: RMouseEvent) => {
+    const all = list || []
+    if (e.metaKey || e.ctrlKey) {
+      setSel((s) => { const base = s.length ? s : pick ? [pick] : []; return base.includes(c.email) ? base.filter((x) => x !== c.email) : [...base, c.email] })
+      anchor.current = c.email
+    } else if (e.shiftKey) {
+      const from = anchor.current || pick
+      const a = all.findIndex((x) => x.email === from), b = all.findIndex((x) => x.email === c.email)
+      if (a >= 0 && b >= 0) { const [lo, hi] = a < b ? [a, b] : [b, a]; setSel(all.slice(lo, hi + 1).map((x) => x.email)) }
+    } else { setSel([]); setPick(c.email); anchor.current = c.email }
+  }
+  const many = sel.length > 1
+  /** the same thing for everyone picked */
+  const bulk = async (what: 'block' | 'vip' | string) => {
+    const picked = (list || []).filter((c) => sel.includes(c.email))
+    for (const c of picked) {
+      if (what === 'block') await window.roarmail.blockSender(c.email, true, c.name || undefined).catch(() => {})
+      else if (what === 'vip') await window.roarmail.saveContact(c.email, { vip: true }).catch(() => {})
+      else if (what.startsWith('tag:')) { const g = what.slice(4); if (!c.groups.includes(g)) await window.roarmail.saveContact(c.email, { groups: [...c.groups, g] }).catch(() => {}) }
+    }
+    setNote(what === 'block' ? t.ct_blockedN.replace('{n}', String(picked.length)) : t.ct_doneN.replace('{n}', String(picked.length)))
+    setSel([]); load()
+  }
   useEffect(() => { const h = setTimeout(load, q ? 160 : 0); return () => clearTimeout(h) }, [q, group])
 
   return (
@@ -65,33 +102,52 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
             <Icon name="down" size={14} /> {t.ct_import}</button>
           <button className="tool" title={t.done} onClick={onClose}><Icon name="close" /></button>
         </div>
-        <div className="seg lens ct-groups" ref={seg}>
-          <button className={!group ? 'on' : ''} onClick={() => setGroup('')}>{t.ct_all}</button>
-          {GROUPS.map((g) => <button key={g} className={group === g ? 'on' : ''} onClick={() => setGroup(g)}>{t[`ct_g_${g}` as Key]}</button>)}
-        </div>
-        {domains.length > 0 && (
-          <div className="ct-domains" role="list" aria-label={t.ct_companies}>
-            <span className="muted small ct-dlabel">{t.ct_companies}</span>
-            {domains.map((d) => (
-              <button key={d.domain} className={`chip-tag ${group === `@${d.domain}` ? 'on' : ''}`} onClick={() => setGroup(group === `@${d.domain}` ? '' : `@${d.domain}`)}>
-                @{d.domain} <span className="muted">{d.count}</span></button>
+        <div className="ct-tabs">
+          <div className="seg lens ct-groups" ref={seg}>
+            {TABS.map((g) => g === 'team' ? (
+              <select key="groups" className={`ct-gsel ${tabOf(group) === 'team' ? 'on' : ''}`} value={GROUP_TAGS.includes(group as ContactGroup) ? group : ''}
+                onChange={(e) => setGroup((e.target.value || 'people') as ContactGroup)}>
+                <option value="">{t.ct_groups}</option>
+                {GROUP_TAGS.map((x) => <option key={x} value={x}>{t[`ct_g_${x}` as Key]}</option>)}
+              </select>
+            ) : (
+              <button key={g || 'all'} className={tabOf(group) === (g || 'all') ? 'on' : ''} onClick={() => setGroup(g)}>{g ? t[`ct_g_${g}` as Key] : t.ct_all}</button>
             ))}
           </div>
-        )}
+          {domains.length > 0 && (
+            <select className={`ct-company ${group.startsWith('@') ? 'on' : ''}`} value={group.startsWith('@') ? group : ''} title={t.ct_companies}
+              onChange={(e) => setGroup((e.target.value || 'people') as ContactGroup)}>
+              <option value="">{t.ct_companies}…</option>
+              {domains.map((d) => <option key={d.domain} value={`@${d.domain}`}>@{d.domain} ({d.count})</option>)}
+            </select>
+          )}
+        </div>
         {note && <p className="small ok-text">{note}</p>}
         <div className="ct-body">
           <div className="ct-list">
             {list === null ? <div className="stats-wait"><div className="spinner" /></div>
               : !list.length ? <p className="muted small ct-empty">{q ? t.ct_none : t.ct_noneGroup}</p>
               : list.map((c) => (
-                <button key={c.email} className={`ct-row ${pick === c.email ? 'on' : ''}`} onClick={() => setPick(c.email)} onContextMenu={(e) => rowMenu(e, c)}>
+                <button key={c.email} className={`ct-row ${(many ? sel.includes(c.email) : pick === c.email) ? 'on' : ''}`} onClick={(e) => click(c, e)}
+                  onContextMenu={(e) => { if (many && sel.includes(c.email)) { e.preventDefault(); bulkMenu() } else rowMenu(e, c) }}>
                   <Avatar email={c.email} name={c.name} pic={pic(c.email)} />
                   <span className="grow ct-who"><b className="ellipsis">{c.name || c.email}{c.vip && <Icon name="star" size={12} filled />}</b>
                     <small className="muted ellipsis">{[c.title, c.company].filter(Boolean).join(' · ') || c.email}</small></span>
                 </button>
               ))}
           </div>
-          {pick ? <ContactCard key={pick} email={pick} pictures={pictures} onWrite={onWrite} onAllMail={onAllMail} onChanged={load} onCompany={(d) => setGroup(`@${d}`)} />
+          {many ? (
+            <div className="ct-card ct-bulk">
+              <h3>{t.ct_selected.replace('{n}', String(sel.length))}</h3>
+              <p className="muted small">{t.ct_selHint}</p>
+              <div className="row wrap ct-acts">
+                <button className="pill small danger-text" onClick={() => { if (confirm(t.ct_blockQ.replace('{n}', String(sel.length)))) bulk('block') }}><Icon name="block" size={14} /> {t.ct_blockAll}</button>
+                <button className="pill small" onClick={() => bulk('vip')}><Icon name="star" size={14} /> VIP</button>
+                {TAGS.map((g) => <button key={g} className="pill small" onClick={() => bulk(`tag:${g}`)}>+ {t[`ct_g_${g}` as Key]}</button>)}
+                <button className="pill small ghost" onClick={() => setSel([])}>{t.cancel}</button>
+              </div>
+            </div>
+          ) : pick ? <ContactCard key={pick} email={pick} pictures={pictures} onWrite={onWrite} onAllMail={onAllMail} onChanged={load} onCompany={(d) => setGroup(`@${d}`)} />
             : <div className="ct-card empty muted">{t.ct_pick}</div>}
         </div>
       </div>
@@ -105,6 +161,9 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
   const domain = email.split('@')[1] || ''
   const [c, setC] = useState<ContactFull | null>(null)
   const pic = useSenderIcons([email], pictures)
+  // the card in two tabs (3 Nov 2026): the details, and their mail and files
+  const [tab, setTab] = useState<'info' | 'mail'>('info')
+  const tabSeg = useLens<HTMLDivElement>(tab)
   useEffect(() => { window.roarmail.contactCard(email).then(setC) }, [email])
   if (!c) return <div className="ct-card"><div className="stats-wait"><div className="spinner" /></div></div>
   const save = (p: ContactPatch) => { setC({ ...c, ...p }); window.roarmail.saveContact(email, p).then(onChanged) }
@@ -130,6 +189,11 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
         <button className="pill small danger-text" onClick={async () => { await window.roarmail.blockSender(email, !c.blocked, c.name || undefined); setC({ ...c, blocked: !c.blocked }); onChanged() }}>
           <Icon name="block" size={14} /> {c.blocked ? t.unblockSender : t.blockSender}</button>
       </div>
+      <div className="seg lens ct-ctabs" ref={tabSeg}>
+        <button className={tab === 'info' ? 'on' : ''} onClick={() => setTab('info')}>{t.ct_tabInfo}</button>
+        <button className={tab === 'mail' ? 'on' : ''} onClick={() => setTab('mail')}>{t.ct_tabMail} <span className="muted">{c.count}</span></button>
+      </div>
+      {tab === 'info' && <>
       <div className="ct-tags">
         {TAGS.map((g) => {
           const on = c.groups.includes(g)
@@ -142,7 +206,9 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
       <label className="ct-field"><span className="muted small">{t.ct_notes}</span>
         <textarea id="ct-notes" defaultValue={c.notes} rows={3} placeholder={t.ct_notesPh} onBlur={(e) => { if (e.target.value.trim() !== c.notes) save({ notes: e.target.value.trim() }) }} /></label>
       <p className="muted small">{t.ct_auto}</p>
-      {c.recent.length > 0 && (
+      </>}
+      {tab === 'mail' && !c.recent.length && !c.files.length && <p className="muted small">{t.ct_noMail}</p>}
+      {tab === 'mail' && c.recent.length > 0 && (
         <section className="ct-sec"><h4>{t.ct_recent} <span className="muted">{c.count}</span></h4>
           {c.recent.map((r) => (
             <button key={r.id} className="ct-mail" onClick={() => onAllMail(email)}>
@@ -152,7 +218,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
           ))}
         </section>
       )}
-      {c.files.length > 0 && (
+      {tab === 'mail' && c.files.length > 0 && (
         <section className="ct-sec"><h4>{t.ct_files} <span className="muted">{c.files.length}</span></h4>
           <div className="ct-files">
             {c.files.map((f) => (

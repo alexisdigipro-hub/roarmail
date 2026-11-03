@@ -1025,3 +1025,18 @@ html[data-focus='bold'] :focus-visible { outline: 2px solid color-mix(in srgb, v
 .msg:hover .quick { animation: rm-quick-slide .34s var(--spring) both; }
 @keyframes rm-quick-slide { from { opacity: 0; transform: translate(26px, -50%); } to { opacity: 1; transform: translate(0, -50%); } }
 html[data-still] .msg:hover .quick { animation: none; }
+
+/* Contacts tidied (3 Nov 2026): one row of tabs (People, VIP, Groups ▾, Everyone, Blocked) with Company ▾ beside it in
+   place of the long row of companies; several picked get one card of actions; the person's card in two tabs */
+.ct-tabs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ct-tabs .ct-groups { flex: none; }
+.ct-gsel { height: 30px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; padding: 0 10px; border-radius: 999px; cursor: pointer; }
+.ct-gsel.on { color: var(--text); background: var(--sel); }
+.ct-company { height: 34px; max-width: 240px; padding: 0 12px; border-radius: 999px; border: 0; font: inherit; font-size: 13px; color: var(--muted);
+  background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); }
+.ct-company.on { color: var(--text); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+.ct-domains { display: none; }
+.ct-bulk h3 { margin: 4px 0 4px; font-size: 22px; }
+.ct-bulk .ct-acts { margin-top: 14px; }
+.ct-ctabs { width: max-content; margin: 4px 0 2px; }
+.fi-acts .fi-del:hover { color: #e0413a; }
