@@ -130,6 +130,10 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any>; rescue: (wh
     ipcRenderer.on('mail:event', h)
     return () => { ipcRenderer.removeListener('mail:event', h) }
   },
+  composeWindow: call('composeWindow') as MailApi['composeWindow'],
+  composeSeed: call('composeSeed') as MailApi['composeSeed'],
+  composeClose: call('composeClose') as MailApi['composeClose'],
+  composeDone: call('composeDone') as MailApi['composeDone'],
   // the rescue page (main process, showRescue): Try again, Download, Quit
   rescue: (what: 'retry' | 'download' | 'quit') => ipcRenderer.send('mail:rescue', what),
   update: {

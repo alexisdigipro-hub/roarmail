@@ -7,6 +7,7 @@ import '@fontsource/jost/700.css'
 import './styles.css'
 import './look.css'
 import App from './App'
+import { ComposeWindow } from './ComposeWindow'
 
 // a file dropped anywhere outside a drop area is not opened as a page in the window (security review 29 Oct 2026)
 document.addEventListener('dragover', (e) => e.preventDefault())
@@ -33,4 +34,6 @@ class Guard extends Component<{ children: ReactNode }, { broke: string }> {
   }
 }
 
-createRoot(document.getElementById('root')!).render(<Guard><App /></Guard>)
+// a message being written in its own window (index.html#compose=<id>), else the whole app
+const composeId = (location.hash.match(/^#compose=([0-9a-f]+)$/) || [])[1]
+createRoot(document.getElementById('root')!).render(<Guard>{composeId ? <ComposeWindow id={composeId} /> : <App />}</Guard>)

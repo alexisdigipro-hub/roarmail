@@ -423,6 +423,10 @@ export type MailEvent =
   | { type: 'sync'; accountId: string; busy: boolean }
   | { type: 'open'; messageId: string; subject?: string }
   | { type: 'compose'; to: string; subject?: string; body?: string }
+  /** a message window was closed by the system (red button, Cmd+W): the page keeps the draft, then closes */
+  | { type: 'composeCloseAsk' }
+  /** a message window sent or saved: the main window shows its toast (Undo send, Draft saved) */
+  | { type: 'composeDone'; outboxId?: string; at?: number; saved?: boolean }
   | { type: 'outbox' }
   | { type: 'opFailed'; error: string }
   | { type: 'lock'; locked: boolean }
@@ -608,4 +612,9 @@ export interface MailApi {
   windowColor?(color: string): Promise<void>
   refresh(accountId?: string): Promise<void>
   on(cb: (e: MailEvent) => void): () => void
+  /** a new message in a window of its own (3 Nov 2026; the desktop app only, the web demo keeps it in the window) */
+  composeWindow?(seed: unknown): Promise<void>
+  composeSeed?(id: string): Promise<unknown>
+  composeClose?(): Promise<void>
+  composeDone?(done: { outboxId?: string; at?: number; saved?: boolean }): Promise<void>
 }

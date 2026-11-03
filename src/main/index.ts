@@ -38,7 +38,57 @@ function handle(channel: string, fn: (e: Electron.IpcMainInvokeEvent, ...args: a
   })
 }
 
-const emit = (e: MailEvent) => { win?.webContents.send('mail:event', e) }
+const emit = (e: MailEvent) => { BrowserWindow.getAllWindows().forEach((w) => { try { if (!w.isDestroyed()) w.webContents.send('mail:event', e) } catch { /* closing */ } }) }
+/** the window that asked: the main one or a message being written */
+const senderWin = (e: Electron.IpcMainInvokeEvent) => BrowserWindow.fromWebContents(e.sender) || win
+
+/*
+ * A new message in a window of its own (Alex, 3 Nov 2026: "I move the new message and the whole RoarMail moves").
+ * Each one is a real window that moves, sizes and sits apart from the main one; the screens load as #compose=<id> and
+ * ask for what to start from (composeSeed). Closing it the system's way asks the page first, so the draft is kept.
+ */
+const composeSeeds = new Map<string, unknown>()
+const composeWins = new Set<BrowserWindow>()
+const COMPOSE_FILE = () => path.join(app.getPath('userData'), 'compose.json')
+function openComposeWindow(seed: unknown) {
+  const id = randomBytes(8).toString('hex')
+  composeSeeds.set(id, seed)
+  let size = { width: 820, height: 720 }
+  try { const b = JSON.parse(fs.readFileSync(COMPOSE_FILE(), 'utf8')); if (b.width >= 560 && b.height >= 420) size = { width: b.width, height: b.height } } catch { /* the default */ }
+  // a little down and right of the last one, so several do not sit exactly on top of each other
+  const base = [...composeWins].pop() || win
+  const at = base && !base.isDestroyed() ? (() => { const b = base.getBounds(); return base === win
+    ? { x: Math.round(b.x + (b.width - size.width) / 2), y: Math.round(b.y + Math.max(40, (b.height - size.height) / 2)) }
+    : { x: b.x + 28, y: b.y + 28 } })() : {}
+  const mac = process.platform === 'darwin'
+  const w = new BrowserWindow({
+    ...size, ...at, minWidth: 560, minHeight: 420, show: false, title: 'New Message',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1e23' : '#eceef1',
+    ...(mac
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 16 } }
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: nativeTheme.shouldUseDarkColors ? { color: '#1b1e23', symbolColor: '#eef0f3', height: 44 } : { color: '#eceef1', symbolColor: '#1b1f25', height: 44 } }),
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
+  })
+  composeWins.add(w)
+  const page = pathToFileURL(SCREENS()).href
+  w.loadURL(`${page}#compose=${id}`).catch(() => {})
+  w.once('ready-to-show', () => w.show())
+  w.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
+  w.webContents.on('will-frame-navigate', (e) => { if (!e.isMainFrame && !/^about:(srcdoc|blank)/.test(e.url)) e.preventDefault() })
+  w.webContents.on('will-navigate', (e, url) => { if (url.split('#')[0] !== page) { e.preventDefault(); if (!url.startsWith('file:')) openSafe(url) } })
+  editMenu(w)
+  let closing = false
+  w.on('close', (e) => {
+    if (closing || quitting) return
+    // the page saves the draft (or asks), then closes itself through mail:composeClose
+    e.preventDefault()
+    w.webContents.send('mail:event', { type: 'composeCloseAsk' })
+  })
+  ;(w as any).__allowClose = () => { closing = true }
+  const keep = () => { try { if (!w.isDestroyed() && !w.isMaximized() && !w.isFullScreen()) { const b = w.getBounds(); fs.writeFileSync(COMPOSE_FILE(), JSON.stringify({ width: b.width, height: b.height })) } } catch { /* next time */ } }
+  w.on('resized', keep)
+  w.on('closed', () => { composeWins.delete(w); composeSeeds.delete(id) })
+}
 
 function show() {
   // the Dock or a second launch can ask before Electron is ready ("Cannot create BrowserWindow before app is
@@ -464,13 +514,14 @@ app.whenReady().then(() => {
       { label: l.delete, enabled: !fixed, click: pick('delete') },
     ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
-  handle('mail:popMenu', (_e, items: MenuItem[]) => new Promise((resolve) => {
-    if (!win) return resolve(null)
+  handle('mail:popMenu', (e, items: MenuItem[]) => new Promise((resolve) => {
+    const at = senderWin(e)
+    if (!at) return resolve(null)
     let picked: string | null = null
     const build = (list: MenuItem[]): Electron.MenuItemConstructorOptions[] => list.map((x) => !x ? { type: 'separator' as const }
       : x.sub ? { label: String(x.label), enabled: x.enabled !== false, submenu: build(x.sub) }
       : { label: String(x.label), enabled: x.enabled !== false, ...(x.checked != null ? { type: 'checkbox' as const, checked: !!x.checked } : {}), click: () => { picked = String(x.id) } })
-    Menu.buildFromTemplate(build(items)).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
+    Menu.buildFromTemplate(build(items)).popup({ window: at, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
   handle('mail:createFolder', (_e, accountId, parentId, name) => mail.createFolder(accountId, parentId, name))
   handle('mail:renameFolder', (_e, id, name) => mail.renameFolder(id, name))
@@ -696,9 +747,15 @@ app.whenReady().then(() => {
     const s = mail.settings()
     if (s.lock && s.lockAfter > 0 && powerMonitor.getSystemIdleTime() >= s.lockAfter * 60) lock()
   }, 30e3)
-  handle('mail:windowColor', (_e, color: string) => { if (/^#[0-9a-f]{6}$/i.test(String(color))) win?.setBackgroundColor(color) })
-  handle('mail:pickFiles', async () => {
-    const r = await dialog.showOpenDialog(win!, { properties: ['openFile', 'multiSelections'] })
+  handle('mail:windowColor', (e, color: string) => { if (/^#[0-9a-f]{6}$/i.test(String(color))) senderWin(e)?.setBackgroundColor(color) })
+  // a new message in its own window (3 Nov 2026)
+  handle('mail:composeWindow', (_e, seed) => { openComposeWindow(seed) })
+  handle('mail:composeSeed', (_e, id) => composeSeeds.get(String(id)) ?? null)
+  handle('mail:composeClose', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w && w !== win) { (w as any).__allowClose?.(); w.close() } })
+  // what the message window did, told to the main window (its toasts: sent with Undo, draft saved)
+  handle('mail:composeDone', (_e, done) => { win?.webContents.send('mail:event', { type: 'composeDone', outboxId: done?.outboxId || undefined, at: typeof done?.at === 'number' ? done.at : undefined, saved: !!done?.saved }) })
+  handle('mail:pickFiles', async (e) => {
+    const r = await dialog.showOpenDialog(senderWin(e)!, { properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : r.filePaths
   })
   handle('mail:openAttachment', async (_e, id) => {
