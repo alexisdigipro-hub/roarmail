@@ -1,5 +1,7 @@
 // RoarMail's own line icons (24px grid, 1.6 stroke).
 const P: Record<string, string> = {
+  // New message (Alex, 3 Nov 2026: a clearer, bigger one): a sheet with a pen over its corner
+  newmail: 'M11 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V13M17.6 3.9a2 2 0 0 1 2.8 2.8L12.8 14.3l-3.6.9.9-3.6z',
   compose: 'M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3zM14 7l3 3',
   reply: 'M10 8 5 12.5l5 4.5M5 12.5h9a5 5 0 0 1 5 5V19',
   replyAll: 'M11 8l-5 4.5 5 4.5M7 8l-5 4.5L7 17M6 12.5h8a5 5 0 0 1 5 5V19',

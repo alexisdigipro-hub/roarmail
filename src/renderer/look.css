@@ -959,3 +959,62 @@ html.panel-window #root > .sheet-wrap > .sheet { flex: 1; width: 100%; max-width
 html.panel-window .sheet.settings { padding-top: 0; }
 html.panel-window .sheet.settings .set-side { padding-top: 44px; }
 html.panel-window .sheet.settings .set-head { padding-top: 40px; }
+
+/* the ✦ card (redone 3 Nov 2026): in the middle of the message over a dimmed composer, like the other questions;
+   one field to write from, the changes as the app's usual pill buttons, the answer shown before it goes into the mail */
+.composer .ai-panel { position: absolute; inset: 0; z-index: 75; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, .38); animation: rm-fade-in .18s ease both; }
+.composer .ai-card { width: min(560px, 100%); max-height: calc(100% - 20px); overflow-y: auto; padding: 18px 20px 18px; border-radius: 20px; background: var(--panel-3);
+  color: var(--text); box-shadow: var(--shadow), inset 0 0 0 1px var(--edge-2); animation: rm-modal-in .35s var(--spring) both; display: flex; flex-direction: column; gap: 10px; }
+.composer .ai-top { display: flex; align-items: center; gap: 8px; }
+.composer .ai-top .ic { color: var(--accent); }
+.composer .ai-top b { font-size: 16px; }
+.composer .ai-label { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.composer .ai-ask { display: flex; gap: 10px; align-items: flex-end; }
+.composer .ai-ask textarea { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; border-radius: 14px; padding: 10px 14px; font: inherit; font-size: 14px;
+  background: var(--glass); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge-2); }
+.composer .ai-ask textarea:focus { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.composer .ai-quote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--edge-2); color: var(--muted); font-size: 13px; white-space: pre-wrap; max-height: 90px; overflow: hidden; }
+.composer .ai-out { white-space: pre-wrap; font-size: 14.5px; line-height: 1.55; padding: 12px 14px; border-radius: 14px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); max-height: 300px; overflow-y: auto; }
+.composer .ai-changes { display: flex; flex-wrap: wrap; gap: 6px; }
+.composer .ai-note { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13.5px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.composer .ai-busy { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.composer .ai-busy .rt-spin { width: 14px; height: 14px; }
+.composer .ai-use { margin-top: 4px; }
+
+/* Settings > Accounts (3 Nov 2026): a list on the left (picture or initial in the account's colour, name, address, a
+   status dot), the chosen account on the right; in a narrow window the list goes on top */
+.acct-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 14px; align-items: start; }
+.acct-list { display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 16px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge);
+  position: sticky; top: 0; max-height: calc(100vh - 160px); overflow-y: auto; scrollbar-width: thin; }
+.acct-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 12px; text-align: left; color: var(--text); }
+.acct-row:hover { background: var(--glass-2); }
+.acct-row.on { background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+.acct-row.disabled { opacity: .55; }
+.acct-av { width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; background: var(--glass-2); }
+.acct-av img { width: 100%; height: 100%; object-fit: cover; }
+.acct-row.add .acct-av { color: var(--muted); box-shadow: inset 0 0 0 1px var(--edge-2); }
+.acct-row.add b { font-weight: 500; color: var(--muted); }
+.acct-names { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.acct-names b { font-size: 13.5px; font-weight: 600; }
+.acct-names small { font-size: 11.5px; color: var(--muted); }
+.acct-state { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); opacity: .5; }
+.acct-state.online { background: #3fae49; opacity: 1; }
+.acct-state.error { background: #e0413a; opacity: 1; }
+.acct-state.connecting { background: #f0b429; opacity: 1; }
+.acct-main { min-width: 0; }
+.acct-main .acct-detail { margin: 0; }
+@media (max-width: 760px) { .acct-layout { grid-template-columns: 1fr; } .acct-list { position: static; max-height: 220px; } }
+
+/* New message (3 Nov 2026): a bigger round button in the accent, the one action of the list's top row that stands out */
+.tool.compose-btn { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent); }
+.tool.compose-btn:hover { filter: brightness(1.12); background: var(--accent); }
+.tool.compose-btn svg { color: #fff; }
+
+/* one soft ring around a search pill, never a square one inside it (Alex, 3 Nov 2026: "the glow looks thick and odd"):
+   the text field inside a pill carries no ring of its own, also with Strong focus rings on; the strong ring itself is
+   thinner and follows each element's own corners */
+:is(.search, .fi-search, .ct-search, .ai-ask) input, :is(.search, .fi-search, .ct-search) input:is(:focus, :focus-visible),
+html[data-focus='bold'] :is(.search, .fi-search, .ct-search) input:focus-visible { outline: none !important; box-shadow: none !important; }
+.search.search-cap:focus-within, .search:focus-within { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+html[data-focus='bold'] :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 85%, transparent) !important; outline-offset: 2px;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 14%, transparent) !important; }

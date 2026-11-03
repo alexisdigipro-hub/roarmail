@@ -25,7 +25,8 @@ Rules:
 - Start with a greeting only if one fits; end with a short closing like "Ευχαριστώ," / "Best," only if it fits.
 - Never invent facts, dates, amounts or names they did not give; if something needed is missing, write a short placeholder in brackets, like [ημερομηνία].
 - When asked to change text they wrote (shorter, more formal, fix, translate), return only the changed text, keeping its meaning.
-- Keep it as short as the request allows. Plain paragraphs separated by one empty line.`
+- Keep it as short as the request allows. Plain paragraphs separated by one empty line.
+- If it cannot be done (the text to change is not real words, or what they want is unclear), do not write an email: answer with one short line that starts with "!!" and says what is missing, in their language.`
 
 async function ask(user: string) {
   const msg = await client.beta.messages.create({

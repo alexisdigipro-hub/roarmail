@@ -395,17 +395,24 @@ function Accounts({ sigs, onAdd }: { accounts: Account[]; sigs: Signature[]; onA
   }, [])
   const a = all.find((x) => x.id === pick) || all[0]
   return (
-    <div className="stack">
-      <div className="acct-pick">
+    // a list on the left, the chosen account on the right (Alex, 3 Nov 2026: the chips wrapped into rows and looked busy)
+    <div className="acct-layout">
+      <div className="acct-list">
         {all.map((x) => (
-          <button key={x.id} className={`acct-chip ${x.id === a?.id ? 'on' : ''} ${x.enabled ? '' : 'disabled'}`} onClick={() => setPick(x.id)} title={x.email}>
-            <span className="acc-dot" style={{ background: x.color }} />
-            <span className="ellipsis">{x.description || x.email}</span>
+          <button key={x.id} className={`acct-row ${x.id === a?.id ? 'on' : ''} ${x.enabled ? '' : 'disabled'}`} onClick={() => setPick(x.id)} title={x.email}>
+            <span className="acct-av" style={{ background: x.avatar ? undefined : x.color }}>
+              {x.avatar ? <img src={x.avatar} alt="" /> : (x.description || x.email).trim().charAt(0).toUpperCase()}
+            </span>
+            <span className="acct-names">
+              <b className="ellipsis">{x.description || x.email}</b>
+              <small className="ellipsis">{x.description ? x.email : x.enabled ? (t[x.state as Key] || '') : t.ac_off}</small>
+            </span>
+            <i className={`acct-state ${x.enabled ? x.state : 'off'}`} />
           </button>
         ))}
-        <button className="acct-chip add" onClick={onAdd} title={t.addAccount}><Icon name="plus" size={14} /></button>
+        <button className="acct-row add" onClick={onAdd}><span className="acct-av"><Icon name="plus" size={14} /></span><span className="acct-names"><b>{t.addAccount}</b></span></button>
       </div>
-      {a && <AccountDetail key={a.id} a={a} sigs={sigs} />}
+      {a && <div className="acct-main"><AccountDetail key={a.id} a={a} sigs={sigs} /></div>}
     </div>
   )
 }

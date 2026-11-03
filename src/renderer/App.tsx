@@ -841,7 +841,7 @@ export default function App() {
             {scope.filter === 'promos' && inboxOf(scope) && !results && !!promos?.senders && (
               <button className="pill small ghost" title={t.pm_unsubHint} onClick={unsubUnopened}>{t.pm_unsub}</button>
             )}
-            <button className="tool" title={`${t.compose} (C)`} onClick={() => setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId })}><Icon name="compose" /></button>
+            <button className="tool compose-btn" title={`${t.compose} (C)`} onClick={() => setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId })}><Icon name="newmail" size={20} /></button>
           </div>
           {(searchOpen || query) && (
             <label className="search search-cap">
