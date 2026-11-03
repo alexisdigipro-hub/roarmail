@@ -12,7 +12,7 @@ import os from 'os'
 import path from 'path'
 import type { MailService, SetupBundle } from './mail'
 import type { RoarMe } from './roarme'
-import type { AiProvider, AiStatus, SyncState } from '../shared/api'
+import type { AiProvider, AiStatus, Invite, SyncState } from '../shared/api'
 import { AI_SYSTEM, aiPrompt, type AiRequest } from '../shared/aiPrompt'
 
 const FN = 'https://bzmjhbnwhdwmncxkqkdl.supabase.co/functions/v1/roarmail-ai'
@@ -49,8 +49,39 @@ export class RoarAccount {
   private local(key: string) { return this.mail.localValue(key) }
   private setLocal(key: string, v: string) { this.mail.setLocalValue(key, v) }
 
+  /** the Roar Account's projects with RoarMail senders (3 Nov 2026), for the Projects in the side list */
+  private async projects() {
+    const acc = await this.roarme.account().catch(() => null)
+    if (!acc) { this.mail.setRoarProjects([]); return }
+    const [{ data: ps }, { data: its }] = await Promise.all([
+      acc.sb.from('roar_projects').select('id, name, color, archived').order('updated_at', { ascending: false }),
+      acc.sb.from('roar_project_items').select('project_id, item_id').eq('app', 'roarmail').eq('kind', 'sender'),
+    ])
+    if (!ps) return
+    this.mail.setRoarProjects(ps.filter((p: any) => !p.archived).map((p: any) => ({ id: p.id, name: p.name, color: p.color || '#ff3b2f',
+      senders: (its || []).filter((i: any) => i.project_id === p.id).map((i: any) => String(i.item_id)) })).filter((p) => p.senders.length))
+  }
+
+  /** an invitation answered in RoarMail goes into the Roar Calendar (source roarmail, one row per invitation) */
+  async inviteToCalendar(inv: Invite, answer: string) {
+    const acc = await this.roarme.account()
+    if (!acc || !inv?.uid || !inv.start) return
+    if (answer === 'declined') {
+      await acc.sb.from('roar_calendar_events').update({ deleted_at: new Date().toISOString() }).eq('owner', acc.userId).eq('source', 'roarmail').eq('source_id', inv.uid)
+      return
+    }
+    const row = { title: (answer === 'tentative' ? '? ' : '') + (inv.title || 'Meeting'),
+      starts_at: new Date(inv.start).toISOString(), ends_at: inv.end ? new Date(inv.end).toISOString() : null, all_day: !!inv.allDay,
+      location: inv.location || null, notes: inv.organizer ? `From ${inv.organizer.name || inv.organizer.address}` : null, deleted_at: null }
+    // the unique index is partial (source_id not null), which an upsert cannot name: look, then change or add
+    const { data: had } = await acc.sb.from('roar_calendar_events').select('id').eq('owner', acc.userId).eq('source', 'roarmail').eq('source_id', inv.uid).maybeSingle()
+    if (had) await acc.sb.from('roar_calendar_events').update(row).eq('id', had.id)
+    else await acc.sb.from('roar_calendar_events').insert({ ...row, owner: acc.userId, source: 'roarmail', source_id: inv.uid })
+  }
+
   private async tick(force = false) {
     if (this.busy) return
+    this.projects().catch(() => {})
     if (!this.mail.settings().syncSetup) { if (this.state.signedIn || this.state.error) this.set({ signedIn: false, error: '' }); return }
     const acc = await this.roarme.account().catch(() => null)
     if (!acc) { if (this.state.signedIn) this.set({ signedIn: false }); return }

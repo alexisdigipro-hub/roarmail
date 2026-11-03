@@ -239,7 +239,11 @@ export interface ListScope {
   day?: number
   /** the person button: all mail from or to this address, in every folder but Trash and Junk */
   person?: string
+  /** a Roar Account project (3 Nov 2026): the mail from and to its senders */
+  project?: string
 }
+/** a Roar Account project as RoarMail sees it: its name, colour and the senders whose mail belongs to it */
+export interface RoarProject { id: string; name: string; color: string; senders: string[] }
 /** promos: mail from lists (List-Unsubscribe) and quiet senders, kept apart from the Inbox (1 Nov 2026) */
 export type ListFilter = 'unread' | 'flagged' | 'attachments' | 'today' | 'threads' | 'promos'
 export type ListSort = 'date' | 'sender' | 'subject' | 'unread' | 'attachments' | 'account'
@@ -421,7 +425,9 @@ export type SwipeAction = 'archive' | 'trash' | 'flag' | 'seen' | 'snooze' | 'no
 
 // ---------- RoarMe (optional sign-in; see src/main/roarme.ts) ----------
 export interface RoarPerson { id: string; name: string; username: string; avatar?: string }
-export interface RoarMeStatus { signedIn: boolean; needsMfa: boolean; email?: string; me?: RoarPerson }
+export interface RoarMeStatus { signedIn: boolean; needsMfa: boolean; email?: string; me?: RoarPerson
+  /** waiting for Allow on themadlions.com/account (Sign in with Roar Account); expired when the code ran out */
+  connecting?: { code: string; url: string; expired?: boolean } }
 export interface RoarRoom { id: string; kind: string; title: string; avatar?: string; members: RoarPerson[]; unread: number }
 export interface RoarTask { id: string; title: string; notes: string; due: string | null; priority: 'low' | 'normal' | 'high'; status: 'pending' | 'open' | 'doing' | 'done' | 'declined'; mine: boolean; from?: string; to?: string }
 /** one file up on RoarTransfer (Cloudflare R2), before its email's link is made */
@@ -619,6 +625,10 @@ export interface MailApi {
   roarmeSignIn(email: string, password: string): Promise<RoarMeStatus>
   roarmeVerify(code: string): Promise<RoarMeStatus>
   roarmeSignOut(): Promise<void>
+  /** Sign in with Roar Account: a code, the account page opens in the browser, Allow there signs RoarMail in */
+  roarmeConnect?(cancel?: boolean): Promise<RoarMeStatus>
+  roarmeConnectOpen?(): Promise<void>
+  roarProjects?(): Promise<RoarProject[]>
   roarmeRooms(): Promise<RoarRoom[]>
   roarmeContacts(): Promise<RoarPerson[]>
   /** an email into a RoarMe chat, with a note and (optionally) its attachments */
