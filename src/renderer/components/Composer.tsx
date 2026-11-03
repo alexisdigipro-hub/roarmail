@@ -323,7 +323,12 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
     if (!el) return null
     const r = document.createRange()
     r.setStart(el, 0)
-    let stop = [...el.childNodes].find((n) => n instanceof HTMLElement && (n.hasAttribute(SIG) || n.tagName === 'BLOCKQUOTE' || n.hasAttribute('data-roarmail-transfer') || /----------/.test(n.textContent || ''))) as Node | undefined
+    // the first of the signature, a quote, a RoarTransfer card or a forwarded message's head, at any depth (the
+    // message's font wraps everything in one more box: 3 Nov 2026, the AI got only "--" or the signature)
+    const marks = [...el.querySelectorAll<HTMLElement>(`[${SIG}], blockquote, [data-roarmail-transfer]`)]
+    const head = [...el.querySelectorAll<HTMLElement>('p, div')].find((n) => /^-{6,}\s/.test((n.textContent || '').trim()) && !n.querySelector('p, div'))
+    if (head) marks.push(head)
+    let stop: Node | undefined = marks.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))[0]
     // the empty lines placed before the signature stay
     while (stop && stop.previousSibling && stop.previousSibling.nodeName === 'BR') stop = stop.previousSibling
     if (stop) r.setEndBefore(stop); else r.setEnd(el, el.childNodes.length)
@@ -336,11 +341,13 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
     aiSel.current = r && !r.collapsed && body.current?.contains(r.commonAncestorContainer) ? r.cloneRange() : null
     setAiOpen((v) => !v); setError('')
   }
-  const runAi = async (instruction: string) => {
+  const runAi = async (instruction: string, quick = false) => {
     if (!instruction.trim() || aiBusy) return
     const target = aiSel.current || ownRange()
     if (!target) return
     const text = target.toString().trim()
+    // Shorter, Fix it, In English…: on nothing written yet they have nothing to work on
+    if (!aiSel.current && quick && !text.replace(/^-+$/, '').trim()) { setError(t.ai_needText); return }
     const src = seed.kind !== 'new' && seed.kind !== 'draft' ? seed.source : undefined
     const me = accounts.find((a) => a.id === accountId)
     setAiBusy(true); setError('')
@@ -457,7 +464,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
                       <small className="muted">{aiSel.current ? t.ai_onSel : t.ai_onAll}</small>
                       {([['ai_shorter', 'Make it shorter'], ['ai_formal', 'Make it more formal'], ['ai_friendly', 'Make it friendlier'], ['ai_fix', 'Fix spelling and grammar, change nothing else'],
                         ['ai_en', 'Translate it into English'], ['ai_el', 'Translate it into Greek']] as const).map(([k, ask]) => (
-                        <button key={k} className="chip" disabled={aiBusy} onClick={() => runAi(ask)}>{t[k]}</button>
+                        <button key={k} className="chip" disabled={aiBusy} onClick={() => runAi(ask, true)}>{t[k]}</button>
                       ))}
                     </div>
                     <div className="row end">
