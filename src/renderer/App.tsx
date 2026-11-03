@@ -843,7 +843,7 @@ export default function App() {
             {scope.filter === 'promos' && inboxOf(scope) && !results && !!promos?.senders && (
               <button className="pill small ghost" title={t.pm_unsubHint} onClick={unsubUnopened}>{t.pm_unsub}</button>
             )}
-            <button className="tool compose-btn" title={`${t.compose} (C)`} onClick={() => setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId })}><Icon name="newmail" size={20} /></button>
+            <button className="tool compose-btn" title={`${t.compose} (C)`} onClick={() => setCompose({ kind: 'new', accountId: scope.accountId === 'all' ? undefined : scope.accountId })}><Icon name="newmail" size={17} /><span>{t.newShort}</span></button>
           </div>
           {(searchOpen || query) && (
             <label className="search search-cap">
@@ -859,8 +859,10 @@ export default function App() {
               <button className="tool small" title={`${t.search} (/)`} onClick={openSearch}><Icon name="search" size={15} /></button>
               <span className="sep" />
               {FILTERS.map(([f, icon, label]) => (
-                <button key={f} className={`tool small ${scope.filter === f ? 'on-filter' : ''}`} title={t[label]}
-                  onClick={() => setScope((s) => ({ ...s, filter: s.filter === f ? undefined : f }))}><Icon name={icon} size={15} filled={f === 'flagged' && scope.filter === f} /></button>
+                <button key={f} className={`tool small ${scope.filter === f ? 'on-filter' : ''} ${f === 'promos' ? 'promo-btn' : ''}`} title={t[label]}
+                  onClick={() => setScope((s) => ({ ...s, filter: s.filter === f ? undefined : f }))}><Icon name={icon} size={15} filled={f === 'flagged' && scope.filter === f} />
+                  {/* Promotions' unread count rides on its own filter button (Alex, 3 Nov 2026: the pill under the bar sat oddly) */}
+                  {f === 'promos' && inboxOf(scope) && prefs.promosApart && !!promos?.unread && <i className="promo-count">{promos.unread > 99 ? '99+' : promos.unread}</i>}</button>
               ))}
               <button className={`tool small ${scope.day ? 'on-filter' : ''}`} title={t.fl_day}
                 onClick={() => { setDayPick(dayKey(scope.day || Date.now())); setPop(pop === 'day' ? null : 'day') }}><Icon name="calendar" size={15} /></button>
@@ -901,12 +903,8 @@ export default function App() {
                 </div>
               )}
             </div>
-            {(scope.person || scope.day || (inboxOf(scope) && prefs.promosApart && !!promos?.total)) && (
+            {(scope.person || scope.day) && (
               <div className="filter-chips">
-                {/* Promotions apart (1 Nov 2026): a pill into them, and in them a way back to the Inbox */}
-                {inboxOf(scope) && prefs.promosApart && !!promos?.total && (scope.filter === 'promos'
-                  ? <button className="chip on-chip promo-chip" onClick={() => setScope((s) => ({ ...s, filter: undefined }))}><Icon name="funnel" size={12} /> {t.pm_title} <Icon name="close" size={11} /></button>
-                  : <button className="chip promo-chip" title={t.fl_promos} onClick={() => setScope((s) => ({ ...s, filter: 'promos' }))}><Icon name="funnel" size={12} /> {t.pm_title} · <b>{promos?.unread ?? 0}</b></button>)}
                 {scope.person && <button className="chip on-chip" onClick={() => setScope((s) => ({ ...s, person: undefined }))}><Icon name="target" size={12} /> {scope.person} <Icon name="close" size={11} /></button>}
                 {scope.day && <button className="chip on-chip" onClick={() => setScope((s) => ({ ...s, day: undefined }))}><Icon name="calendar" size={12} /> {new Date(scope.day).toLocaleDateString()} <Icon name="close" size={11} /></button>}
               </div>
