@@ -27,6 +27,7 @@ let shownOnce = false
 let locked = false
 let tray: Tray | null = null
 let roarAccount: RoarAccount | null = null
+const menuIcons = new Map<string, Electron.NativeImage>()
 let background = false // keep running in the menu bar / tray when the window closes
 
 // App lock (Touch ID on a Mac). While locked the main process answers nothing but these, so a locked
@@ -570,13 +571,23 @@ app.whenReady().then(() => {
       { label: l.delete, enabled: !fixed, click: pick('delete') },
     ]).popup({ window: win, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
+  // the app's icons for the system menus, drawn by the screens once (3 Nov 2026)
+  handle('mail:menuIcons', (_e, icons: Record<string, string>) => {
+    for (const [k, d] of Object.entries(icons || {})) {
+      if (menuIcons.has(k) || typeof d !== 'string' || !d.startsWith('data:image/png')) continue
+      const img = nativeImage.createFromDataURL(d).resize({ width: 16, height: 16 })
+      if (process.platform === 'darwin') img.setTemplateImage(true)
+      menuIcons.set(k, img)
+    }
+  })
   handle('mail:popMenu', (e, items: MenuItem[]) => new Promise((resolve) => {
     const at = senderWin(e)
     if (!at) return resolve(null)
     let picked: string | null = null
     const build = (list: MenuItem[]): Electron.MenuItemConstructorOptions[] => list.map((x) => !x ? { type: 'separator' as const }
-      : x.sub ? { label: String(x.label), enabled: x.enabled !== false, submenu: build(x.sub) }
-      : { label: String(x.label), enabled: x.enabled !== false, ...(x.checked != null ? { type: 'checkbox' as const, checked: !!x.checked } : {}), click: () => { picked = String(x.id) } })
+      : x.sub ? { label: String(x.label), enabled: x.enabled !== false, ...(x.icon && menuIcons.get(x.icon) ? { icon: menuIcons.get(x.icon) } : {}), submenu: build(x.sub) }
+      : { label: String(x.label), enabled: x.enabled !== false, ...(x.icon && menuIcons.get(x.icon) && x.checked == null ? { icon: menuIcons.get(x.icon) } : {}),
+          ...(x.checked != null ? { type: 'checkbox' as const, checked: !!x.checked } : {}), click: () => { picked = String(x.id) } })
     Menu.buildFromTemplate(build(items)).popup({ window: at, callback: () => setTimeout(() => resolve(picked), 0) })
   }))
   handle('mail:createFolder', (_e, accountId, parentId, name) => mail.createFolder(accountId, parentId, name))
@@ -826,7 +837,7 @@ app.whenReady().then(() => {
     const r = await dialog.showOpenDialog(senderWin(e)!, { properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : r.filePaths
   })
-  handle('mail:openAttachment', async (_e, id) => {
+  handle('mail:openAttachment', async (e, id) => {
     const a = await mail.attachment(id)
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-'))
     const file = path.join(dir, a.filename)
@@ -835,7 +846,9 @@ app.whenReady().then(() => {
     // a program or script is never started from a mail: it is shown in its folder, marked as from the internet
     if (!SAFE_OPEN.test(a.filename)) { shell.showItemInFolder(file); return }
     // Mac: shown in Quick Look over the window (29 Oct 2026), which also has a button to open it in its app
-    if (process.platform === 'darwin' && win) win.previewFile(file, a.filename)
+    // Quick Look over the window that asked (3 Nov 2026: from the Files window it opened behind, over the main one)
+    const over = senderWin(e)
+    if (process.platform === 'darwin' && over) over.previewFile(file, a.filename)
     else await shell.openPath(file)
   })
   // Settings > General > Downloads folder: saved straight there (a free name), or asked every time

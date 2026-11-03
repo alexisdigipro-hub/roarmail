@@ -42,14 +42,14 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: 
     e.preventDefault()
     const id = await window.roarmail.popMenu([
       { id: 'open', label: window.roarmail.platform === 'darwin' ? t.preview : t.open },
-      { id: 'save', label: t.fl_saveAs },
+      { id: 'save', label: t.fl_saveAs, icon: 'download' },
       { id: 'name', label: t.fl_copyName },
       null,
-      ...(onOpenMail ? [{ id: 'openMail', label: t.fi_openMail }] : []),
-      { id: 'mail', label: t.fi_mailWith },
-      { id: 'card', label: t.ct_card },
+      ...(onOpenMail ? [{ id: 'openMail', label: t.fi_openMail, icon: 'unread' }] : []),
+      { id: 'mail', label: t.fi_mailWith, icon: 'target' },
+      { id: 'card', label: t.ct_card, icon: 'person' },
       null,
-      { id: 'delMail', label: t.fi_delMail },
+      { id: 'delMail', label: t.fi_delMail, icon: 'trash' },
     ])
     if (id === 'open') window.roarmail.openAttachment(f.id)
     else if (id === 'save') window.roarmail.saveAttachment(f.id)
@@ -87,9 +87,10 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: 
           {!res ? <div className="stats-wait"><div className="spinner" /></div>
             : !res.files.length ? <p className="muted ct-empty">{q || kind ? t.fi_none : t.fi_empty}</p>
             : res.files.map((f) => (
-              <div key={f.id} className="fi-row" onContextMenu={(e) => menu(e, f)} onDoubleClick={() => window.roarmail.openAttachment(f.id)}>
+              <div key={f.id} className="fi-row" onContextMenu={(e) => menu(e, f)}>
                 <span className={`fi-ico k-${f.kind}`}><Icon name={ICON[f.kind]} size={16} /></span>
-                <button type="button" className="fi-main" title={f.filename} onClick={() => window.roarmail.openAttachment(f.id)}>
+                {/* a click opens the mail the file came in (Alex, 3 Nov 2026); the file itself from the ⋯ (Open) */}
+                <button type="button" className="fi-main" title={onOpenMail ? t.fi_openMail : f.filename} onClick={() => onOpenMail ? onOpenMail(f) : window.roarmail.openAttachment(f.id)}>
                   <b className="ellipsis">{f.filename}</b>
                   <small className="muted ellipsis">{f.fromName || f.fromEmail} · {f.subject || t.noSubject}</small>
                 </button>

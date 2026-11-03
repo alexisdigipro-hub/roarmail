@@ -81,6 +81,21 @@ const P: Record<string, string> = {
   gear: 'M10.3 3h3.4l.5 2.4 1.6.9 2.3-.8 1.7 2.9-1.8 1.6v1.9l1.8 1.6-1.7 2.9-2.3-.8-1.6.9-.5 2.4h-3.4l-.5-2.4-1.6-.9-2.3.8-1.7-2.9 1.8-1.6v-1.9L4.2 8.4l1.7-2.9 2.3.8 1.6-.9zM12 9.2a2.8 2.8 0 1 0 0 5.6a2.8 2.8 0 1 0 0-5.6',
 }
 
+/** an icon as a small PNG for the system's menus (3 Nov 2026): drawn in black on a clear square, the Mac tints it */
+export function iconPng(name: string, px = 32): string {
+  const c = document.createElement('canvas')
+  c.width = c.height = px
+  const g = c.getContext('2d')
+  if (!g || !P[name]) return ''
+  g.scale(px / 24, px / 24)
+  g.lineWidth = 1.7; g.lineCap = 'round'; g.lineJoin = 'round'
+  g.strokeStyle = navigator.platform.startsWith('Mac') ? '#000' : '#808080'
+  g.stroke(new Path2D(P[name]))
+  return c.toDataURL('image/png')
+}
+/** every icon's name */
+export const ICON_NAMES = Object.keys(P)
+
 export function Icon({ name, size = 18, filled = false }: { name: keyof typeof P | string; size?: number; filled?: boolean }) {
   return (
     <svg className="ic" width={size} height={size} viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor"

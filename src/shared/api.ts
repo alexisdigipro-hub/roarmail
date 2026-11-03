@@ -126,7 +126,8 @@ export interface MailStats {
 export interface Address { name?: string; address: string }
 
 /** a line of a right-click menu (popMenu): null is a separator; sub opens a submenu; checked draws a tick */
-export type MenuItem = { id?: string; label: string; enabled?: boolean; checked?: boolean; sub?: MenuItem[] } | null
+/** icon: one of the app's line icons by name (components/Icon.tsx), drawn in the menu (3 Nov 2026) */
+export type MenuItem = { id?: string; label: string; enabled?: boolean; checked?: boolean; icon?: string; sub?: MenuItem[] } | null
 
 /** Contacts (29 Oct 2026): a person in the address book; built from mail, signatures, imports and what was typed */
 export type ContactGroup = 'people' | 'vip' | 'team' | 'clients' | 'crew' | 'blocked' | 'written' | 'recent' | `@${string}`
@@ -641,6 +642,8 @@ export interface MailApi {
   windowColor?(color: string): Promise<void>
   refresh(accountId?: string): Promise<void>
   on(cb: (e: MailEvent) => void): () => void
+  /** the app's line icons as small pictures, handed once to the main process for the system menus */
+  menuIcons?(icons: Record<string, string>): Promise<void>
   /** the Roar Account (3 Nov 2026): sync of RoarMail's setup, and the ✦ AI in a new message */
   syncState?(): Promise<SyncState>
   syncNow?(): Promise<SyncState>

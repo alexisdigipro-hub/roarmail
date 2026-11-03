@@ -181,13 +181,13 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
   const moreMenu = async (e: ReactMouseEvent) => {
     e.preventDefault(); e.stopPropagation()
     const id = await window.roarmail.popMenu([
-      { id: 'reply', label: t.reply }, { id: 'replyAll', label: t.replyAll }, { id: 'forward', label: t.forward },
+      { id: 'reply', label: t.reply, icon: 'reply' }, { id: 'replyAll', label: t.replyAll, icon: 'reply' }, { id: 'forward', label: t.forward, icon: 'forward' },
       null,
       // print and the two ways to save in one place (Alex, 3 Nov 2026: tidier menus)
-      { label: t.mm_keep, sub: [{ id: 'print', label: t.mm_print }, { id: 'pdf', label: t.mm_pdf }, { id: 'eml', label: t.mm_eml }] },
+      { label: t.mm_keep, icon: 'print', sub: [{ id: 'print', label: t.mm_print, icon: 'print' }, { id: 'pdf', label: t.mm_pdf, icon: 'download' }, { id: 'eml', label: t.mm_eml, icon: 'download' }] },
       null,
-      { label: `${t.mn_sender} · ${m.fromName || m.fromEmail}`, sub: [
-        { id: 'card', label: t.ct_card }, { id: 'all', label: t.ct_allMail }, { id: 'rule', label: t.ru_fromSender },
+      { label: `${t.mn_sender} · ${m.fromName || m.fromEmail}`, icon: 'person', sub: [
+        { id: 'card', label: t.ct_card, icon: 'person' }, { id: 'all', label: t.ct_allMail, icon: 'target' }, { id: 'rule', label: t.ru_fromSender, icon: 'funnel' },
       ] },
     ])
     if (id === 'reply' || id === 'replyAll' || id === 'forward') onCompose(id, m)
