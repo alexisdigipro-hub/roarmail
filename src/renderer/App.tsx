@@ -147,6 +147,8 @@ export default function App() {
       if (a.do === 'scope') setScope({ accountId: a.accountId, ...(a.role ? { role: a.role } : {}), ...(a.person ? { person: a.person } : {}) })
       else if (a.do === 'addAccount') setAdding(true)
       else if (a.do === 'contacts') setContactsAt(a.email || '')
+      // a file's mail from Files: found by its subject in every inbox, then opened
+      else if (a.do === 'openMail') { setScope({ accountId: 'all', role: 'inbox' }); setQuery(a.subject); setTimeout(() => setSelected([a.id]), 600) }
     }
     if (e.type === 'composeDone') { if (e.outboxId) sentRef.current(e.outboxId, e.at); else if (e.saved) flash({ text: t.draftSaved, ms: 2600 }) }
     if (e.type === 'outbox') loadOutbox()
