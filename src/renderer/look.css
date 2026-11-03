@@ -1004,3 +1004,8 @@ html.panel-window .sheet.settings .set-head { padding-top: 40px; }
 .acct-main { min-width: 0; }
 .acct-main .acct-detail { margin: 0; }
 @media (max-width: 760px) { .acct-layout { grid-template-columns: 1fr; } .acct-list { position: static; max-height: 220px; } }
+
+/* New message (3 Nov 2026): a bigger round button in the accent, the one action of the list's top row that stands out */
+.tool.compose-btn { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent); }
+.tool.compose-btn:hover { filter: brightness(1.12); background: var(--accent); }
+.tool.compose-btn svg { color: #fff; }
