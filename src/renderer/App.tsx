@@ -3,7 +3,7 @@ import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, PromoCount, Rule, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
-import { Icon, folderIcon } from './components/Icon'
+import { ICON_NAMES, Icon, folderIcon, iconPng } from './components/Icon'
 import { arrive, leave } from './motion'
 import { AddAccount } from './components/AddAccount'
 import { Viewer, initials, tint, type ComposeKind } from './components/Viewer'
@@ -404,29 +404,29 @@ export default function App() {
     const one = targets.length === 1
     // tidied (Alex, 29 Oct): answer first, then mark, then file it, the sender's things in one submenu, Delete last
     const pick = await api.popMenu([
-      { id: 'reply', label: t.reply, enabled: one },
-      { id: 'replyAll', label: t.replyAll, enabled: one },
-      { id: 'forward', label: t.forward, enabled: one },
+      { id: 'reply', label: t.reply, enabled: one, icon: 'reply' },
+      { id: 'replyAll', label: t.replyAll, enabled: one, icon: 'reply' },
+      { id: 'forward', label: t.forward, enabled: one, icon: 'forward' },
       null,
-      { id: 'seen', label: allSeen ? t.markUnread : t.markRead },
-      { id: 'flag', label: allFlag ? t.unflag : t.flag },
+      { id: 'seen', label: allSeen ? t.markUnread : t.markRead, icon: 'unread' },
+      { id: 'flag', label: allFlag ? t.unflag : t.flag, icon: 'star' },
       null,
-      { id: 'move', label: t.moveTo },
-      { id: 'archive', label: t.archiveIt },
-      { id: 'snooze', label: t.snoozeUntil },
+      { id: 'move', label: t.moveTo, icon: 'folder' },
+      { id: 'archive', label: t.archiveIt, icon: 'archive' },
+      { id: 'snooze', label: t.snoozeUntil, icon: 'clock' },
       null,
-      { label: `${t.mn_sender}${r.fromName ? ` · ${r.fromName}` : ''}`, enabled: !!r.fromEmail, sub: [
-        { id: 'contact', label: t.ct_card },
-        { id: 'allMail', label: t.ct_allMail },
-        { id: 'rule', label: t.ru_fromSender },
+      { label: `${t.mn_sender}${r.fromName ? ` · ${r.fromName}` : ''}`, enabled: !!r.fromEmail, icon: 'person', sub: [
+        { id: 'contact', label: t.ct_card, icon: 'person' },
+        { id: 'allMail', label: t.ct_allMail, icon: 'target' },
+        { id: 'rule', label: t.ru_fromSender, icon: 'funnel' },
         ...(promoRow ? [{ id: 'notPromo', label: t.pm_notPromo }] : []),
         null,
-        { id: 'block', label: blocked ? t.unblockSender : t.blockSender },
+        { id: 'block', label: blocked ? t.unblockSender : t.blockSender, icon: 'block' },
         ...(blockableDomain(emailDomain(r.fromEmail)) ? [{ id: 'blockDomain', label: `${t.bl_domain} @${emailDomain(r.fromEmail)}` }] : []),
       ] },
       null,
-      { id: 'spam', label: targets.length > 1 ? `${t.bl_report} (${targets.length})` : t.bl_report },
-      { id: 'trash', label: targets.length > 1 ? `${t.trashIt} (${targets.length})` : t.trashIt },
+      { id: 'spam', label: targets.length > 1 ? `${t.bl_report} (${targets.length})` : t.bl_report, icon: 'spam' },
+      { id: 'trash', label: targets.length > 1 ? `${t.trashIt} (${targets.length})` : t.trashIt, icon: 'trash' },
     ])
     if (!pick) return
     try {
@@ -528,6 +528,8 @@ export default function App() {
     } catch (e) { flash({ text: clean(e) }); loadRows() }
   }
 
+  // the icons of the system menus (3 Nov 2026): drawn once and handed to the main process
+  useEffect(() => { api.menuIcons?.(Object.fromEntries(ICON_NAMES.map((n) => [n, iconPng(n)]).filter(([, d]) => d))).catch(() => {}) }, [])
   // on the desktop Settings, Files, Contacts and Statistics open in windows of their own too (Alex, 3 Nov 2026)
   useEffect(() => {
     if (!api.panelWindow) return
@@ -726,10 +728,10 @@ export default function App() {
           {/* the rest in one menu (Alex, 3 Nov 2026: fewer buttons): RoarMe's tasks, Statistics, the rail's width */}
           <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={t.mm_more} onClick={async () => {
             const pick = await api.popMenu([
-              { id: 'work', label: `${t.roarme} · ${t.rm_work}`, checked: workOpen },
-              { id: 'stats', label: t.st_title },
+              { id: 'work', label: `${t.roarme} · ${t.rm_work}`, icon: 'tasks' },
+              { id: 'stats', label: t.st_title, icon: 'chart' },
               null,
-              { id: 'rail', label: railWide ? t.railIcons : t.railNames },
+              { id: 'rail', label: railWide ? t.railIcons : t.railNames, icon: 'sidebar' },
             ])
             if (pick === 'work') setWorkOpen((v) => !v)
             else if (pick === 'stats') setStatsOpen(true)

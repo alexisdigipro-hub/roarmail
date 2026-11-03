@@ -41,14 +41,14 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
     e.preventDefault()
     const tag = (g: string) => ({ id: `tag:${g}`, label: t[`ct_g_${g}` as Key], checked: c.groups.includes(g) })
     const id = await window.roarmail.popMenu([
-      { id: 'write', label: t.ct_write },
-      { id: 'all', label: t.ct_allMail },
-      { id: 'copy', label: t.ad_copyAddress },
+      { id: 'write', label: t.ct_write, icon: 'compose' },
+      { id: 'all', label: t.ct_allMail, icon: 'target' },
+      { id: 'copy', label: t.ad_copyAddress, icon: 'link' },
       null,
       { label: t.mn_groups, sub: [{ id: 'vip', label: 'VIP', checked: c.vip }, null, tag('team'), tag('clients'), tag('crew')] },
       null,
       { id: 'company', label: `${t.ct_everyoneAt} @${c.email.split('@')[1] || ''}` },
-      { id: 'block', label: c.blocked ? t.unblockSender : t.blockSender },
+      { id: 'block', label: c.blocked ? t.unblockSender : t.blockSender, icon: 'block' },
     ])
     if (id === 'write') onWrite(c.email)
     else if (id === 'all') onAllMail(c.email)
@@ -60,8 +60,8 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
   }
   const bulkMenu = async () => {
     const id = await window.roarmail.popMenu([
-      { id: 'block', label: `${t.ct_blockAll} (${sel.length})` },
-      { id: 'vip', label: 'VIP' },
+      { id: 'block', label: `${t.ct_blockAll} (${sel.length})`, icon: 'block' },
+      { id: 'vip', label: 'VIP', icon: 'star' },
       { label: t.mn_groups, sub: TAGS.map((g) => ({ id: `tag:${g}`, label: t[`ct_g_${g}` as Key] })) },
     ])
     if (id) bulk(id)

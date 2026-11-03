@@ -42,14 +42,14 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: 
     e.preventDefault()
     const id = await window.roarmail.popMenu([
       { id: 'open', label: window.roarmail.platform === 'darwin' ? t.preview : t.open },
-      { id: 'save', label: t.fl_saveAs },
+      { id: 'save', label: t.fl_saveAs, icon: 'download' },
       { id: 'name', label: t.fl_copyName },
       null,
-      ...(onOpenMail ? [{ id: 'openMail', label: t.fi_openMail }] : []),
-      { id: 'mail', label: t.fi_mailWith },
-      { id: 'card', label: t.ct_card },
+      ...(onOpenMail ? [{ id: 'openMail', label: t.fi_openMail, icon: 'unread' }] : []),
+      { id: 'mail', label: t.fi_mailWith, icon: 'target' },
+      { id: 'card', label: t.ct_card, icon: 'person' },
       null,
-      { id: 'delMail', label: t.fi_delMail },
+      { id: 'delMail', label: t.fi_delMail, icon: 'trash' },
     ])
     if (id === 'open') window.roarmail.openAttachment(f.id)
     else if (id === 'save') window.roarmail.saveAttachment(f.id)
