@@ -211,7 +211,7 @@ const el = {
   ai_nokey: 'Βάλε το κλειδί σου στις Ρυθμίσεις > Roar Account.', ai_badkey: 'Το κλειδί δεν έγινε δεκτό. Έλεγξέ το στις Ρυθμίσεις > Roar Account.',
   pg_accounts: 'Λογαριασμοί', pg_signatures: 'Υπογραφές', pg_roarme: 'RoarMe', pg_general: 'Γενικά', pg_reading: 'Ανάγνωση', pg_composing: 'Σύνταξη',
   pg_notify: 'Ειδοποιήσεις', pg_search: 'Αναζήτηση', pg_theme: 'Θέμα', pg_list: 'Λίστα μηνυμάτων', pg_fonts: 'Γραμματοσειρές',
-  pg_privacy: 'Απόρρητο και ασφάλεια', pg_updates: 'Ενημερώσεις', pg_keys: 'Συντομεύσεις', pg_expert: 'Για προχωρημένους',
+  pg_privacy: 'Απόρρητο', pg_updates: 'Ενημερώσεις', pg_keys: 'Συντομεύσεις', pg_expert: 'Για προχωρημένους',
   sec_app: 'Η εφαρμογή', sec_inboxes: 'Εισερχόμενα', sec_reading: 'Κατά την ανάγνωση', sec_swipe: 'Σάρωση στη λίστα', sec_swipeNote: 'Με δύο δάχτυλα στο trackpad, πάνω σε ένα μήνυμα.',
   sec_attachments: 'Συνημμένα', sec_sending: 'Αποστολή', sec_composeNote: 'Υπογραφή, μορφοποίηση, προτεραιότητα και RoarTransfer είναι μέσα στο παράθυρο γραφής. Οι υπογραφές φτιάχνονται στις Υπογραφές.',
   sec_notifications: 'Ειδοποιήσεις', sec_sounds: 'Ήχοι', sec_badges: 'Αριθμοί αδιάβαστων', sec_searchWhere: 'Πού ψάχνει', sec_searchHow: 'Πώς ψάχνει',
@@ -249,7 +249,7 @@ const el = {
   fk_pdf: 'PDF', fk_image: 'Εικόνες', fk_video: 'Video', fk_audio: 'Ήχος', fk_script: 'Σενάρια', fk_doc: 'Κείμενα', fk_sheet: 'Πίνακες', fk_slides: 'Παρουσιάσεις', fk_archive: 'Συμπιεσμένα', fk_other: 'Άλλα',
   mn_sender: 'Αποστολέας', mn_groups: 'Ομάδες',
   err_certHostQ: 'Ο server δείχνει πιστοποιητικό για άλλο όνομα: {host}. Αν είναι ο server του παρόχου σου (π.χ. της εταιρείας hosting), χρησιμοποίησέ τον. Αν δεν τον ξέρεις, μην προχωρήσεις: μπορεί κάποιος στο δίκτυο να προσπαθεί να πάρει τον κωδικό σου.', err_certHostUse: 'Χρήση του', err_certHostType: 'Το πιστοποιητικό του server είναι για {host}. Αν είναι ο server του παρόχου σου, γράψ\'τον ως Server και ξαναδοκίμασε.',
-  pg_mail: 'Αλληλογραφία', pg_writing: 'Υπογραφές και πρότυπα', pg_look: 'Εμφάνιση', pg_about: 'Σχετικά με το RoarMail',
+  pg_mail: 'Mail', pg_writing: 'Σύνταξη', pg_look: 'Εμφάνιση', pg_about: 'Σχετικά',
   ru_none: 'Κανένας κανόνας ακόμη. Ένας κανόνας τακτοποιεί τα νέα μηνύματα μόλις έρθουν: τα μετακινεί, τα κάνει διαβασμένα, τους βάζει αστέρι ή τα αρχειοθετεί.',
   ru_new: 'Νέος κανόνας', ru_namePh: 'π.χ. Newsletters', ru_if: 'Αν', ru_all: 'ισχύουν όλα αυτά', ru_any: 'ισχύει ένα από αυτά', ru_then: 'Τότε',
   ru_from: 'Ο αποστολέας περιέχει', ru_to: 'Το Προς ή το Κοιν. περιέχει', ru_subject: 'Το θέμα περιέχει', ru_attachment: 'Έχει συνημμένο', ru_list: 'Η λίστα (List-Id) περιέχει',
@@ -265,7 +265,7 @@ const el = {
   inv_invite: 'Πρόσκληση', inv_cancelled: 'Ακυρώθηκε', inv_cancelledNote: 'Ο διοργανωτής ακύρωσε αυτή την εκδήλωση.', inv_by: 'Διοργανωτής', inv_allDay: 'Ολοήμερο',
   inv_accept: 'Αποδοχή', inv_maybe: 'Ίσως', inv_decline: 'Απόρριψη', inv_add: 'Προσθήκη στο ημερολόγιο', inv_open: 'Άνοιγμα στο ημερολόγιο',
   inv_accepted: 'Αποδέχτηκες', inv_tentative: 'Απάντησες «ίσως»', inv_declined: 'Απέρριψες', inv_sent: 'Η απάντηση στάλθηκε στο', inv_noOrganizer: 'Η πρόσκληση δεν έχει διοργανωτή για να του απαντήσεις.',
-  mm_more: 'Περισσότερα', mm_print: 'Εκτύπωση…', mm_pdf: 'Αποθήκευση ως PDF…', mm_eml: 'Αποθήκευση ως .eml…',
+  mm_keep: 'Εκτύπωση ή αποθήκευση', mm_more: 'Περισσότερα', mm_print: 'Εκτύπωση…', mm_pdf: 'Αποθήκευση ως PDF…', mm_eml: 'Αποθήκευση ως .eml…',
 }
 const en: typeof el = {
   snoozed: 'Snoozed', snoozeIt: 'Snooze', snoozeUntil: 'Snooze until…', snoozedToast: 'Snoozed until', setAside: 'Set aside',
@@ -479,7 +479,7 @@ const en: typeof el = {
   ai_nokey: 'Add your key in Settings > Roar Account.', ai_badkey: 'The key was not accepted. Check it in Settings > Roar Account.',
   pg_accounts: 'Accounts', pg_signatures: 'Signatures', pg_roarme: 'RoarMe', pg_general: 'General', pg_reading: 'Reading', pg_composing: 'Composing',
   pg_notify: 'Notifications', pg_search: 'Search', pg_theme: 'Theme', pg_list: 'Message list', pg_fonts: 'Fonts',
-  pg_privacy: 'Privacy and security', pg_updates: 'Updates', pg_keys: 'Shortcuts', pg_expert: 'Advanced',
+  pg_privacy: 'Privacy', pg_updates: 'Updates', pg_keys: 'Shortcuts', pg_expert: 'Advanced',
   sec_app: 'The app', sec_inboxes: 'Inboxes', sec_reading: 'While reading', sec_swipe: 'Swiping in the list', sec_swipeNote: 'Two fingers on the trackpad, over a message.',
   sec_attachments: 'Attachments', sec_sending: 'Sending', sec_composeNote: 'Signature, formatting, priority and RoarTransfer are in the writing window. Signatures are made in Signatures.',
   sec_notifications: 'Notifications', sec_sounds: 'Sounds', sec_badges: 'Unread numbers', sec_searchWhere: 'Where it looks', sec_searchHow: 'How it looks',
@@ -517,7 +517,7 @@ const en: typeof el = {
   fk_pdf: 'PDF', fk_image: 'Pictures', fk_video: 'Video', fk_audio: 'Audio', fk_script: 'Scripts', fk_doc: 'Documents', fk_sheet: 'Sheets', fk_slides: 'Slides', fk_archive: 'Archives', fk_other: 'Other',
   mn_sender: 'Sender', mn_groups: 'Groups',
   err_certHostQ: 'The server shows a certificate for another name: {host}. If that is your provider\'s server (a hosting company), use it. If you do not know it, stop: someone on the network may be trying to get your password.', err_certHostUse: 'Use', err_certHostType: 'The server\'s certificate is for {host}. If that is your provider\'s server, type it as the Server and try again.',
-  pg_mail: 'Mail', pg_writing: 'Signatures and templates', pg_look: 'Appearance', pg_about: 'About RoarMail',
+  pg_mail: 'Mail', pg_writing: 'Writing', pg_look: 'Appearance', pg_about: 'About',
   ru_none: 'No rules yet. A rule sorts new mail as it arrives: moves it, marks it read, stars it or archives it.',
   ru_new: 'New Rule', ru_namePh: 'e.g. Newsletters', ru_if: 'If', ru_all: 'all of these hold', ru_any: 'any of these holds', ru_then: 'Then',
   ru_from: 'From contains', ru_to: 'To or Cc contains', ru_subject: 'Subject contains', ru_attachment: 'Has an attachment', ru_list: 'Mailing list (List-Id) contains',
@@ -533,7 +533,7 @@ const en: typeof el = {
   inv_invite: 'Invitation', inv_cancelled: 'Cancelled', inv_cancelledNote: 'The organizer cancelled this event.', inv_by: 'Organizer', inv_allDay: 'All day',
   inv_accept: 'Accept', inv_maybe: 'Maybe', inv_decline: 'Decline', inv_add: 'Add to Calendar', inv_open: 'Open in Calendar',
   inv_accepted: 'You accepted', inv_tentative: 'You said maybe', inv_declined: 'You declined', inv_sent: 'Answer sent to', inv_noOrganizer: 'This invitation has no organizer to answer.',
-  mm_more: 'More', mm_print: 'Print…', mm_pdf: 'Save as PDF…', mm_eml: 'Save as .eml…',
+  mm_keep: 'Print or save', mm_more: 'More', mm_print: 'Print…', mm_pdf: 'Save as PDF…', mm_eml: 'Save as .eml…',
 }
 
 // Settings > General > Language: the choice is kept here too, so it applies before the settings arrive
