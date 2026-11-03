@@ -474,7 +474,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
             <span className="sep" />
             {/* the paperclip offers both: attach to the message, or send through RoarTransfer as one link (29 Oct 2026) */}
             <span className="attach-wrap">
-              <button className={`tool ${attachMenu ? 'on-filter' : ''}`} title={t.attach} onClick={() => setAttachMenu((v) => !v)}><Icon name="clip" /></button>
+              <button className={`tool ${attachMenu ? 'on-filter' : ''} ${rt.length ? 'uploading' : ''}`} title={t.attach} onClick={() => setAttachMenu((v) => !v)}><Icon name="clip" /></button>
               {attachMenu && (
                 <div className="attach-menu" onMouseLeave={() => setAttachMenu(false)}>
                   <button onClick={async () => { setAttachMenu(false); const p = await window.roarmail.pickFiles(); if (p.length) { setFiles([...files, ...p]); dirty.current = true } }}>
@@ -671,6 +671,27 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
                 <button className="pill small ghost danger" onClick={() => close('discard')}>{t.discard}</button>
                 <button className="pill small primary" autoFocus onClick={() => close('save')}>{t.saveDraft}</button>
               </div>
+            </div>
+          </div>
+        )}
+        {/* RoarTransfer / FastTransfer going up: a card in the middle of the message with each file's bar, so it is plain
+            that something is happening (Alex, 3 Nov 2026: "it vanishes, then the file appears a while later") */}
+        {rt.length > 0 && (
+          <div className="rt-progress" role="status" aria-live="polite">
+            <div className="rt-card">
+              <div className="rt-title"><span className="rt-spin" /><b>{roarReady ? 'RoarTransfer' : 'FastTransfer'}</b>
+                <span className="muted small">{rt.every((f) => !(f in up)) ? t.rt_making : t.rt_up}</span></div>
+              {rt.map((f) => {
+                const p = Math.round((up[f] ?? (f in up ? 0 : 1)) * 100)
+                return (
+                  <div className="rt-file" key={f}>
+                    <div className="rt-line"><span className="ellipsis">{f.split(/[\\/]/).pop()}</span><span className="muted small">{p}%</span>
+                      <button className="tool small" title={t.cancel} onClick={() => window.roarmail.roarmeCancelTransfer(f)}><Icon name="close" size={12} /></button></div>
+                    <div className="rt-bar"><i style={{ width: `${p}%` }} /></div>
+                  </div>
+                )
+              })}
+              <p className="muted small" style={{ margin: '8px 0 0' }}>{t.rt_keepWriting}</p>
             </div>
           </div>
         )}
