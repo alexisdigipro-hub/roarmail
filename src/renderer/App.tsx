@@ -240,7 +240,7 @@ export default function App() {
       const token = await api.act(ids, action, folderId)
       if (token) {
         actionSound(action === 'archive' ? 'archive' : action === 'trash' ? 'trash' : 'archive')
-        const word = action === 'archive' ? t.archived : action === 'move' ? t.moved : action === 'junk' ? t.junked : folderRole === 'trash' ? t.deleted : t.trashed
+        const word = action === 'archive' ? t.archived : action === 'move' ? t.moved : action === 'junk' ? (folderRole === 'spam' ? t.trashed : t.junked) : folderRole === 'trash' ? t.deleted : t.trashed
         flash({ text: targets.length > 1 ? `${word} · ${targets.length}` : word, undo: () => { api.undo(token).then((ok) => { if (ok) { loadRows(); setSelected(keys) } }) } })
       }
     } catch (e) { flash({ text: clean(e) }); loadRows() }
