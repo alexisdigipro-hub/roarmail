@@ -140,6 +140,14 @@ export default function App() {
     else if (e.type === 'open') { setScope({ accountId: 'all', role: 'inbox' }); setTimeout(() => setSelected([e.messageId]), 80) }
     if (e.type === 'compose') setCompose({ kind: 'new', to: e.to, subject: e.subject, body: e.body })
     // a message window sent or saved (3 Nov 2026): its toast shows here, with Undo send
+    // the Settings window changed something; a panel window asks something of this one (3 Nov 2026)
+    if (e.type === 'settings') api.settings().then((x) => { setPrefs(x); applyLook(x) }).catch(() => {})
+    if (e.type === 'panelAction') {
+      const a = e.action
+      if (a.do === 'scope') setScope({ accountId: a.accountId, ...(a.role ? { role: a.role } : {}), ...(a.person ? { person: a.person } : {}) })
+      else if (a.do === 'addAccount') setAdding(true)
+      else if (a.do === 'contacts') setContactsAt(a.email || '')
+    }
     if (e.type === 'composeDone') { if (e.outboxId) sentRef.current(e.outboxId, e.at); else if (e.saved) flash({ text: t.draftSaved, ms: 2600 }) }
     if (e.type === 'outbox') loadOutbox()
     if (e.type === 'opFailed') flash({ text: `${t.opFailed} (${e.error})` })
@@ -518,6 +526,14 @@ export default function App() {
     } catch (e) { flash({ text: clean(e) }); loadRows() }
   }
 
+  // on the desktop Settings, Files, Contacts and Statistics open in windows of their own too (Alex, 3 Nov 2026)
+  useEffect(() => {
+    if (!api.panelWindow) return
+    if (settingsOpen) { api.panelWindow('settings', settingsAt); setSettingsOpen(false); setSettingsAt(null) }
+    if (filesOpen) { api.panelWindow('files'); setFilesOpen(false) }
+    if (statsOpen) { api.panelWindow('stats'); setStatsOpen(false) }
+    if (contactsAt !== null) { api.panelWindow('contacts', { email: contactsAt || undefined }); setContactsAt(null) }
+  }, [settingsOpen, filesOpen, statsOpen, contactsAt])
   // on the desktop every new message opens in a window of its own (Alex, 3 Nov 2026); the web demo keeps it inside
   useEffect(() => {
     if (!compose || !api.composeWindow) return

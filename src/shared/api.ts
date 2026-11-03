@@ -210,6 +210,12 @@ export interface Security {
 /** a block in Settings > Privacy: an address, a sender's name (from any address) or a whole domain */
 export interface BlockItem { kind: 'email' | 'name' | 'domain'; value: string; label: string }
 
+/** what a panel window asks of the main window */
+export type PanelAction =
+  | { do: 'scope'; accountId: string; person?: string; role?: FolderRole }
+  | { do: 'addAccount' }
+  | { do: 'contacts'; email?: string }
+
 /** the Roar Account's sync of RoarMail's setup (Settings > Roar Account) */
 export interface SyncState { on: boolean; signedIn: boolean; at: number; error: string; /** accounts that came from another computer and need their password here */ added?: number }
 export type AiProvider = 'roar' | 'claude' | 'openai'
@@ -441,6 +447,12 @@ export type MailEvent =
   | { type: 'composeCloseAsk' }
   /** the Roar Account's sync changed state (Settings > Roar Account) */
   | { type: 'roarSync' }
+  /** a setting changed (in the Settings window): every window reads them again */
+  | { type: 'settings' }
+  /** a panel window (Settings, Files, Contacts, Statistics) asks the main window to do something */
+  | { type: 'panelAction'; action: PanelAction }
+  /** an open panel window gets a new starting point (a rule from a sender, a contact) */
+  | { type: 'panelSeed'; seed: unknown }
   /** a message window sent or saved: the main window shows its toast (Undo send, Draft saved) */
   | { type: 'composeDone'; outboxId?: string; at?: number; saved?: boolean }
   | { type: 'outbox' }
@@ -636,6 +648,10 @@ export interface MailApi {
   ai?(req: import('./aiPrompt').AiRequest): Promise<string>
   /** a new message in a window of its own (3 Nov 2026; the desktop app only, the web demo keeps it in the window) */
   composeWindow?(seed: unknown): Promise<void>
+  /** Settings, Files, Contacts, Statistics in a window of their own; the seed is where to start */
+  panelWindow?(kind: 'settings' | 'files' | 'contacts' | 'stats', seed?: unknown): Promise<void>
+  /** from a panel window: the main window does it */
+  toMain?(action: PanelAction): Promise<void>
   composeSeed?(id: string): Promise<unknown>
   composeClose?(): Promise<void>
   composeDone?(done: { outboxId?: string; at?: number; saved?: boolean }): Promise<void>

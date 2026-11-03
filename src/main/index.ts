@@ -52,6 +52,60 @@ const senderWin = (e: Electron.IpcMainInvokeEvent) => BrowserWindow.fromWebConte
 const composeSeeds = new Map<string, unknown>()
 const composeWins = new Set<BrowserWindow>()
 const COMPOSE_FILE = () => path.join(app.getPath('userData'), 'compose.json')
+/*
+ * Settings, Files, Contacts and Statistics in windows of their own too (Alex, 3 Nov 2026: "everything that pops up is
+ * stuck to the background; unstick them all"): one window of each, moved and sized freely, its size remembered; what
+ * they ask of the main window (show someone's mail, add an account) goes to it as a panelAction event.
+ */
+const PANEL_SIZE: Record<string, { width: number; height: number }> = {
+  settings: { width: 1000, height: 740 }, files: { width: 1180, height: 800 }, contacts: { width: 1180, height: 800 }, stats: { width: 920, height: 720 },
+}
+const panelWins = new Map<string, BrowserWindow>()
+const PANEL_FILE = () => path.join(app.getPath('userData'), 'panels.json')
+function openPanelWindow(kind: string, seed: unknown) {
+  if (!PANEL_SIZE[kind]) return
+  const open = panelWins.get(kind)
+  if (open && !open.isDestroyed()) {
+    // already open: it comes forward, and a new starting point (a rule, a contact) is handed to it
+    if (seed) open.webContents.send('mail:event', { type: 'panelSeed', seed })
+    if (open.isMinimized()) open.restore()
+    open.show(); open.focus()
+    return
+  }
+  const id = randomBytes(8).toString('hex')
+  composeSeeds.set(id, seed ?? null)
+  let size = PANEL_SIZE[kind]
+  try { const b = JSON.parse(fs.readFileSync(PANEL_FILE(), 'utf8'))[kind]; if (b?.width >= 600 && b?.height >= 440) size = { width: b.width, height: b.height } } catch { /* the default */ }
+  const at = win && !win.isDestroyed() ? (() => { const b = win.getBounds(); return { x: Math.round(b.x + (b.width - size.width) / 2), y: Math.round(b.y + Math.max(30, (b.height - size.height) / 2)) } })() : {}
+  const mac = process.platform === 'darwin'
+  const w = new BrowserWindow({
+    ...size, ...at, minWidth: 600, minHeight: 440, show: false, title: 'RoarMail',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1e23' : '#eceef1',
+    ...(mac
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 14 } }
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: nativeTheme.shouldUseDarkColors ? { color: '#1b1e23', symbolColor: '#eef0f3', height: 36 } : { color: '#eceef1', symbolColor: '#1b1f25', height: 36 } }),
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
+  })
+  panelWins.set(kind, w)
+  const page = pathToFileURL(SCREENS()).href
+  w.loadURL(`${page}#panel=${kind}&id=${id}`).catch(() => {})
+  w.once('ready-to-show', () => w.show())
+  w.webContents.setWindowOpenHandler(({ url }) => { openSafe(url); return { action: 'deny' } })
+  w.webContents.on('will-frame-navigate', (e) => { if (!e.isMainFrame && !/^about:(srcdoc|blank)/.test(e.url)) e.preventDefault() })
+  w.webContents.on('will-navigate', (e, url) => { if (url.split('#')[0] !== page) { e.preventDefault(); if (!url.startsWith('file:')) openSafe(url) } })
+  editMenu(w)
+  w.on('resized', () => {
+    try {
+      if (w.isDestroyed() || w.isMaximized() || w.isFullScreen()) return
+      let all: Record<string, unknown> = {}
+      try { all = JSON.parse(fs.readFileSync(PANEL_FILE(), 'utf8')) } catch { /* first */ }
+      const b = w.getBounds(); all[kind] = { width: b.width, height: b.height }
+      fs.writeFileSync(PANEL_FILE(), JSON.stringify(all))
+    } catch { /* next time */ }
+  })
+  w.on('closed', () => { if (panelWins.get(kind) === w) panelWins.delete(kind); composeSeeds.delete(id) })
+}
+
 function openComposeWindow(seed: unknown) {
   const id = randomBytes(8).toString('hex')
   composeSeeds.set(id, seed)
@@ -675,7 +729,7 @@ app.whenReady().then(() => {
   handle('mail:setSetting', (_e, k, v) => {
     // the downloads folder is only one the person chose in the folder picker (or none)
     if (k === 'downloadsFolder' && v && v !== picked) return
-    mail.setSetting(k, v); if (k === 'syncSetup') roarAccount?.nudge(); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v); if (k === 'dockMode') applyDock(v) })
+    mail.setSetting(k, v); emit({ type: 'settings' }); if (k === 'syncSetup') roarAccount?.nudge(); if (k === 'appearance') applyAppearance(v); if (k === 'runAtLogin') applyLogin(!!v); if (k === 'dockMode') applyDock(v) })
   handle('mail:snooze', (_e, ids, until) => mail.snooze(ids, until))
   handle('mail:snoozed', () => mail.snoozed())
   handle('mail:unsnooze', (_e, id) => mail.unsnooze(id))
@@ -761,6 +815,10 @@ app.whenReady().then(() => {
   // a new message in its own window (3 Nov 2026)
   handle('mail:composeWindow', (_e, seed) => { openComposeWindow(seed) })
   handle('mail:composeSeed', (_e, id) => composeSeeds.get(String(id)) ?? null)
+  // Settings, Files, Contacts, Statistics in windows of their own (3 Nov 2026)
+  handle('mail:panelWindow', (_e, kind, seed) => { openPanelWindow(String(kind), seed) })
+  // what a panel window asks of the main window: it comes forward and does it
+  handle('mail:toMain', (_e, action) => { if (!win || win.isDestroyed()) createWindow(); win?.show(); win?.focus(); win?.webContents.send('mail:event', { type: 'panelAction', action }) })
   handle('mail:composeClose', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w && w !== win) { (w as any).__allowClose?.(); w.close() } })
   // what the message window did, told to the main window (its toasts: sent with Undo, draft saved)
   handle('mail:composeDone', (_e, done) => { win?.webContents.send('mail:event', { type: 'composeDone', outboxId: done?.outboxId || undefined, at: typeof done?.at === 'number' ? done.at : undefined, saved: !!done?.saved }) })

@@ -136,6 +136,8 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any>; rescue: (wh
   aiSetKey: call('aiSetKey') as MailApi['aiSetKey'],
   ai: call('ai') as MailApi['ai'],
   composeWindow: call('composeWindow') as MailApi['composeWindow'],
+  panelWindow: call('panelWindow') as MailApi['panelWindow'],
+  toMain: call('toMain') as MailApi['toMain'],
   composeSeed: call('composeSeed') as MailApi['composeSeed'],
   composeClose: call('composeClose') as MailApi['composeClose'],
   composeDone: call('composeDone') as MailApi['composeDone'],

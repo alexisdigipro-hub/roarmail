@@ -483,6 +483,12 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
                   <button className="rt" onClick={() => { setAttachMenu(false); transferNow() }}>
                     <Icon name="roarUp" size={16} /><span><b>{roarReady ? 'RoarTransfer' : 'FastTransfer'}</b><small>{roarReady ? t.at_rtHint : t.at_fastHint}</small></span>
                   </button>
+                  {/* not signed in: RoarTransfer is one sign-in away (Alex, 3 Nov 2026) */}
+                  {!roarReady && window.roarmail.panelWindow && (
+                    <button onClick={() => { setAttachMenu(false); window.roarmail.panelWindow!('settings', { page: 'roar' }) }}>
+                      <Icon name="person" size={16} /><span><b>{t.at_signIn}</b><small>{t.at_signInHint}</small></span>
+                    </button>
+                  )}
                 </div>
               )}
             </span>
@@ -656,12 +662,15 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
         </div>
         {later && <TimePicker title={t.sendLater} onClose={() => setLater(false)} onPick={(at) => { setLater(false); if (at) send(at) }} />}
         {asking && (
-          <div className="ask">
-            <p>{t.discardQ}</p>
-            <div className="row end">
-              <button className="pill small ghost" onClick={() => setAsking(false)}>{t.keepWriting}</button>
-              <button className="pill small ghost danger" onClick={() => close('discard')}>{t.discard}</button>
-              <button className="pill small primary" autoFocus onClick={() => close('save')}>{t.saveDraft}</button>
+          // in the middle of the message, over everything, so it is seen (Alex, 3 Nov 2026: at the bottom nobody saw it)
+          <div className="ask" onMouseDown={(e) => { if (e.target === e.currentTarget) setAsking(false) }}>
+            <div className="ask-card">
+              <p>{t.discardQ}</p>
+              <div className="row end">
+                <button className="pill small ghost" onClick={() => setAsking(false)}>{t.keepWriting}</button>
+                <button className="pill small ghost danger" onClick={() => close('discard')}>{t.discard}</button>
+                <button className="pill small primary" autoFocus onClick={() => close('save')}>{t.saveDraft}</button>
+              </div>
             </div>
           </div>
         )}
