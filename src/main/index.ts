@@ -837,7 +837,7 @@ app.whenReady().then(() => {
     const r = await dialog.showOpenDialog(senderWin(e)!, { properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : r.filePaths
   })
-  handle('mail:openAttachment', async (_e, id) => {
+  handle('mail:openAttachment', async (e, id) => {
     const a = await mail.attachment(id)
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roarmail-'))
     const file = path.join(dir, a.filename)
@@ -846,7 +846,9 @@ app.whenReady().then(() => {
     // a program or script is never started from a mail: it is shown in its folder, marked as from the internet
     if (!SAFE_OPEN.test(a.filename)) { shell.showItemInFolder(file); return }
     // Mac: shown in Quick Look over the window (29 Oct 2026), which also has a button to open it in its app
-    if (process.platform === 'darwin' && win) win.previewFile(file, a.filename)
+    // Quick Look over the window that asked (3 Nov 2026: from the Files window it opened behind, over the main one)
+    const over = senderWin(e)
+    if (process.platform === 'darwin' && over) over.previewFile(file, a.filename)
     else await shell.openPath(file)
   })
   // Settings > General > Downloads folder: saved straight there (a free name), or asked every time

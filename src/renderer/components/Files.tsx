@@ -87,9 +87,10 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: 
           {!res ? <div className="stats-wait"><div className="spinner" /></div>
             : !res.files.length ? <p className="muted ct-empty">{q || kind ? t.fi_none : t.fi_empty}</p>
             : res.files.map((f) => (
-              <div key={f.id} className="fi-row" onContextMenu={(e) => menu(e, f)} onDoubleClick={() => window.roarmail.openAttachment(f.id)}>
+              <div key={f.id} className="fi-row" onContextMenu={(e) => menu(e, f)}>
                 <span className={`fi-ico k-${f.kind}`}><Icon name={ICON[f.kind]} size={16} /></span>
-                <button type="button" className="fi-main" title={f.filename} onClick={() => window.roarmail.openAttachment(f.id)}>
+                {/* a click opens the mail the file came in (Alex, 3 Nov 2026); the file itself from the ⋯ (Open) */}
+                <button type="button" className="fi-main" title={onOpenMail ? t.fi_openMail : f.filename} onClick={() => onOpenMail ? onOpenMail(f) : window.roarmail.openAttachment(f.id)}>
                   <b className="ellipsis">{f.filename}</b>
                   <small className="muted ellipsis">{f.fromName || f.fromEmail} · {f.subject || t.noSubject}</small>
                 </button>
