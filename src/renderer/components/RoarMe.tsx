@@ -47,9 +47,29 @@ export function RoarMeAccount({ compact }: { compact?: boolean }) {
       </div>
     )
   }
+  // Sign in with Roar Account: waiting for Allow in the browser
+  if (status.connecting && !status.signedIn) {
+    const c = status.connecting
+    return (
+      <div className="roarme-card">
+        <div className="row roarme-head"><b className="roar-wm"><span>ROAR</span> ACCOUNT</b><span className="muted small grow">{c.expired ? t.rm_connExpired : t.rm_connWait}</span></div>
+        <div className="connect-code">{c.code}</div>
+        <div className="row end">
+          <button type="button" className="pill small ghost" onClick={() => run(() => api().roarmeConnect!(true))}>{t.cancel}</button>
+          {c.expired
+            ? <button type="button" className="pill primary" disabled={busy} onClick={() => run(() => api().roarmeConnect!())}>{t.rm_connAgain}</button>
+            : <button type="button" className="pill small" onClick={() => api().roarmeConnectOpen!()}>{t.rm_connOpen}</button>}
+        </div>
+      </div>
+    )
+  }
   return (
     <form className="roarme-card" onSubmit={(e) => { e.preventDefault(); status.needsMfa ? run(() => api().roarmeVerify(code)) : run(() => api().roarmeSignIn(email, pass)) }}>
       <div className="row roarme-head"><b className="roar-wm"><span>ROAR</span> ACCOUNT</b><span className="muted small grow">{t.rm_why}</span></div>
+      {!status.needsMfa && api().roarmeConnect && <>
+        <button type="button" className="pill primary connect-btn" disabled={busy} onClick={() => run(() => api().roarmeConnect!())}>{t.rm_connect}</button>
+        <div className="connect-or muted small">{t.rm_orEmail}</div>
+      </>}
       {status.needsMfa ? (
         <label>{t.rm_code}<input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={code} onChange={(e) => setCode(e.target.value)} placeholder="123 456" /></label>
       ) : (

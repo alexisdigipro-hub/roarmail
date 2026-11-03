@@ -1,7 +1,7 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
-import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, PromoCount, Rule, Settings, SwipeAction } from '../shared/api'
+import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, PromoCount, RoarProject, Rule, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
 import { ICON_NAMES, Icon, folderIcon, iconPng } from './components/Icon'
 import { arrive, leave } from './motion'
@@ -27,7 +27,7 @@ const keyOf = (r: MessageRow) => r.threadId || r.id
 // the filter buttons above the list, like Airmail's
 const FILTERS: [ListFilter, string, Key][] = [['unread', 'unread', 'fl_unread'], ['flagged', 'star', 'fl_flagged'], ['attachments', 'clip', 'fl_attachments'], ['threads', 'chat', 'fl_threads'], ['promos', 'funnel', 'fl_promos']]
 /** the Inbox itself (an account's, or all of them), where Promotions apart takes the promotions out (1 Nov 2026) */
-const inboxOf = (s: ListScope) => !s.folderId && !s.person && (s.role || 'inbox') === 'inbox'
+const inboxOf = (s: ListScope) => !s.folderId && !s.person && !s.project && (s.role || 'inbox') === 'inbox'
 // Airmail's sort menu
 const SORTS: [ListSort, Key][] = [['date', 'so_date'], ['sender', 'so_sender'], ['subject', 'so_subject'], ['unread', 'so_unread'], ['attachments', 'so_attachments'], ['account', 'so_account']]
 const dayKey = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
@@ -39,6 +39,8 @@ export default function App() {
   const [accounts, setAccounts] = useState<Account[] | null>(null)
   const [scope, setScope] = useState<ListScope>({ accountId: 'all', role: 'inbox' })
   const [folders, setFolders] = useState<Folder[]>([])
+  // the Roar Account's projects with senders (3 Nov 2026): a place in the side list each
+  const [projects, setProjects] = useState<RoarProject[]>([])
   const [rows, setRows] = useState<MessageRow[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [anchor, setAnchor] = useState<string | null>(null)
@@ -92,6 +94,7 @@ export default function App() {
     const s = scopeRef.current
     if (s.accountId === 'all') api.unifiedFolders().then(setFolders)
     else api.folders(s.accountId).then(setFolders)
+    api.roarProjects?.().then(setProjects).catch(() => {})
   }, [])
   // only the newest request may fill the list, so a slow answer never replaces a folder just opened
   const rowsAsked = useRef(0)
@@ -192,7 +195,7 @@ export default function App() {
 
   const list = results ?? rows
   // new mail in the same list (or rows back from Undo) drops in; another folder brings its whole list in instead
-  const listKey = `${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${results ? 'found' : ''}`
+  const listKey = `${scope.accountId}|${scope.role || ''}|${scope.folderId || ''}|${scope.filter || ''}|${scope.person || ''}|${scope.project || ''}|${results ? 'found' : ''}`
   const shown = useRef<{ key: string; keys: Set<string> }>({ key: '', keys: new Set() })
   useLayoutEffect(() => {
     const keys = new Set(list.map(keyOf))
@@ -619,11 +622,12 @@ export default function App() {
   const title = useMemo(() => {
     if (results) return t.searchResults
     if (scope.filter === 'promos' && inboxOf(scope)) return t.pm_title
+    if (scope.project) return projects.find((p) => p.id === scope.project)?.name || t.pj_title
     if (scope.person) return list[0] ? (list.find((r) => r.fromEmail === scope.person)?.fromName || scope.person) : scope.person
     if (scope.folderId) { const f = folders.find((x) => x.id === scope.folderId); return f ? (f.role ? t[f.role as Key] : f.name) : '' }
     if (scope.accountId === 'all') return t[`all_${scope.role || 'inbox'}` as Key] || t.allInboxes
     return t.inbox
-  }, [scope, folders, results, list])
+  }, [scope, folders, results, list, projects])
 
   const busy = Object.values(syncing).some(Boolean)
   // pull down to refresh (Alex, 29 Oct: "swipe down on the messages and it loads"): at the top of the list, two fingers
@@ -781,13 +785,23 @@ export default function App() {
               <span className="grow ellipsis">{t[`all_${f.role}` as Key] || t[f.role as Key]}</span>
             </label>
           ) : (
-            <button key={f.id} className={`folder ${scope.role === f.role ? 'on' : ''} ${dropOn === f.id ? 'drop' : ''}`} style={{ paddingLeft: 14 }}
+            <button key={f.id} className={`folder ${scope.role === f.role && !scope.project ? 'on' : ''} ${dropOn === f.id ? 'drop' : ''}`} style={{ paddingLeft: 14 }}
               onClick={() => setScope({ accountId: 'all', role: f.role! })} {...dropTo(f)}>
               <Icon name={folderIcon(f.role)} size={16} />
               <span className="grow ellipsis">{t[`all_${f.role}` as Key] || t[f.role as Key]}</span>
               {counter(f) > 0 && <span className={`count ${(f.role === 'inbox' ? prefs.inboxCounter : prefs.folderCounter) === 'total' ? 'total' : ''}`}>{counter(f)}</span>}
             </button>
           ))}
+          {!editUnified && projects.length > 0 && <>
+            <div className="folder-group muted small">{t.pj_title}</div>
+            {projects.map((p) => (
+              <button key={p.id} className={`folder ${scope.project === p.id ? 'on' : ''}`} style={{ paddingLeft: 14 }} title={p.senders.join(', ')}
+                onClick={() => setScope({ accountId: 'all', project: p.id })}>
+                <span className="pj-dot" style={{ background: p.color }} />
+                <span className="grow ellipsis">{p.name}</span>
+              </button>
+            ))}
+          </>}
           </div>
         </aside>
       )}

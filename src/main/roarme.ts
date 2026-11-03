@@ -47,6 +47,8 @@ function vaultStorage() {
 export class RoarMe {
   private sb: SupabaseClient
   private me: RoarPerson | null = null
+  // Sign in with Roar Account (3 Nov 2026): the code shown, its secret, the poll
+  private link: { code: string; url: string; secret: string; until: number; expired?: boolean; timer?: NodeJS.Timeout } | null = null
 
   constructor(private onChange: () => void) {
     this.sb = createClient(URL, KEY, {
@@ -65,7 +67,8 @@ export class RoarMe {
   async status(): Promise<RoarMeStatus> {
     const { data } = await this.sb.auth.getSession()
     const user = data.session?.user
-    if (!user) return { signedIn: false, needsMfa: false }
+    const connecting = this.link ? { code: this.link.code, url: this.link.url, expired: !!this.link.expired } : undefined
+    if (!user) return { signedIn: false, needsMfa: false, connecting }
     const aal = await this.sb.auth.mfa.getAuthenticatorAssuranceLevel()
     const needsMfa = aal.data?.nextLevel === 'aal2' && aal.data?.currentLevel !== 'aal2'
     if (needsMfa) return { signedIn: true, needsMfa: true, email: user.email }
@@ -102,6 +105,44 @@ export class RoarMe {
     if (aal.data?.nextLevel === 'aal2' && aal.data?.currentLevel !== 'aal2') return null
     return { sb: this.sb, userId: s.user.id, token: s.access_token }
   }
+
+  /** Sign in with Roar Account: ask roar-connect for a code, open themadlions.com/account/?connect=CODE, wait for Allow.
+   *  The answer is a one-time sign-in token, traded here for RoarMail's own session (nothing else leaves the computer). */
+  async connect(cancel = false): Promise<RoarMeStatus> {
+    if (this.link?.timer) clearInterval(this.link.timer)
+    this.link = null
+    if (cancel) { this.onChange(); return this.status() }
+    const r = await fetch(`${URL}/functions/v1/roar-connect`, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ do: 'start', app: 'roarmail' }) })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || !j.code) throw new Error(j.error || 'roarme-connect')
+    const link = { code: j.code as string, url: j.url as string, secret: j.secret as string, until: Date.now() + 10 * 60e3 } as NonNullable<RoarMe['link']>
+    this.link = link
+    let busy = false
+    link.timer = setInterval(async () => {
+      if (busy || this.link !== link) return
+      busy = true
+      try {
+        if (Date.now() > link.until) throw new Error('expired')
+        const p = await fetch(`${URL}/functions/v1/roar-connect`, { method: 'POST', headers: { apikey: KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ do: 'poll', code: link.code, secret: link.secret }) })
+        const a = await p.json().catch(() => ({}))
+        if (a.expired) throw new Error('expired')
+        if (a.token_hash) {
+          clearInterval(link.timer)
+          const { error } = await this.sb.auth.verifyOtp({ type: 'magiclink', token_hash: a.token_hash })
+          this.link = null
+          if (error) throw error
+          this.me = null
+          this.onChange()
+        }
+      } catch (e) {
+        if (this.link === link) { clearInterval(link.timer); link.expired = true; this.onChange() }
+      } finally { busy = false }
+    }, 2000)
+    shell.openExternal(link.url)
+    this.onChange()
+    return this.status()
+  }
+  async connectOpen() { if (this.link && !this.link.expired) await shell.openExternal(this.link.url) }
 
   async signOut() {
     await this.sb.auth.signOut({ scope: 'local' }).catch(() => {})

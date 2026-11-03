@@ -23,7 +23,7 @@ import { fieldLike, readSignature, type CardFields } from './contacts'
 import { attendeeFor, buildReply, readInvite } from './ics'
 import { PERSONAL, baseDomain, blockNameKey, blockableDomain, blockableName, emailDomain, shield } from './shield'
 import type {
-  Account, AccountPatch, Action, Address, BlockItem, Contact, ContactFull, ContactPatch, Draft, MailFile, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
+  RoarProject, Account, AccountPatch, Action, Address, BlockItem, Contact, ContactFull, ContactPatch, Draft, MailFile, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   MailStats, PromoCount, Rule, ServerConfig, Settings, Signature, SnoozedItem, Template,
 } from '../shared/api'
 
@@ -1419,10 +1419,12 @@ export class MailService {
     // Promotions (1 Nov 2026): the promos filter shows conversations with any; with Promotions apart the Inbox leaves out
     // the conversations that are nothing but promotions (a real person's reply in one keeps it there)
     const s = this.settings()
-    const apart = s.promosApart && !who && !scope.folderId && (scope.role || 'inbox') === 'inbox' && scope.filter !== 'promos'
+    const apart = s.promosApart && !who && !scope.project && !scope.folderId && (scope.role || 'inbox') === 'inbox' && scope.filter !== 'promos'
     const promoCol = scope.filter === 'promos' || apart ? `, sum(${this.promoSql(s)}) as promo_n` : ''
     const promos = scope.filter === 'promos' ? 'and promo_n > 0' : apart ? 'and promo_n < n' : ''
-    const where = (scope.role === 'waiting' && !who && !scope.folderId)
+    const where = scope.project && !who
+      ? `${this.projectSql(scope.project)} ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
+      : (scope.role === 'waiting' && !who && !scope.folderId)
       ? `${this.waitingSql()} ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
       : who
       ? `(m.from_email = @who or instr(lower(m.to_json), @whoq) > 0 or instr(lower(m.cc_json), @whoq) > 0) and coalesce(f.role, '') not in ('trash', 'spam')
@@ -1681,6 +1683,27 @@ export class MailService {
       this.db.prepare(`insert into invite_answers (uid, answer, answered_at) values (?,?,?)
         on conflict(uid) do update set answer = excluded.answer, answered_at = excluded.answered_at`).run(inv.uid, answer, now())
     }
+    return inv
+  }
+
+  /** the Roar Account's projects that have senders (3 Nov 2026), kept here by RoarAccount */
+  roarProjects(): RoarProject[] {
+    try { const v = JSON.parse(this.localValue('roarProjects') || '[]'); return Array.isArray(v) ? v : [] } catch { return [] }
+  }
+  setRoarProjects(list: RoarProject[]) {
+    const v = JSON.stringify(list)
+    if (v === (this.localValue('roarProjects') || '[]')) return
+    this.setLocalValue('roarProjects', v)
+    this.emit({ type: 'folders', accountId: 'all' })
+  }
+  /** a project's mail: from or to its senders (an address, or @domain for a whole company), outside Trash and Junk */
+  private projectSql(id: string) {
+    const p = this.roarProjects().find((x) => x.id === id)
+    const q = (v: string) => `'${v.replace(/'/g, "''")}'`
+    const parts = (p?.senders || []).map((s) => s.toLowerCase().trim()).filter((s) => /^[^\s']*@[^\s@']+$/.test(s)).map((s) => s.startsWith('@')
+      ? `(lower(m.from_email) like ${q('%' + s)} or instr(lower(m.to_json), ${q(s + '"')}) > 0)`
+      : `(lower(m.from_email) = ${q(s)} or instr(lower(m.to_json), ${q('"' + s + '"')}) > 0)`)
+    return `(${parts.join(' or ') || '0'}) and coalesce(f.role, '') not in ('trash', 'spam')`
   }
 
   /** the message exactly as the server has it (Save as .eml) */

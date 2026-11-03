@@ -692,7 +692,12 @@ app.whenReady().then(() => {
   handle('mail:saveTemplate', (_e, tpl) => mail.saveTemplate(tpl))
   handle('mail:deleteTemplate', (_e, id) => mail.deleteTemplate(String(id)))
   // calendar invitations: the answer goes to the organizer; Add to Calendar opens the .ics in the system's calendar app
-  handle('mail:answerInvite', (_e, id, answer) => mail.answerInvite(String(id), answer))
+  handle('mail:answerInvite', async (_e, id, answer) => {
+    const inv = await mail.answerInvite(String(id), answer)
+    // in the Roar Calendar too (accepted or maybe; declined takes it off), when signed in
+    roarAccount?.inviteToCalendar(inv, answer).catch(() => {})
+  })
+  handle('mail:roarProjects', () => mail.roarProjects())
   handle('mail:inviteToCalendar', async (_e, id) => {
     const text = await mail.calendarOf(String(id))
     if (!text) throw new Error('no-invite')
@@ -768,6 +773,8 @@ app.whenReady().then(() => {
   handle('mail:roarmeSignIn', (_e, email, pass) => roarme.signIn(email, pass))
   handle('mail:roarmeVerify', (_e, code) => roarme.verify(code))
   handle('mail:roarmeSignOut', () => roarme.signOut())
+  handle('mail:roarmeConnect', (_e, cancel?: boolean) => roarme.connect(!!cancel))
+  handle('mail:roarmeConnectOpen', () => roarme.connectOpen())
   handle('mail:roarmeRooms', () => roarme.rooms())
   handle('mail:roarmeContacts', () => roarme.contacts())
   handle('mail:roarmeTask', (_e, task) => roarme.makeTask(task))

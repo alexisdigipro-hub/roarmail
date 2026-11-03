@@ -1057,3 +1057,12 @@ html[data-still] .msg:hover .quick { animation: none; }
 .rail-tools .acc.tool-btn svg { width: 16px; height: 16px; }
 .rail.wide .rail-tools { grid-template-columns: repeat(7, minmax(0, 32px)); gap: 3px; }
 .rail.wide .rail-tools .acc.tool-btn { width: 100%; height: auto; }
+
+/* Sign in with Roar Account (3 Nov 2026) */
+.roarme-card .connect-btn { width: 100%; justify-content: center; margin-top: 4px; }
+.roarme-card .connect-or { text-align: center; margin: 2px 0 -2px; }
+.roarme-card .connect-code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 30px; font-weight: 700; letter-spacing: .12em; text-align: center; padding: 14px; border-radius: 14px; background: rgba(255,255,255,.06); }
+
+/* Roar Account projects in the side list (3 Nov 2026) */
+.folder-group { padding: 14px 14px 4px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+.pj-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; margin: 0 3px; box-shadow: 0 0 8px currentColor; }
