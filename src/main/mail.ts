@@ -227,6 +227,7 @@ const transient = (code: string) => code === 'network' || code === 'host'
 export class MailService {
   private worker = new Map<string, ImapFlow>()
   private communityTimer: ReturnType<typeof setInterval> | null = null
+  private blockTimer: ReturnType<typeof setInterval> | null = null
   /** the shared spam list's fingerprints, kept in memory (community_blocks) */
   private communitySet: Set<string> | null = null
   /** new mail's Authentication-Results, read once by the shield at arrival */
@@ -662,6 +663,12 @@ export class MailService {
     worker(); worker()
     this.schedulePoll()
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000)
+    // blocked senders' mail already here (Inbox to Junk, Junk to Trash): soon after start and every 5 minutes, so a block
+    // made before, or mail that came while RoarMail was closed, does not stay (Alex, 4 Nov 2026)
+    if (!this.blockTimer) {
+      setTimeout(() => { try { this.sweepBlocked() } catch { /* next time */ } }, 20e3)
+      this.blockTimer = setInterval(() => { try { this.sweepBlocked() } catch { /* next time */ } }, 5 * 60e3)
+    }
     // the shared spam list: half a minute after start, then every 6 hours
     if (!this.communityTimer) {
       setTimeout(() => this.refreshCommunity().catch(() => {}), 30e3)
