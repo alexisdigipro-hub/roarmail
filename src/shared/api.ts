@@ -3,7 +3,7 @@
 // so the screens never change.
 
 export type Tls = 'tls' | 'starttls' | 'none'
-export type FolderRole = 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' | 'all' | 'flagged' | 'snoozed'
+export type FolderRole = 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' | 'all' | 'flagged' | 'snoozed' | 'waiting'
 
 export interface ServerConfig {
   email: string
@@ -570,6 +570,8 @@ export interface MailApi {
    *  Resolves true when the name was blocked too */
   blockSender(email: string, blocked: boolean, name?: string): Promise<boolean>
   blockedSenders(): Promise<string[]>
+  /** Waiting for a reply (4 Nov 2026): take sent mail off that list */
+  notWaiting?(ids: string[]): Promise<void>
   /** Block everyone at a domain (never gmail.com and the like); false when that domain cannot be blocked */
   blockDomain(domain: string, on: boolean): Promise<boolean>
   /** Settings > Privacy: every blocked address, name and domain */

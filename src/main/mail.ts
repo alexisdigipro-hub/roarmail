@@ -71,11 +71,13 @@ const SETTINGS: Settings = {
   accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
-  unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
+  unifiedShown: 'inbox,snoozed,waiting,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
   accountOrder: '', promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true,
   syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '',
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
+/** how far back Waiting for a reply looks */
+const WAITING_DAYS = 30
 /** settings that belong to this computer, never carried by the Roar Account's sync (ids made here, a folder here, its
  *  own fingerprint, the window's lock) */
 const LOCAL_ONLY = new Set(['installId', 'sharedOnce', 'downloadsFolder', 'accountOrder', 'unifiedOrder', 'lock', 'lockAfter', 'runAtLogin', 'dockMode', 'syncPulled'])
@@ -271,6 +273,14 @@ export class MailService {
         if (badT || badC) fix.run(badT ? 1 : 0, badC ? 1 : 0, c.email)
       }
     } catch { /* the next start tries again */ }
+    // Waiting for a reply (4 Nov 2026) shows in All accounts for everyone once, also where the list was chosen by hand
+    try {
+      if (!db.prepare(`select 1 from settings where key = 'waitingAdded'`).get()) {
+        const cur = (db.prepare(`select value from settings where key = 'unifiedShown'`).get() as Row | undefined)?.value as string | undefined
+        if (cur && !cur.split(',').includes('waiting')) db.prepare(`update settings set value = ? where key = 'unifiedShown'`).run(`${cur},waiting`)
+        db.prepare(`insert into settings (key, value) values ('waitingAdded', '1')`).run()
+      }
+    } catch { /* next start */ }
     // Block by name (2 Nov 2026): the sender's name as block_rules keeps it
     db.function('blockname', { deterministic: true }, (v: unknown) => blockNameKey(String(v ?? '')))
     // anything cut off by a crash or quit goes back in the queue
@@ -561,9 +571,15 @@ export class MailService {
 
   /** the unified folders: each role across every switched-on account, with the counts added up */
   unifiedFolders(): Folder[] {
-    const roles: FolderRole[] = ['inbox', 'snoozed', 'flagged', 'drafts', 'sent', 'archive', 'all', 'spam', 'trash']
+    const roles: FolderRole[] = ['inbox', 'snoozed', 'waiting', 'flagged', 'drafts', 'sent', 'archive', 'all', 'spam', 'trash']
     const rows = this.db.prepare(`select coalesce(f.special, f.role) as r, sum(f.unread) as unread, sum(f.total) as total, count(*) as n from folders f
       where coalesce(f.special, f.role) is not null and ${ON} group by r`).all() as Row[]
+    // Waiting for a reply: a virtual list over Sent, its number is how many wait
+    if (rows.some((x) => x.r === 'sent')) {
+      const n = (this.db.prepare(`select count(distinct coalesce(m.thread_id, m.id)) n from messages m join message_folders mf on mf.message_id = m.id
+        join folders f on f.id = mf.folder_id where ${this.waitingSql()} and ${ON}`).get({ since: now() - WAITING_DAYS * 864e5 }) as Row).n as number
+      rows.push({ r: 'waiting', unread: n, total: n, n: 1 })
+    }
     return roles.flatMap((role) => {
       const r = rows.find((x) => x.r === role)
       return r || role === 'inbox' ? [{ id: `all:${role}`, accountId: 'all', path: role, name: role, role, unread: r?.unread || 0, total: r?.total || 0, depth: 0 }] : []
@@ -1406,7 +1422,9 @@ export class MailService {
     const apart = s.promosApart && !who && !scope.folderId && (scope.role || 'inbox') === 'inbox' && scope.filter !== 'promos'
     const promoCol = scope.filter === 'promos' || apart ? `, sum(${this.promoSql(s)}) as promo_n` : ''
     const promos = scope.filter === 'promos' ? 'and promo_n > 0' : apart ? 'and promo_n < n' : ''
-    const where = who
+    const where = (scope.role === 'waiting' && !who && !scope.folderId)
+      ? `${this.waitingSql()} ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
+      : who
       ? `(m.from_email = @who or instr(lower(m.to_json), @whoq) > 0 or instr(lower(m.cc_json), @whoq) > 0) and coalesce(f.role, '') not in ('trash', 'spam')
          ${scope.accountId === 'all' ? '' : 'and f.account_id = @account'}`
       : scope.folderId
@@ -1428,7 +1446,7 @@ export class MailService {
       group by coalesce(m.thread_id, m.id)
       having ${byDate ? (scope.oldest ? 'last_date > @cut' : 'last_date < @cut') : '1'} ${having} ${promos}
       order by ${order} limit @limit`)
-      .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit, today: today.getTime(),
+      .all({ folder: scope.folderId, role: scope.role || 'inbox', account: scope.accountId, cut, limit, today: today.getTime(), since: now() - WAITING_DAYS * 864e5,
         who: who || '', whoq: who ? `"${who}"` : '', dayFrom: day?.getTime() || 0, dayTo: day ? day.getTime() + 864e5 : 0 }) as Row[]
     return rows.map(toRow)
   }
@@ -1969,6 +1987,25 @@ export class MailService {
     if (ids.length) this.act(ids, 'junk', undefined, true).catch(() => {})
     // what a blocked sender has in Junk already goes to the Trash (3 Nov 2026)
     if (junk.length) this.act(junk, 'trash', undefined, true).catch(() => {})
+  }
+
+  /** Waiting for a reply (Alex, 4 Nov 2026): mail you sent in the last weeks to someone else, with nothing after it in its
+   *  conversation from anyone but you, unless taken off the list; over a message m in folder f */
+  private waitingSql() {
+    const own = [...this.ownAddresses()].map((e) => `'${e.replace(/'/g, "''")}'`).join(',') || "''"
+    return `coalesce(f.special, f.role) = 'sent' and m.date > @since and m.id not in (select message_id from waiting_done)
+      and lower(coalesce(m.to_json, '')) not in ('[]', '')
+      and not exists (select 1 from messages r where r.account_id = m.account_id and r.date > m.date
+        and ((m.thread_id is not null and r.thread_id = m.thread_id) or (m.message_id is not null and r.in_reply_to = m.message_id))
+        and lower(coalesce(r.from_email, '')) not in (${own}))`
+  }
+
+  /** Not waiting: off the list for good */
+  notWaiting(ids: string[]) {
+    const ins = this.db.prepare('insert or ignore into waiting_done (message_id, at) values (?, ?)')
+    this.db.transaction(() => { for (const id of ids) ins.run(id, now()) })()
+    for (const a of this.accounts()) this.emit({ type: 'folders', accountId: a.id })
+    this.emit({ type: 'messages', accountId: 'all' })
   }
 
   /** the addresses blocked one by one (the window marks Block / Unblock with it) */

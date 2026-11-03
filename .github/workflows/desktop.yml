@@ -70,6 +70,9 @@ jobs:
               *-Windows-Setup.exe) cp "$f" RoarMail-Windows-Setup.exe ;;
             esac
           done
+          # every file's SHA-256: the app's updater installs a download only when it matches (4 Nov 2026)
+          sha256sum *.dmg *.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
           ls -la
       # Latest only when this is the highest version: a rebuild of an older one published later took the Latest mark from
       # 0.24.0 (1 Nov 2026), so the site's download links and the updater pointed back to 0.23.3

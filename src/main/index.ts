@@ -801,6 +801,7 @@ app.whenReady().then(() => {
   })
   handle('mail:blockSender', (_e, email, blocked, name) => mail.blockSender(String(email || ''), !!blocked, typeof name === 'string' ? name : undefined))
   handle('mail:blockedSenders', () => mail.blockedSenders())
+  handle('mail:notWaiting', (_e, ids) => mail.notWaiting(Array.isArray(ids) ? ids.map(String) : []))
   handle('mail:blockDomain', (_e, domain, on) => mail.blockDomain(String(domain || ''), !!on))
   handle('mail:blockList', () => mail.blockList())
   handle('mail:unblock', (_e, item) => mail.unblock({ kind: String(item?.kind || ''), value: String(item?.value || '') }))

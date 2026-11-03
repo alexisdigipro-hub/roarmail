@@ -119,6 +119,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any>; rescue: (wh
   forgetLearned: call('forgetLearned') as MailApi['forgetLearned'],
   blockSender: call('blockSender') as MailApi['blockSender'],
   blockedSenders: call('blockedSenders') as MailApi['blockedSenders'],
+  notWaiting: call('notWaiting') as MailApi['notWaiting'],
   blockDomain: call('blockDomain') as MailApi['blockDomain'],
   blockList: call('blockList') as MailApi['blockList'],
   unblock: call('unblock') as MailApi['unblock'],
