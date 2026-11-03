@@ -4,6 +4,7 @@
 // installer runs silently and opens RoarMail again.
 const { app, BrowserWindow, Notification, net, shell } = require('electron')
 const { spawn } = require('child_process')
+const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 
@@ -59,6 +60,18 @@ async function latest() {
   return { tag, version }
 }
 
+/** the SHA-256 the release lists for one of its files (SHA256SUMS.txt, made by desktop.yml) */
+async function expectedSum(tag, name) {
+  const r = await net.fetch(`https://github.com/${REPO}/releases/download/${encodeURIComponent(tag)}/SHA256SUMS.txt`, { headers: { 'User-Agent': 'RoarMail' } })
+  if (!r.ok) return ''
+  const line = (await r.text()).split('\n').find((l) => l.trim().endsWith(` ${name}`) || l.trim().endsWith(`*${name}`))
+  return (line && (line.match(/^([0-9a-f]{64})\b/i) || [])[1] || '').toLowerCase()
+}
+const sha256 = (file) => new Promise((ok, bad) => {
+  const h = crypto.createHash('sha256')
+  fs.createReadStream(file).on('data', (d) => h.update(d)).on('end', () => ok(h.digest('hex'))).on('error', bad)
+})
+
 async function check() {
   if (busy || state.status === 'ready') return state
   // a copy run from the source has nothing to update: it says so instead of checking
@@ -95,6 +108,10 @@ async function check() {
       }
       await new Promise((ok, bad) => { out.end(); out.on('finish', ok); out.on('error', bad) })
       if (total && fs.statSync(part).size !== total) throw new Error('incomplete download')
+      // the release's own list of SHA-256 sums (4 Nov 2026): a download that does not match it is thrown away, never installed
+      const want = await expectedSum(tag, name)
+      const sum = await sha256(part)
+      if (!want || want !== sum) { fs.rmSync(part, { force: true }); throw new Error(want ? 'the download does not match its checksum' : 'no checksum for this release') }
       fs.renameSync(part, target)
     }
     file = target

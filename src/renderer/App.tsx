@@ -404,6 +404,8 @@ export default function App() {
     const one = targets.length === 1
     // tidied (Alex, 29 Oct): answer first, then mark, then file it, the sender's things in one submenu, Delete last
     const pick = await api.popMenu([
+      // Waiting for a reply (4 Nov 2026): nudge them, or take it off the list
+      ...(scope.role === 'waiting' ? [{ id: 'nudge', label: t.wt_nudge, enabled: one, icon: 'reply' }, { id: 'notWaiting', label: t.wt_not, icon: 'check' }, null] : []),
       { id: 'reply', label: t.reply, enabled: one, icon: 'reply' },
       { id: 'replyAll', label: t.replyAll, enabled: one, icon: 'reply' },
       { id: 'forward', label: t.forward, enabled: one, icon: 'forward' },
@@ -430,7 +432,13 @@ export default function App() {
     ])
     if (!pick) return
     try {
-      if (pick === 'reply' || pick === 'replyAll' || pick === 'forward') {
+      if (pick === 'nudge') {
+        const items = await api.thread(keyOf(r))
+        const m = await api.message((items[items.length - 1] || r).id)
+        setCompose({ kind: 'reply', source: m, body: t.wt_nudgeText })
+      }
+      else if (pick === 'notWaiting') { await api.notWaiting?.(targets.flatMap((x) => x.ids)); loadRows() }
+      else if (pick === 'reply' || pick === 'replyAll' || pick === 'forward') {
         const items = await api.thread(keyOf(r))
         const m = await api.message((items[items.length - 1] || r).id)
         setCompose({ kind: pick, source: m })

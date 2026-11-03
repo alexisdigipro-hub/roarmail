@@ -107,4 +107,4 @@ export function Icon({ name, size = 18, filled = false }: { name: keyof typeof P
 
 export const folderIcon = (role: string | null) =>
   role === 'inbox' ? 'inbox' : role === 'sent' ? 'sent' : role === 'drafts' ? 'drafts' : role === 'trash' ? 'trash'
-    : role === 'spam' ? 'spam' : role === 'archive' ? 'archive' : role === 'flagged' ? 'star' : role === 'all' ? 'all' : role === 'snoozed' ? 'clock' : 'folder'
+    : role === 'spam' ? 'spam' : role === 'archive' ? 'archive' : role === 'flagged' ? 'star' : role === 'all' ? 'all' : role === 'snoozed' ? 'clock' : role === 'waiting' ? 'reply' : 'folder'

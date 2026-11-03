@@ -87,7 +87,11 @@ function prefill(seed: ComposeSeed, accounts: Account[]) {
     ? [...m.to, ...m.cc].filter((a) => a.address.toLowerCase() !== mine && a.address.toLowerCase() !== from.toLowerCase()).map(fmt).join(', ')
     : ''
   const header = `${fullDate(m.date)}, ${esc(m.fromName || m.fromEmail)} ${t.wrote}:`
-  return { accountId, to: from, cc: others, bcc: '', subject: prefix('Re'), body: `<br><br><p>${header}</p><blockquote>${quoted}</blockquote>`, signed: false }
+  // replying to your own sent mail (Waiting for a reply > Nudge them, 4 Nov 2026) goes to the people it went to
+  const ownSent = from.toLowerCase() === mine
+  const lead = seed.body ? `<div>${esc(seed.body).replace(/\n/g, '<br>')}</div>` : ''
+  return { accountId, to: ownSent ? m.to.map(fmt).join(', ') : from, cc: ownSent ? m.cc.map(fmt).join(', ') : others, bcc: '', subject: prefix('Re'),
+    body: `${lead}<br><br><p>${header}</p><blockquote>${quoted}</blockquote>`, signed: false }
 }
 
 export function Composer({ seed, accounts, onClose, onSent, windowed = false }: {

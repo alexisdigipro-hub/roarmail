@@ -28,7 +28,7 @@ export const GENERAL_DEFAULTS = {
   accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
-  unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '', accountOrder: '',
+  unifiedShown: 'inbox,snoozed,waiting,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '', accountOrder: '',
   promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true, syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '',
 } as const satisfies Partial<Settings>
 
