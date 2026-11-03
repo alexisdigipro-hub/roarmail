@@ -1239,6 +1239,15 @@ export class MailService {
         for (let i = fresh.length - 1; i >= 0; i--) if (handled.has(fresh[i].id)) fresh.splice(i, 1)
       }
     }
+    // Junk: a blocked sender's mail does not sit there either, it goes on to the Trash (Alex, 3 Nov 2026: "I block it,
+    // delete it, and it shows again in Junk"); the server's filter has seen it in Junk already
+    if (folder.role === 'spam') {
+      const out = this.blockedIn(folderId)
+      if (out.length) {
+        for (let i = fresh.length - 1; i >= 0; i--) if (out.includes(fresh[i].id)) fresh.splice(i, 1)
+        this.act(out, 'trash', undefined, true).catch(() => {})
+      }
+    }
     // Promotions apart (1 Nov 2026): a list's mail and quiet senders do not notify; quiet senders never do
     const s = this.settings()
     const hush = s.promosApart ? this.promoSql(s) : s.learnQuiet ? `(not ${KEPT} and ${QUIET})` : ''
@@ -1948,9 +1957,11 @@ export class MailService {
 
   /** after a new block: what is already in the inboxes from them goes to Junk too */
   private sweepBlocked() {
-    const ids: string[] = []
-    for (const f of this.db.prepare(`select f.id from folders f where f.role = 'inbox' and ${ON}`).all() as Row[]) ids.push(...this.blockedIn(f.id))
+    const ids: string[] = [], junk: string[] = []
+    for (const f of this.db.prepare(`select f.id, f.role from folders f where f.role in ('inbox', 'spam') and ${ON}`).all() as Row[]) (f.role === 'spam' ? junk : ids).push(...this.blockedIn(f.id))
     if (ids.length) this.act(ids, 'junk', undefined, true).catch(() => {})
+    // what a blocked sender has in Junk already goes to the Trash (3 Nov 2026)
+    if (junk.length) this.act(junk, 'trash', undefined, true).catch(() => {})
   }
 
   /** the addresses blocked one by one (the window marks Block / Unblock with it) */
@@ -2217,12 +2228,13 @@ export class MailService {
           let target: Row | undefined
           if (action === 'move') target = this.db.prepare('select * from folders where id = ? and account_id = ?').get(targetFolderId, g.accountId) as Row
           // Junk (2 Nov 2026): the account's Junk folder, its Trash when it has none
-          else if (action === 'junk') target = this.folderByRole(g.accountId, 'spam') || this.folderByRole(g.accountId, 'trash')
+          // already in Junk (Block or Report spam pressed there): on to the Trash (3 Nov 2026)
+          else if (action === 'junk') target = g.role === 'spam' ? this.folderByRole(g.accountId, 'trash') : this.folderByRole(g.accountId, 'spam') || this.folderByRole(g.accountId, 'trash')
           else target = this.folderByRole(g.accountId, action === 'archive' ? 'archive' : 'trash')
           if (action === 'move' && !target) continue
           if (target && target.id === g.folderId) continue
           // trash in Trash deletes for good; archive with no Archive folder makes one when the op runs
-          const kind: MoveKind = action === 'junk' ? (target?.role === 'spam' ? 'move' : 'trash')
+          const kind: MoveKind = action === 'junk' ? (target?.role === 'spam' ? 'move' : g.role === 'trash' ? 'delete' : 'trash')
             : action === 'trash' && g.role === 'trash' ? 'delete' : action === 'move' ? 'move' : action
           const opId = uuid()
           accounts.add(g.accountId)
