@@ -1018,3 +1018,10 @@ html[data-focus='bold'] :is(.search, .fi-search, .ct-search) input:focus-visible
 .search.search-cap:focus-within, .search:focus-within { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 html[data-focus='bold'] :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 85%, transparent) !important; outline-offset: 2px;
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 14%, transparent) !important; }
+
+/* the row's hover bar (star, folder, block, delete) sits at the middle of the row's height, at its right, and slides in
+   from the right (Alex, 3 Nov 2026) */
+.msg .quick { top: 50%; bottom: auto; right: 10px; transform: translateY(-50%); }
+.msg:hover .quick { animation: rm-quick-slide .34s var(--spring) both; }
+@keyframes rm-quick-slide { from { opacity: 0; transform: translate(26px, -50%); } to { opacity: 1; transform: translate(0, -50%); } }
+html[data-still] .msg:hover .quick { animation: none; }
