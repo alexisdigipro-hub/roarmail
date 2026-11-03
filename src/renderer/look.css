@@ -1009,3 +1009,12 @@ html.panel-window .sheet.settings .set-head { padding-top: 40px; }
 .tool.compose-btn { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent); }
 .tool.compose-btn:hover { filter: brightness(1.12); background: var(--accent); }
 .tool.compose-btn svg { color: #fff; }
+
+/* one soft ring around a search pill, never a square one inside it (Alex, 3 Nov 2026: "the glow looks thick and odd"):
+   the text field inside a pill carries no ring of its own, also with Strong focus rings on; the strong ring itself is
+   thinner and follows each element's own corners */
+:is(.search, .fi-search, .ct-search, .ai-ask) input, :is(.search, .fi-search, .ct-search) input:is(:focus, :focus-visible),
+html[data-focus='bold'] :is(.search, .fi-search, .ct-search) input:focus-visible { outline: none !important; box-shadow: none !important; }
+.search.search-cap:focus-within, .search:focus-within { box-shadow: inset 0 0 0 1px var(--sel-edge), 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+html[data-focus='bold'] :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 85%, transparent) !important; outline-offset: 2px;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 14%, transparent) !important; }
