@@ -2,6 +2,7 @@
 // sliding to the open one), the page on the right with a big title. Appearance carries RoarMe's look settings.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
+import { SAFE_FONTS, knownLocalFonts, localStack, mailFontStack } from '../mailfonts'
 import type { Account, BlockItem, Folder, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
 import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
@@ -758,7 +759,7 @@ const QUOTE_COLORS: [string, Key][] = [
 
 /** Apple Mail's "Fonts & Colours": the list, messages and fixed width; quoted text coloured by level */
 function Fonts({ s, set }: { s: Settings; set: Set }) {
-  const [local, setLocal] = useState<string[] | null>(null)
+  const [local, setLocal] = useState<string[] | null>(() => { const k = knownLocalFonts(); return k.length ? k : null })
   const [noLocal, setNoLocal] = useState(false)
   // the fonts installed on this computer (Cera GR and the rest), asked for when the person wants them
   const loadLocal = async () => {
@@ -795,6 +796,20 @@ function Fonts({ s, set }: { s: Settings; set: Set }) {
           <Choice value={s.textSize} onChange={(v) => set('textSize', v)} options={TEXT_SIZES.map((n, i) => [i, String(n)])} />
         </Line>
         <Line label={t.f_mono}>{picker('monoFont')}</Line>
+        {/* the font mail you write is sent in (3 Nov 2026): the ones everyone has first, then this computer's */}
+        <Line label={t.f_compose} hint={t.f_composeHint}>
+          <select value={s.composeFont} style={{ fontFamily: mailFontStack(s.composeFont) || undefined }} onChange={(e) => set('composeFont', e.target.value)}>
+            <option value="">{t.fm_default}</option>
+            <optgroup label={t.fm_safe}>
+              {SAFE_FONTS.map(([n, stack]) => <option key={n} value={`safe:${n}`} style={{ fontFamily: stack }}>{n}</option>)}
+            </optgroup>
+            {(local || (s.composeFont.startsWith('local:') ? [s.composeFont.slice(6)] : [])).length > 0 && (
+              <optgroup label={t.fm_yours}>
+                {(local || [s.composeFont.slice(6)]).map((f) => <option key={f} value={`local:${f}`} style={{ fontFamily: localStack(f) }}>{f}</option>)}
+              </optgroup>
+            )}
+          </select>
+        </Line>
         {!local && !noLocal && <Line label={<span className="muted">{t.f_computerHint}</span>}><button className="pill small" onClick={loadLocal}>{t.f_showComputer}</button></Line>}
         <Toggle label={t.f_plainMono} on={s.plainMono} set={(v) => set('plainMono', v)} />
       </Group>

@@ -8,7 +8,7 @@ import { Icon } from './Icon'
 import { clean as roarError, useRoarMe } from './RoarMe'
 import type { ComposeKind } from './Viewer'
 import { TimePicker } from './TimePicker'
-import { FONTS } from '../look'
+import { SAFE_FONTS, knownLocalFonts, localStack, mailFontStack, readLocalFonts, withMailFont } from '../mailfonts'
 import { TemplatesMenu, filled, templateValues } from './Templates'
 
 /** a quoted message inside the writing window: no pictures from the network in its styles, nothing that could sit
@@ -156,9 +156,14 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
     return { inReplyTo: m.messageId, references: [m.references, m.messageId].filter(Boolean).join(' ') || undefined, replyToMessageId: m.id }
   }
 
+  // the font new mail is written in (Settings > Fonts > New messages, 3 Nov 2026): shown while writing, sent around the text
+  const [mailFont, setMailFont] = useState('')
+  useEffect(() => { window.roarmail.settings().then((x) => setMailFont(mailFontStack(x.composeFont || ''))).catch(() => {}) }, [])
+  // the fonts of this computer in the Font menu, once read (reading them needs a click: "Your fonts…")
+  const [localFonts, setLocalFonts] = useState<string[]>(knownLocalFonts)
   const draft = (): Draft => ({
     id: draftId.current, accountId, identityId: identityId || undefined, to, cc, bcc, subject,
-    html: body.current?.innerHTML || '', text: body.current?.innerText || '',
+    html: withMailFont(body.current?.innerHTML || '', mailFont), text: body.current?.innerText || '',
     ...replyMeta(), replacesMessageId: seed.draft?.replacesMessageId, attachments: files,
     priority: priority === 'normal' ? undefined : priority,
   })
@@ -445,9 +450,19 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
               <option value="" disabled>{t.fm_style}</option>
               {BLOCKS.map(([k, label]) => <option key={k} value={k}>{t[label as keyof typeof t] as string}</option>)}
             </select>
-            <select title={t.font} defaultValue="" onChange={(e) => { exec('fontName', e.target.value); e.target.value = '' }}>
+            {/* fonts everyone has first, then this computer's (they arrive only where the reader has them too) */}
+            <select title={t.font} defaultValue="" onChange={(e) => {
+              const v = e.target.value; e.target.value = ''
+              if (v === '__local') { readLocalFonts().then((f) => { setLocalFonts(f); if (!f.length) setError(t.f_noComputer) }).catch(() => setError(t.f_noComputer)); return }
+              exec('fontName', v)
+            }}>
               <option value="" disabled>{t.font}</option>
-              {FONTS.map(([k, label, fam]) => <option key={k} value={fam} style={{ fontFamily: fam }}>{label}</option>)}
+              <optgroup label={t.fm_safe}>
+                {SAFE_FONTS.map(([n, stack]) => <option key={n} value={stack} style={{ fontFamily: stack }}>{n}</option>)}
+              </optgroup>
+              {localFonts.length > 0
+                ? <optgroup label={t.fm_yours}>{localFonts.map((f) => <option key={f} value={localStack(f)} style={{ fontFamily: localStack(f) }}>{f}</option>)}</optgroup>
+                : <option value="__local">{t.fm_loadYours}</option>}
             </select>
             <select className="narrow" title={t.fm_size} defaultValue="" onChange={(e) => { exec('fontSize', e.target.value); e.target.value = '' }}>
               <option value="" disabled>{t.fm_size}</option>
@@ -500,7 +515,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
             )}
           </div>
         )}
-        <div className="editor" ref={body} contentEditable suppressContentEditableWarning spellCheck />
+        <div className="editor" ref={body} contentEditable suppressContentEditableWarning spellCheck style={mailFont ? { fontFamily: mailFont } : undefined} />
         {files.length > 0 && (
           <div className="files">
             {files.map((f) => {

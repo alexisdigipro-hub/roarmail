@@ -316,6 +316,8 @@ export interface Settings {
   listSize: number
   /** the font of messages without their own (plain text and simple mail) */
   messageFont: string
+  /** Settings > Fonts > New messages (3 Nov 2026): the font mail you write starts in and is sent in ('safe:Arial', 'local:Futura', '' for none) */
+  composeFont: string
   monoFont: string
   /** plain text messages in the fixed-width font */
   plainMono: boolean
