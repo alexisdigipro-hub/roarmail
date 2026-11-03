@@ -334,43 +334,57 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
     if (stop) r.setEndBefore(stop); else r.setEnd(el, el.childNodes.length)
     return r
   }
+  // the ✦ card (redone 3 Nov 2026, Alex: "the result went into the mail even when it was a question back; make it
+  // clearer"): what it works on is fixed when the card opens; the answer shows in the card first and goes into the
+  // message only with Use it; an answer that is a question back stays in the card
+  const aiTarget = useRef<Range | null>(null)
+  const [aiText, setAiText] = useState('')
+  const [aiOut, setAiOut] = useState<string | null>(null)
+  const [aiNote, setAiNote] = useState('')
   const openAi = () => {
-    // a selection inside the message is what the AI changes; it is remembered before the panel takes the focus
+    if (aiOpen) { setAiOpen(false); return }
     const sel = window.getSelection()
     const r = sel && sel.rangeCount ? sel.getRangeAt(0) : null
     aiSel.current = r && !r.collapsed && body.current?.contains(r.commonAncestorContainer) ? r.cloneRange() : null
-    setAiOpen((v) => !v); setError('')
+    aiTarget.current = aiSel.current || ownRange()
+    setAiText((aiTarget.current?.toString() || '').trim().replace(/^-+$/, ''))
+    setAiOut(null); setAiNote(''); setError(''); setAiOpen(true)
   }
-  const runAi = async (instruction: string, quick = false) => {
+  const closeAi = () => { setAiOpen(false); setAiOut(null); setAiNote(''); setAiAsk(''); aiSel.current = null; body.current?.focus() }
+  /** ask: a new mail from words (on: what is written), or a change (on: the answer shown, else what is written) */
+  const runAi = async (instruction: string, change = false) => {
     if (!instruction.trim() || aiBusy) return
-    const target = aiSel.current || ownRange()
-    if (!target) return
-    const text = target.toString().trim()
-    // Shorter, Fix it, In English…: on nothing written yet they have nothing to work on
-    if (!aiSel.current && quick && !text.replace(/^-+$/, '').trim()) { setError(t.ai_needText); return }
+    const base = change && aiOut ? aiOut : aiText
+    if (change && !base.trim()) { setAiNote(t.ai_needText); return }
     const src = seed.kind !== 'new' && seed.kind !== 'draft' ? seed.source : undefined
     const me = accounts.find((a) => a.id === accountId)
-    setAiBusy(true); setError('')
+    setAiBusy(true); setAiNote('')
     try {
       const out = await window.roarmail.ai!({
-        instruction, text, selection: !!aiSel.current,
+        instruction, text: base, selection: change || !!aiSel.current,
         thread: src ? (src.text || (src.html || '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+\n/g, '\n')).slice(0, 12000) : undefined,
         threadFrom: src ? (src.fromName || src.fromEmail) : undefined,
         to, subject, me: me ? `${me.displayName || ''} <${me.email}>`.trim() : undefined,
       })
-      if (!out) throw new Error('empty')
-      const html = out.split(/\n{2,}/).map((p) => `<div>${esc(p.trim()).replace(/\n/g, '<br>')}</div>`).join('<div><br></div>') + (aiSel.current ? '' : '<div><br></div>')
-      // replaced with the editor's own command, so Cmd+Z brings the text back
-      body.current?.focus()
-      const sel = window.getSelection()
-      sel?.removeAllRanges(); sel?.addRange(target)
-      document.execCommand('insertHTML', false, html)
-      dirty.current = true
-      setAiOpen(false); setAiAsk(''); aiSel.current = null
+      // "!!" is the AI saying it cannot (nothing to work on, unclear): said in the card, never put in the mail
+      if (!out || out.startsWith('!!')) setAiNote(out ? out.replace(/^!!\s*/, '') : t.ai_needText)
+      else setAiOut(out)
     } catch (e: any) {
       const m = String(e?.message || e)
-      setError(/ai-signin/.test(m) ? t.ai_signin : /ai-limit/.test(m) ? t.ai_limit : /ai-nokey/.test(m) ? t.ai_nokey : /ai-badkey/.test(m) ? t.ai_badkey : roarError(e))
+      setAiNote(/ai-signin/.test(m) ? t.ai_signin : /ai-limit/.test(m) ? t.ai_limit : /ai-nokey/.test(m) ? t.ai_nokey : /ai-badkey/.test(m) ? t.ai_badkey : roarError(e))
     } finally { setAiBusy(false) }
+  }
+  /** Use it: the answer replaces what it was made from (or goes in at the top), with the editor's own command so Cmd+Z undoes it */
+  const useAi = () => {
+    const target = aiTarget.current
+    if (!aiOut || !target) return
+    const html = aiOut.split(/\n{2,}/).map((p) => `<div>${esc(p.trim()).replace(/\n/g, '<br>')}</div>`).join('<div><br></div>') + (aiSel.current ? '' : '<div><br></div>')
+    body.current?.focus()
+    const sel = window.getSelection()
+    sel?.removeAllRanges(); sel?.addRange(target)
+    document.execCommand('insertHTML', false, html)
+    dirty.current = true
+    closeAi()
   }
   const toggleFmt = () => setFmtBar((v) => { try { localStorage.setItem('roarmail.fmtbar', v ? '0' : '1') } catch { /* this run only */ } return !v })
 
@@ -452,29 +466,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
           <b>{title}</b>
           <span className="grow" />
           <div className="composer-tools">
-            {canAi && (
-              <span className="attach-wrap">
-                <button className={`tool ai-btn ${aiOpen ? 'on-filter' : ''}`} title={t.ai_btn} onMouseDown={(e) => e.preventDefault()} onClick={openAi}><Icon name="spark" /></button>
-                {aiOpen && (
-                  <div className="attach-menu ai-menu" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setAiOpen(false) } }}>
-                    <textarea autoFocus rows={3} value={aiAsk} placeholder={t.ai_ph} disabled={aiBusy}
-                      onChange={(e) => setAiAsk(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); runAi(aiAsk) } }} />
-                    <div className="ai-chips">
-                      <small className="muted">{aiSel.current ? t.ai_onSel : t.ai_onAll}</small>
-                      {([['ai_shorter', 'Make it shorter'], ['ai_formal', 'Make it more formal'], ['ai_friendly', 'Make it friendlier'], ['ai_fix', 'Fix spelling and grammar, change nothing else'],
-                        ['ai_en', 'Translate it into English'], ['ai_el', 'Translate it into Greek']] as const).map(([k, ask]) => (
-                        <button key={k} className="chip" disabled={aiBusy} onClick={() => runAi(ask, true)}>{t[k]}</button>
-                      ))}
-                    </div>
-                    <div className="row end">
-                      <button className="pill small primary" disabled={aiBusy || !aiAsk.trim()} onClick={() => runAi(aiAsk)}>
-                        <Icon name="spark" size={14} /> {aiBusy ? t.ai_busy : t.ai_write}</button>
-                    </div>
-                  </div>
-                )}
-              </span>
-            )}
+            {canAi && <button className={`tool ai-btn ${aiOpen ? 'on-filter' : ''}`} title={t.ai_btn} onMouseDown={(e) => e.preventDefault()} onClick={openAi}><Icon name="spark" /></button>}
             <button className={`tool ${fmtBar ? 'on-filter' : ''}`} title={t.fm_bar} onClick={toggleFmt}><Icon name="aa" /></button>
             <button className={`tool paper-btn ${paper ? 'on-filter' : ''}`} title={t.fm_paper} onMouseDown={(e) => e.preventDefault()} onClick={togglePaper}><Icon name="paper" /></button>
             <button className="tool" title={t.emoji} onMouseDown={(e) => e.preventDefault()} onClick={() => { body.current?.focus(); window.roarmail.emojiPanel() }}><Icon name="emoji" /></button>
@@ -678,6 +670,55 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
                 <button className="pill small ghost danger" onClick={() => close('discard')}>{t.discard}</button>
                 <button className="pill small primary" autoFocus onClick={() => close('save')}>{t.saveDraft}</button>
               </div>
+            </div>
+          </div>
+        )}
+        {/* the ✦ card in the middle of the message: write from words, or change what was written; the answer is shown
+            here first and goes into the mail only with Use it */}
+        {aiOpen && (
+          <div className="ai-panel" onMouseDown={(e) => { if (e.target === e.currentTarget && !aiBusy) closeAi() }}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); closeAi() } }}>
+            <div className="ai-card">
+              <div className="ai-top"><Icon name="spark" size={18} /><b>RoarMail AI</b><span className="grow" />
+                <button className="tool small" title={t.cancel} onClick={closeAi}><Icon name="close" size={14} /></button></div>
+              {aiOut == null ? (
+                <>
+                  <label className="ai-label">{t.ai_say}</label>
+                  <div className="ai-ask">
+                    <textarea autoFocus rows={3} value={aiAsk} placeholder={t.ai_ph} disabled={aiBusy}
+                      onChange={(e) => setAiAsk(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runAi(aiAsk) } }} />
+                    <button className="pill primary" disabled={aiBusy || !aiAsk.trim()} onClick={() => runAi(aiAsk)}>{aiBusy ? t.ai_busy : t.ai_write}</button>
+                  </div>
+                  {aiText && (
+                    <>
+                      <label className="ai-label">{aiSel.current ? t.ai_onSel : t.ai_onAll}</label>
+                      <p className="ai-quote">{aiText.length > 220 ? `${aiText.slice(0, 220)}…` : aiText}</p>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <label className="ai-label">{t.ai_result}</label>
+                  <div className="ai-out">{aiOut}</div>
+                </>
+              )}
+              {(aiText || aiOut != null) && (
+                <div className="ai-changes">
+                  {([['ai_shorter', 'Make it shorter'], ['ai_friendly', 'Make it friendlier'], ['ai_formal', 'Make it more formal'], ['ai_fix', 'Fix spelling and grammar, change nothing else'],
+                    ['ai_en', 'Translate it into English'], ['ai_el', 'Translate it into Greek']] as const).map(([k, ask]) => (
+                    <button key={k} className="pill small" disabled={aiBusy} onClick={() => runAi(ask, true)}>{t[k]}</button>
+                  ))}
+                </div>
+              )}
+              {aiNote && <p className="ai-note">{aiNote}</p>}
+              {aiBusy && <div className="ai-busy"><span className="rt-spin" /> {t.ai_busy}</div>}
+              {aiOut != null && (
+                <div className="row end ai-use">
+                  <button className="pill small ghost" disabled={aiBusy} onClick={() => { setAiOut(null); setAiNote('') }}>{t.ai_again}</button>
+                  <button className="pill primary" disabled={aiBusy} onClick={useAi}>{t.ai_use}</button>
+                </div>
+              )}
             </div>
           </div>
         )}
