@@ -139,6 +139,8 @@ export default function App() {
     if (e.type === 'open' && e.subject != null) { setScope({ accountId: 'all', role: 'inbox' }); setQuery(e.subject); setTimeout(() => setSelected([e.messageId]), 600) }
     else if (e.type === 'open') { setScope({ accountId: 'all', role: 'inbox' }); setTimeout(() => setSelected([e.messageId]), 80) }
     if (e.type === 'compose') setCompose({ kind: 'new', to: e.to, subject: e.subject, body: e.body })
+    // a message window sent or saved (3 Nov 2026): its toast shows here, with Undo send
+    if (e.type === 'composeDone') { if (e.outboxId) sentRef.current(e.outboxId, e.at); else if (e.saved) flash({ text: t.draftSaved, ms: 2600 }) }
     if (e.type === 'outbox') loadOutbox()
     if (e.type === 'opFailed') flash({ text: `${t.opFailed} (${e.error})` })
     if (e.type === 'sound') playNewMail(e.sound)
@@ -516,6 +518,13 @@ export default function App() {
     } catch (e) { flash({ text: clean(e) }); loadRows() }
   }
 
+  // on the desktop every new message opens in a window of its own (Alex, 3 Nov 2026); the web demo keeps it inside
+  useEffect(() => {
+    if (!compose || !api.composeWindow) return
+    api.composeWindow(compose).catch(() => {})
+    setCompose(null)
+  }, [compose])
+  const sentRef = useRef<(outboxId: string, at?: number) => void>(() => {})
   const sent = (outboxId: string, at?: number) => {
     setCompose(null)
     if (!at) actionSound('send')
@@ -528,6 +537,7 @@ export default function App() {
       })
     } else flash({ text: t.sent_ok, ms: 2600 })
   }
+  sentRef.current = sent
 
   // keyboard: Airmail-style single keys, and arrows / j k to move
   useEffect(() => {

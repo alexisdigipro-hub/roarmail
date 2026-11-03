@@ -90,9 +90,11 @@ function prefill(seed: ComposeSeed, accounts: Account[]) {
   return { accountId, to: from, cc: others, bcc: '', subject: prefix('Re'), body: `<br><br><p>${header}</p><blockquote>${quoted}</blockquote>`, signed: false }
 }
 
-export function Composer({ seed, accounts, onClose, onSent }: {
+export function Composer({ seed, accounts, onClose, onSent, windowed = false }: {
   seed: ComposeSeed; accounts: Account[]
   onClose: (saved: boolean) => void; onSent: (outboxId: string, at?: number) => void
+  /** in a window of its own (3 Nov 2026): it fills the window, its top row moves the window, the system's close asks first */
+  windowed?: boolean
 }) {
   const init = useRef(prefill(seed, accounts)).current
   const [accountId, setAccountId] = useState(init.accountId)
@@ -353,6 +355,13 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     }
   }
 
+  // the window's own close (red button, Cmd+W) runs the same close as the X: a changed message asks first
+  const closeRef = useRef<(c?: 'save' | 'discard') => void>(() => {})
+  useEffect(() => {
+    if (!windowed) return
+    return window.roarmail.on((e) => { if (e.type === 'composeCloseAsk') closeRef.current() })
+  }, [windowed])
+
   async function close(choice?: 'save' | 'discard') {
     const changed = dirty.current || !!draftId.current
     if (!choice && changed) { setAsking(true); return }
@@ -362,15 +371,16 @@ export function Composer({ seed, accounts, onClose, onSent }: {
     onClose(false)
   }
 
+  closeRef.current = close
   const title = seed.kind === 'new' ? t.compose : seed.kind === 'forward' ? t.forward : seed.kind === 'replyAll' ? t.replyAll
     : seed.kind === 'draft' ? (thread && (thread as Draft).inReplyTo ? t.reply : t.compose) : t.reply
 
   return (
-    <div className="sheet-wrap" onKeyDown={(e) => {
+    <div className={windowed ? 'compose-win' : 'sheet-wrap'} onKeyDown={(e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send() }
       if (e.key === 'Escape') { e.preventDefault(); asking ? setAsking(false) : close() }
     }}>
-      <div className={`sheet composer ${paper ? 'paper' : ''}`} style={{ width: box.w, height: box.h }} onInput={() => { dirty.current = true }}>
+      <div className={`sheet composer ${paper ? 'paper' : ''} ${windowed ? 'windowed' : ''}`} style={windowed ? undefined : { width: box.w, height: box.h }} onInput={() => { dirty.current = true }}>
         <div className="composer-head">
           <b>{title}</b>
           <span className="grow" />
@@ -562,7 +572,7 @@ export function Composer({ seed, accounts, onClose, onSent }: {
             </div>
           </div>
         )}
-        <div className="composer-resize" title={t.resizeWin} onPointerDown={resize} onDoubleClick={toggleBig} />
+        {!windowed && <div className="composer-resize" title={t.resizeWin} onPointerDown={resize} onDoubleClick={toggleBig} />}
       </div>
     </div>
   )
