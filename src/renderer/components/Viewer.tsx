@@ -183,7 +183,8 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
     const id = await window.roarmail.popMenu([
       { id: 'reply', label: t.reply }, { id: 'replyAll', label: t.replyAll }, { id: 'forward', label: t.forward },
       null,
-      { id: 'print', label: t.mm_print }, { id: 'pdf', label: t.mm_pdf }, { id: 'eml', label: t.mm_eml },
+      // print and the two ways to save in one place (Alex, 3 Nov 2026: tidier menus)
+      { label: t.mm_keep, sub: [{ id: 'print', label: t.mm_print }, { id: 'pdf', label: t.mm_pdf }, { id: 'eml', label: t.mm_eml }] },
       null,
       { label: `${t.mn_sender} · ${m.fromName || m.fromEmail}`, sub: [
         { id: 'card', label: t.ct_card }, { id: 'all', label: t.ct_allMail }, { id: 'rule', label: t.ru_fromSender },

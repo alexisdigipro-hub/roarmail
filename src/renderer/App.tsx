@@ -718,12 +718,21 @@ export default function App() {
         <span className="grow" />
         <div className="rail-tools">
           <button className={`acc tool-btn ${busy ? 'spin' : ''}`} title={t.refresh} onClick={() => api.refresh()}><Icon name="refresh" size={18} /></button>
-          <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={`${t.roarme} · ${t.rm_work}`} onClick={() => setWorkOpen((v) => !v)}><Icon name="tasks" size={18} /></button>
           <button className={`acc tool-btn ${contactsAt !== null ? 'on-tool' : ''}`} title={t.ct_title} onClick={() => setContactsAt('')}><Icon name="person" size={18} /></button>
           <button className={`acc tool-btn ${filesOpen ? 'on-tool' : ''}`} title={t.fi_title} onClick={() => setFilesOpen(true)}><Icon name="clip" size={18} /></button>
-          <button className={`acc tool-btn ${statsOpen ? 'on-tool' : ''}`} title={t.st_title} onClick={() => setStatsOpen(true)}><Icon name="chart" size={18} /></button>
           <button className="acc tool-btn" title={t.settings} onClick={() => setSettingsOpen(true)}><Icon name="gear" size={18} /></button>
-          <button className={`acc tool-btn ${railWide ? 'on-tool' : ''}`} title={railWide ? t.railIcons : t.railNames} onClick={toggleRail}><Icon name="sidebar" size={18} /></button>
+          {/* the rest in one menu (Alex, 3 Nov 2026: fewer buttons): RoarMe's tasks, Statistics, the rail's width */}
+          <button className={`acc tool-btn ${workOpen ? 'on-tool' : ''}`} title={t.mm_more} onClick={async () => {
+            const pick = await api.popMenu([
+              { id: 'work', label: `${t.roarme} · ${t.rm_work}`, checked: workOpen },
+              { id: 'stats', label: t.st_title },
+              null,
+              { id: 'rail', label: railWide ? t.railIcons : t.railNames },
+            ])
+            if (pick === 'work') setWorkOpen((v) => !v)
+            else if (pick === 'stats') setStatsOpen(true)
+            else if (pick === 'rail') toggleRail()
+          }}><Icon name="more" size={18} /></button>
         </div>
       </nav>
 

@@ -20,8 +20,9 @@ const MAC = window.roarmail.platform === 'darwin'
 // Everything is still there: what belonged together now shares a page, and nothing shows in two places.
 export type Page = 'general' | 'roar' | 'mail' | 'writing' | 'rules' | 'look' | 'accounts' | 'privacy' | 'about'
 const PAGES: [Page, string][] = [
-  ['general', 'gear'], ['roar', 'roar'], ['mail', 'unread'], ['writing', 'compose'], ['rules', 'funnel'],
-  ['look', 'palette'], ['accounts', 'inbox'], ['privacy', 'shield'], ['about', 'info'],
+  // tidied (Alex, 3 Nov 2026: "fewer menus, organised"): Rules live under Mail, short names that fit the side list
+  ['general', 'gear'], ['roar', 'roar'], ['accounts', 'inbox'], ['mail', 'unread'], ['writing', 'compose'],
+  ['look', 'palette'], ['privacy', 'shield'], ['about', 'info'],
 ]
 const title = (p: Page) => t[`pg_${p}` as Key]
 const title2 = (p: string) => t[`pg_${p}` as Key]
@@ -33,7 +34,8 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
   /** open at this page (Make a Rule from This Sender opens Rules with the rule started) */
   start?: { page: Page; rule?: Rule } | null
 }) {
-  const [page, setPage] = useState<Page>(start?.page || 'general')
+  // Rules are a tab of Mail since 3 Nov 2026: a start at 'rules' opens Mail on it
+  const [page, setPage] = useState<Page>(start?.page === 'rules' ? 'mail' : start?.page || 'general')
   const [sigs, setSigs] = useState<Signature[]>([])
   const [prefs, setPrefs] = useState<Settings | null>(null)
   const nav = useLens<HTMLDivElement>(page)
@@ -55,7 +57,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
     if (!prefs) return ''
     if (p === 'accounts') return String(accounts.length)
     if (p === 'look') return prefs.theme === 'pumba' ? 'Pumba' : 'Simba'
-    if (p === 'privacy') return prefs.privacyMode ? t.on : prefs.lock ? t.appLockShort : ''
+    if (p === 'privacy') return prefs.privacyMode ? t.on : ''
     if (p === 'about') return upd?.status === 'ready' ? t.up_readyShort : upd?.current || ''
     return ''
   }
@@ -85,10 +87,12 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
             {page === 'writing' && <Tabs tabs={[['signatures', title2('signatures')], ['templates', title2('templates')]]}>
               {(k) => k === 'signatures' ? <Signatures sigs={sigs} reload={loadSigs} /> : <TemplatesPage />}
             </Tabs>}
-            {page === 'rules' && <RulesPage accounts={accounts} seed={start?.page === 'rules' ? start.rule : null} />}
+
             {prefs && page === 'general' && <General s={prefs} set={set} />}
             {prefs && page === 'roar' && <RoarAccountPage s={prefs} set={set} />}
-            {prefs && page === 'mail' && <Mail s={prefs} set={set} />}
+            {prefs && page === 'mail' && <Tabs start={start?.page === 'rules' ? 'rules' : undefined} tabs={[['reading', title2('reading')], ['rules', title2('rules')]]}>
+              {(k) => k === 'rules' ? <RulesPage accounts={accounts} seed={start?.page === 'rules' ? start.rule : null} /> : <Mail s={prefs} set={set} />}
+            </Tabs>}
             {prefs && page === 'look' && <Tabs tabs={[['theme', title2('theme')], ['list', title2('list')], ['fonts', title2('fonts')]]}>
               {(k) => k === 'theme' ? <Theme s={prefs} set={set} /> : k === 'list' ? <ListPage s={prefs} set={set} /> : <Fonts s={prefs} set={set} />}
             </Tabs>}
@@ -131,8 +135,8 @@ function Choice<V extends string | number>({ value, options, onChange }: { value
 }
 
 /** a page in parts (Appearance, Signatures and templates): the parts as a segmented control, one shown */
-function Tabs({ tabs, children }: { tabs: [string, string][]; children: (k: string) => ReactNode }) {
-  const [on, setOn] = useState(tabs[0][0])
+function Tabs({ tabs, children, start }: { tabs: [string, string][]; children: (k: string) => ReactNode; start?: string }) {
+  const [on, setOn] = useState(start && tabs.some(([k]) => k === start) ? start : tabs[0][0])
   const seg = useLens<HTMLDivElement>(on)
   return (
     <div className="stack">
