@@ -61,7 +61,7 @@ export function Viewer({ row, accounts, prefs, way, onCompose, onAct, onRoar, on
     return () => { live = false }
   }, [key, row?.count])
 
-  if (!row) return <section className="viewer empty"><div className="empty-mark"><b>ROAR</b><i>MAIL</i></div><p className="muted">{t.pickMessage}</p></section>
+  if (!row) return <section className="viewer empty"><div className="empty-mark"><b>ROAR</b><i>MAIL</i></div></section>
   if (error) return <section className="viewer empty"><p className="error">{error}</p></section>
   if (!items) return <section className="viewer empty"><div className="spinner" /></section>
 
