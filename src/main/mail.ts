@@ -73,8 +73,12 @@ const SETTINGS: Settings = {
   autoUpdate: true, senderPictures: true, previewLines: 2, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
   accountOrder: '', promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true,
+  syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '',
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
+/** settings that belong to this computer, never carried by the Roar Account's sync (ids made here, a folder here, its
+ *  own fingerprint, the window's lock) */
+const LOCAL_ONLY = new Set(['installId', 'sharedOnce', 'downloadsFolder', 'accountOrder', 'unifiedOrder', 'lock', 'lockAfter', 'runAtLogin', 'dockMode', 'syncPulled'])
 /** only accounts that are switched on show anywhere */
 const ON = 'f.account_id in (select id from accounts where enabled = 1)'
 // Promotions apart and learns from you (Alex, 1 Nov 2026), as SQL over a message m:
@@ -413,8 +417,42 @@ export class MailService {
     }
   }
 
+  /** the Roar Account's copy of this setup (3 Nov 2026): as exportSetup, without any password or token, without
+   *  what belongs to this computer only, the contacts only where something was set by hand, and the blocks */
+  syncBundle(): SetupBundle {
+    const b = this.exportSetup()
+    const T = b.tables
+    T.accounts = T.accounts.map(({ secret: _s, updated_at: _u, ...a }) => a)
+    T.settings = T.settings.filter((x) => !LOCAL_ONLY.has(String(x.key)))
+    T.contacts = (T.contacts || []).filter((c) => c.vip || c.blocked || c.images_allowed)
+      .map((c) => ({ email: c.email, name: c.name ?? null, vip: c.vip ? 1 : 0, blocked: c.blocked ? 1 : 0, images_allowed: c.images_allowed ? 1 : 0 }))
+    T.block_rules = (this.db.prepare('select kind, value, label from block_rules order by kind, value').all() as Row[])
+    return { ...b, at: 0 }
+  }
+
+  /** a setup from the Roar Account: as importSetup, keeping this computer's passwords and own settings; only accounts
+   *  new here start (they still need their password, said on the Accounts page) */
+  syncImport(b: SetupBundle): number {
+    const T = { ...(b?.tables || {}) }
+    T.accounts = (T.accounts || []).map(({ secret: _s, ...a }) => a)
+    T.settings = (T.settings || []).filter((x) => !LOCAL_ONLY.has(String(x.key)))
+    const before = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e as string))
+    this.importSetup({ ...b, tables: T }, false)
+    const ins = this.db.prepare(`insert into block_rules (kind, value, label, created) values (?, ?, ?, ?) on conflict(kind, value) do nothing`)
+    for (const r of T.block_rules || []) if ((r.kind === 'name' || r.kind === 'domain') && r.value) ins.run(r.kind, r.value, r.label ?? null, now())
+    this.communitySet = null
+    return (T.accounts || []).filter((a) => !before.has(String(a.email || '').toLowerCase())).length
+  }
+
+  /** a value this computer keeps for itself in the settings table (not a setting: the sync's own marks) */
+  localValue(key: string): string | undefined { return (this.db.prepare('select value from settings where key = ?').get(key) as Row | undefined)?.value as string | undefined }
+  setLocalValue(key: string, v: string) { this.db.prepare('insert into settings (key, value) values (?, ?) on conflict(key) do update set value = excluded.value').run(key, v) }
+
+  /** this copy's fingerprint (the shared spam list and the Roar Account's device list) */
+  installPrint() { return this.reporter() }
+
   /** puts a bundle from exportSetup back; an account that is already here (same address) is updated, not doubled */
-  importSetup(b: SetupBundle): { accounts: number; signatures: number; templates: number; rules: number } {
+  importSetup(b: SetupBundle, restartAll = true): { accounts: number; signatures: number; templates: number; rules: number } {
     if (b?.format !== 'roarmail-setup' || !b.tables) throw new Error('not-a-setup')
     const cols = (t: string) => new Set((this.db.prepare(`pragma table_info(${t})`).all() as Row[]).map((c) => c.name as string))
     const put = (t: string, r: Row, verb = 'insert or replace') => {
@@ -433,7 +471,9 @@ export class MailService {
         const here = this.db.prepare('select id from accounts where lower(email) = lower(?)').get(a.email) as Row | undefined
         const id = here?.id || ((this.db.prepare('select 1 from accounts where id = ?').get(a.id)) ? uuid() : a.id)
         ids.set(a.id, id)
-        const row: Row = { ...a, id, secret: a.secret ? seal(String(a.secret)) : null, updated_at: now() }
+        // a synced account (the Roar Account) carries no password: the one here stays as it is
+        const row: Row = { ...a, id, updated_at: now() }
+        if ('secret' in a) row.secret = a.secret ? seal(String(a.secret)) : null
         if (here) {
           const { id: _i, created_at: _c, ...rest } = row
           const have = cols('accounts'), keys = Object.keys(rest).filter((k) => have.has(k))
@@ -459,7 +499,7 @@ export class MailService {
           .run(c.email, c.name ?? null, c.last_used ?? null, c.use_count || 0, c.vip ? 1 : 0, c.blocked ? 1 : 0, c.images_allowed ? 1 : 0)
       }
     })()
-    for (const id of ids.values()) { this.stopAccount(id); this.state.delete(id); if ((this.db.prepare('select enabled from accounts where id = ?').get(id) as Row)?.enabled) this.startAccount(id) }
+    for (const id of restartAll ? ids.values() : fresh) { this.stopAccount(id); this.state.delete(id); if ((this.db.prepare('select enabled from accounts where id = ?').get(id) as Row)?.enabled) this.startAccount(id) }
     this.emit({ type: 'accounts' })
     return { accounts: ids.size, signatures: (T.signatures || []).length, templates: (T.templates || []).length, rules: (T.rules || []).length }
   }

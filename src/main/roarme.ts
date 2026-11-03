@@ -92,6 +92,17 @@ export class RoarMe {
     return this.status()
   }
 
+  /** the Roar Account behind this (3 Nov 2026): RoarMail's sync and AI use the same sign-in; null when signed out
+   *  or still waiting for the two-step code */
+  async account(): Promise<{ sb: SupabaseClient; userId: string; token: string } | null> {
+    const { data } = await this.sb.auth.getSession()
+    const s = data.session
+    if (!s) return null
+    const aal = await this.sb.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (aal.data?.nextLevel === 'aal2' && aal.data?.currentLevel !== 'aal2') return null
+    return { sb: this.sb, userId: s.user.id, token: s.access_token }
+  }
+
   async signOut() {
     await this.sb.auth.signOut({ scope: 'local' }).catch(() => {})
     this.me = null

@@ -130,6 +130,11 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any>; rescue: (wh
     ipcRenderer.on('mail:event', h)
     return () => { ipcRenderer.removeListener('mail:event', h) }
   },
+  syncState: call('syncState') as MailApi['syncState'],
+  syncNow: call('syncNow') as MailApi['syncNow'],
+  aiStatus: call('aiStatus') as MailApi['aiStatus'],
+  aiSetKey: call('aiSetKey') as MailApi['aiSetKey'],
+  ai: call('ai') as MailApi['ai'],
   composeWindow: call('composeWindow') as MailApi['composeWindow'],
   composeSeed: call('composeSeed') as MailApi['composeSeed'],
   composeClose: call('composeClose') as MailApi['composeClose'],

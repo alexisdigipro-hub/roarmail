@@ -34,6 +34,8 @@ const P: Record<string, string> = {
   palette: 'M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.7 1.8-1.7H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3zM7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01M17 11h.01',
   keyboard: 'M3 7h18v11H3zM7 11h.01M11 11h.01M15 11h.01M8 15h8',
   type: 'M4 19 9.5 5h1L16 19M6.2 14h7.6M16.5 19l2.5-7 2.5 7M17.4 16.7h3.2',
+  // a four-pointed spark: the AI in a new message
+  spark: 'M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6L4.5 11l5.6-1.9zM18.5 3.5v3M17 5h3',
   // half dark, half light: the white page behind the text (Composer, dark mode)
   paper: 'M12 12m-8.5 0a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0M12 3.5v17M12 7.5h4.6M12 12h6.4M12 16.5h4.6',
   aa: 'M3 18 7.5 6h1L13 18M4.6 14h6.8M15.5 18c0-2.5 1.5-3.5 3.5-3.5h2V18M21 14.5V13c0-1.7-1-2.5-2.6-2.5-1 0-1.9.4-2.4 1',
