@@ -1045,3 +1045,8 @@ html[data-still] .msg:hover .quick { animation: none; }
 .tool.compose-btn { width: auto; height: 38px; padding: 0 16px 0 13px; gap: 7px; display: inline-flex; align-items: center; border-radius: 999px;
   font-size: 13.5px; font-weight: 600; box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent); }
 .tool.compose-btn span { color: #fff; }
+
+/* Promotions' unread count on its filter button in the bar (3 Nov 2026), in place of the pill under the bar */
+.tool.promo-btn { position: relative; }
+.promo-count { position: absolute; top: -3px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; font-style: normal;
+  font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; color: #fff; background: var(--accent); box-shadow: 0 0 0 2px var(--panel-3); }
