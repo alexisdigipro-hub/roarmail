@@ -326,8 +326,8 @@ function warningLine(k: SecurityWarning, m: MessageFull): ReactNode {
     case 'auth': return t.sec_auth
     case 'nameSpoof': return t.sec_name
     case 'replyTo': return <>{t.sec_reply} <b>{sec.replyTo}</b></>
-    case 'brand': return t.sec_brand.replace('{b}', sec.brand || '')
-    case 'lookalike': return sec.brand ? t.sec_lookalike.replace('{b}', sec.brand) : t.sec_punycode
+    case 'brand': return t.sec_brand.split('{b}').join(sec.brand || '')
+    case 'lookalike': return sec.brand ? t.sec_lookalike.split('{b}').join(sec.brand) : t.sec_punycode
     case 'attachment': return <>{t.sec_file} <b>{(sec.files || []).join(', ')}</b></>
     case 'links': return (sec.links || 1) === 1 ? t.sec_link1 : t.sec_linksN.replace('{n}', String(sec.links))
     case 'urgent': return t.sec_urgent
