@@ -1050,3 +1050,10 @@ html[data-still] .msg:hover .quick { animation: none; }
 .tool.promo-btn { position: relative; }
 .promo-count { position: absolute; top: -3px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; font-style: normal;
   font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; color: #fff; background: var(--accent); box-shadow: 0 0 0 2px var(--panel-3); }
+
+/* the rail's tool buttons, smaller (3 Nov 2026): seven round buttons that sit comfortably */
+.rail-tools { gap: 6px; }
+.rail-tools .acc.tool-btn { width: 32px; height: 32px; }
+.rail-tools .acc.tool-btn svg { width: 16px; height: 16px; }
+.rail.wide .rail-tools { grid-template-columns: repeat(7, minmax(0, 32px)); gap: 3px; }
+.rail.wide .rail-tools .acc.tool-btn { width: 100%; height: auto; }
