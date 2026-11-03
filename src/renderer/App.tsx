@@ -848,7 +848,7 @@ export default function App() {
           {(searchOpen || query) && (
             <label className="search search-cap">
               <Icon name="search" size={15} />
-              <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t.search}
+              <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={scope.accountId === 'all' ? t.searchAll : `${t.searchIn} ${accounts.find((a) => a.id === scope.accountId)?.description || accounts.find((a) => a.id === scope.accountId)?.email || ''}`.trim()}
                 onBlur={() => { if (!query.trim()) setSearchOpen(false) }} />
               <button title={t.cancel} onMouseDown={(e) => e.preventDefault()} onClick={closeSearch}><Icon name="close" size={13} /></button>
             </label>
