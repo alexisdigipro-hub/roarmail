@@ -44,7 +44,7 @@ const BRANDS: Brand[] = [
   brand('LinkedIn', ['linkedin'], ['linkedin']),
   brand('Eurobank', ['eurobank'], ['eurobank']),
   brand('Alpha Bank', ['alpha bank', 'alphabank', 'alpha τραπεζα'], ['alpha', 'alphabank']),
-  brand('Piraeus Bank', ['piraeus', 'πειραιωσ'], ['piraeusbank', 'piraeus', 'winbank'], ['piraeus bank', 'piraeusbank', 'τραπεζα πειραιωσ', 'winbank']),
+  brand('Piraeus Bank', ['piraeus', 'πειραιωσ', 'winbank'], ['piraeusbank', 'piraeus', 'winbank'], ['piraeus bank', 'piraeusbank', 'τραπεζα πειραιωσ', 'winbank']),
   brand('NBG', ['εθνικη τραπεζα', 'nbg', 'national bank of greece'], ['nbg'], ['εθνικη τραπεζα', 'national bank of greece']),
   brand('Cosmote', ['cosmote'], ['cosmote', 'ote']),
   brand('Vodafone', ['vodafone'], ['vodafone']),

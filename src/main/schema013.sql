@@ -2,7 +2,7 @@
 -- Besides the blocked addresses (contacts.blocked), a sender's name or a whole domain can be blocked. A name is kept
 -- folded (lower case, no accents, single spaces) and never catches someone you wrote to or a VIP.
 create table if not exists block_rules (
-  kind text not null,  -- 'name' or 'domain'
+  kind text not null,  -- 'name', 'domain' or 'brand' (a fake's brand, 4 Nov 2026)
   value text not null, -- folded name, or a domain such as deals-xyz.com
   label text,          -- the name as it was shown, for Settings > Privacy
   created integer,

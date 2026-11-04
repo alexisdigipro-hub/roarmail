@@ -21,7 +21,7 @@ import { OAUTH_PREFIX, refresh as msRefresh, signIn as msSignIn } from './micros
 import { cleanRule, plan } from './rules'
 import { fieldLike, readSignature, type CardFields } from './contacts'
 import { attendeeFor, buildReply, readInvite } from './ics'
-import { PERSONAL, baseDomain, blockNameKey, blockableDomain, blockableName, emailDomain, shield } from './shield'
+import { PERSONAL, baseDomain, blockNameKey, blockableDomain, blockableName, claimedBrand, emailDomain, shield } from './shield'
 import type {
   RoarProject, Account, AccountPatch, Action, Address, BlockItem, Contact, ContactFull, ContactPatch, Draft, MailFile, Folder, FolderRole, Invite, InviteAnswer, ListScope, MailEvent, MessageFull, MessageRow, OutboxItem,
   MailStats, PromoCount, Rule, ServerConfig, Settings, Signature, SnoozedItem, Template,
@@ -463,7 +463,7 @@ export class MailService {
     const before = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e as string))
     this.importSetup({ ...b, tables: T }, false)
     const ins = this.db.prepare(`insert into block_rules (kind, value, label, created) values (?, ?, ?, ?) on conflict(kind, value) do nothing`)
-    for (const r of T.block_rules || []) if ((r.kind === 'name' || r.kind === 'domain') && r.value) ins.run(r.kind, r.value, r.label ?? null, now())
+    for (const r of T.block_rules || []) if ((r.kind === 'name' || r.kind === 'domain' || r.kind === 'brand') && r.value) ins.run(r.kind, r.value, r.label ?? null, now())
     this.communitySet = null
     return (T.accounts || []).filter((a) => !before.has(String(a.email || '').toLowerCase())).length
   }
@@ -1250,7 +1250,7 @@ export class MailService {
     if (folder.role === 'inbox') {
       // blocked senders (the address, their name from any address, a whole domain) and mail the shield calls dangerous
       // go to Junk, not Trash, so the mail server learns too (Alex, 2 Nov 2026)
-      const gone = new Set([...this.blockedIn(folderId), ...this.dangerous(arrived), ...this.community(arrived)])
+      const gone = new Set([...this.blockedIn(folderId), ...this.dangerous(arrived), ...this.community(arrived), ...this.brandBlocked(arrived)])
       if (gone.size) {
         for (let i = fresh.length - 1; i >= 0; i--) if (gone.has(fresh[i].id)) fresh.splice(i, 1)
         this.act([...gone], 'junk', undefined, true).catch(() => {})
@@ -1265,7 +1265,7 @@ export class MailService {
     // Junk: a blocked sender's mail does not sit there either, it goes on to the Trash (Alex, 3 Nov 2026: "I block it,
     // delete it, and it shows again in Junk"); the server's filter has seen it in Junk already
     if (folder.role === 'spam') {
-      const out = this.blockedIn(folderId)
+      const out = this.junkToTrash(folderId)
       if (out.length) {
         for (let i = fresh.length - 1; i >= 0; i--) if (out.includes(fresh[i].id)) fresh.splice(i, 1)
         this.act(out, 'trash', undefined, true).catch(() => {})
@@ -1853,6 +1853,12 @@ export class MailService {
       byName = true
     }
     if (!blocked && who) this.db.prepare(`delete from block_rules where kind = 'name' and value = ?`).run(blockNameKey(who))
+    // the brand a fake pretended to be (4 Nov 2026): kept too, so the next fake of it from a new address is caught
+    if (blocked && !this.isKnown(e)) {
+      const m = this.db.prepare('select from_name, subject from messages where from_email = ? order by date desc limit 1').get(e) as Row | undefined
+      const b = claimedBrand(who || m?.from_name || '', m?.subject || '', emailDomain(e), true)
+      if (b) this.db.prepare(`insert into block_rules (kind, value, label, created) values ('brand', ?, ?, ?) on conflict(kind, value) do nothing`).run(b, b, now())
+    }
     if (blocked) this.sweepBlocked()
     // the shared list: the address, and the name when it was blocked (or taken off with the unblock)
     const shared: { kind: string; value: string }[] = [{ kind: 'email', value: e }]
@@ -2003,10 +2009,58 @@ export class MailService {
     return out
   }
 
+  private idsIn(folderId: string): string[] {
+    return (this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id where mf.folder_id = ? and m.pending_op is null`)
+      .all(folderId) as Row[]).map((r) => r.id as string)
+  }
+
+  /** a brand blocked (4 Nov 2026): Block on a fake bank or courier mail keeps the brand it pretended to be, and from then on
+   *  every mail that claims that brand from an address the brand does not own is caught, whatever address it comes from */
+  private brandBlocked(ids: string[]): string[] {
+    const brands = new Set((this.db.prepare(`select value from block_rules where kind = 'brand'`).all() as Row[]).map((r) => r.value as string))
+    if (!ids.length || !brands.size) return []
+    const out: string[] = []
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500)
+      for (const r of this.db.prepare(`select id, from_name, from_email, subject from messages where id in (${part.map(() => '?').join(',')})`).all(...part) as Row[]) {
+        const from = String(r.from_email || '').toLowerCase()
+        if (!from || this.isKnown(from)) continue
+        const b = claimedBrand(r.from_name || '', r.subject || '', emailDomain(from), true)
+        if (b && brands.has(b)) out.push(r.id)
+      }
+    }
+    return out
+  }
+
+  /** what leaves Junk for the Trash (Alex, 4 Nov 2026: "I block them in Junk and they show again"): a blocked sender, a
+   *  blocked brand, the shared spam list, and the fakes the shield is sure about (a brand from an address it does not own,
+   *  a lookalike address, a name posing as another address). Phishing comes from a new address every time, so blocking
+   *  the address alone never kept them out of Junk. Never mail from people you know. */
+  private junkToTrash(folderId: string): string[] {
+    const all = this.idsIn(folderId)
+    const out = new Set([...this.blockedIn(folderId), ...this.brandBlocked(all), ...this.community(all)])
+    if (this.settings().junkDanger) {
+      for (let i = 0; i < all.length; i += 500) {
+        const part = all.slice(i, i + 500)
+        for (const r of this.db.prepare(`select id, from_name, from_email, reply_to, subject, list_unsubscribe from messages where id in (${part.map(() => '?').join(',')})`).all(...part) as Row[]) {
+          const from = String(r.from_email || '').toLowerCase()
+          if (!from || out.has(r.id) || this.isKnown(from)) continue
+          const sec = shield({ authResults: '', fromName: r.from_name || '', fromEmail: from, replyTo: r.reply_to || undefined,
+            subject: r.subject || '', text: '', files: [], firstTime: true, known: false, list: !!r.list_unsubscribe })
+          if (sec.warnings.some((w) => w === 'brand' || w === 'lookalike' || w === 'nameSpoof')) out.add(r.id)
+        }
+      }
+    }
+    return [...out]
+  }
+
   /** after a new block: what is already in the inboxes from them goes to Junk too */
   private sweepBlocked() {
     const ids: string[] = [], junk: string[] = []
-    for (const f of this.db.prepare(`select f.id, f.role from folders f where f.role in ('inbox', 'spam') and ${ON}`).all() as Row[]) (f.role === 'spam' ? junk : ids).push(...this.blockedIn(f.id))
+    for (const f of this.db.prepare(`select f.id, f.role from folders f where f.role in ('inbox', 'spam') and ${ON}`).all() as Row[]) {
+      if (f.role === 'spam') junk.push(...this.junkToTrash(f.id))
+      else ids.push(...new Set([...this.blockedIn(f.id), ...this.brandBlocked(this.idsIn(f.id))]))
+    }
     if (ids.length) this.act(ids, 'junk', undefined, true).catch(() => {})
     // what a blocked sender has in Junk already goes to the Trash (3 Nov 2026)
     if (junk.length) this.act(junk, 'trash', undefined, true).catch(() => {})
