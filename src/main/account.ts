@@ -98,6 +98,7 @@ export class RoarAccount {
       let added = 0, skipPush = false
       if (remote && remote.updated_at !== pulled && remote.device !== install && remote.data?.format === 'roarmail-setup') {
         added = this.mail.syncImport(remote.data as SetupBundle)
+        this.mail.settingsChanged()
         this.setLocal('syncPulled', remote.updated_at)
         // what just came in is the new starting point: it does not go back up (two computers would answer each other)
         if (!first) { this.lastPrint = printOf(this.mail.syncBundle()); skipPush = true }

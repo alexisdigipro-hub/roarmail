@@ -457,6 +457,9 @@ export class MailService {
     return { ...b, at: 0 }
   }
 
+  /** settings came from another computer: every window reads them again */
+  settingsChanged() { this.emit({ type: 'settings' }) }
+
   /** when each setting was changed by hand on this computer (or came newer from another one) */
   private settingsAt(): Record<string, number> {
     try { return JSON.parse(this.localValue('settingsAt') || '{}') || {} } catch { return {} }
