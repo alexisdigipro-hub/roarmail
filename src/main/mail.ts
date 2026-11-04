@@ -80,7 +80,8 @@ const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 const WAITING_DAYS = 30
 /** settings that belong to this computer, never carried by the Roar Account's sync (ids made here, a folder here, its
  *  own fingerprint, the window's lock) */
-const LOCAL_ONLY = new Set(['installId', 'sharedOnce', 'downloadsFolder', 'accountOrder', 'unifiedOrder', 'lock', 'lockAfter', 'runAtLogin', 'dockMode', 'syncPulled'])
+const LOCAL_ONLY = new Set(['installId', 'sharedOnce', 'downloadsFolder', 'accountOrder', 'unifiedOrder', 'lock', 'lockAfter', 'runAtLogin', 'dockMode', 'syncPulled',
+  'settingsAt', 'roarProjects', 'waitingAdded'])
 /** only accounts that are switched on show anywhere */
 const ON = 'f.account_id in (select id from accounts where enabled = 1)'
 // Promotions apart and learns from you (Alex, 1 Nov 2026), as SQL over a message m:
@@ -451,7 +452,14 @@ export class MailService {
       .map((c) => ({ email: c.email, name: c.name ?? null, vip: c.vip ? 1 : 0, blocked: c.blocked ? 1 : 0, images_allowed: c.images_allowed ? 1 : 0,
         title: c.title ?? null, company: c.company ?? null, phone: c.phone ?? null, website: c.website ?? null, notes: c.notes || '', groups: c.groups || '', use_count: c.use_count || 0 }))
     T.block_rules = (this.db.prepare('select kind, value, label from block_rules order by kind, value').all() as Row[])
+    // when each setting was last changed (4 Nov 2026): the other computer takes a setting only when this one is newer
+    T.settings_at = [{ at: this.settingsAt() }]
     return { ...b, at: 0 }
+  }
+
+  /** when each setting was changed by hand on this computer (or came newer from another one) */
+  private settingsAt(): Record<string, number> {
+    try { return JSON.parse(this.localValue('settingsAt') || '{}') || {} } catch { return {} }
   }
 
   /** a setup from the Roar Account: as importSetup, keeping this computer's passwords and own settings; only accounts
@@ -459,7 +467,20 @@ export class MailService {
   syncImport(b: SetupBundle): number {
     const T = { ...(b?.tables || {}) }
     T.accounts = (T.accounts || []).map(({ secret: _s, ...a }) => a)
-    T.settings = (T.settings || []).filter((x) => !LOCAL_ONLY.has(String(x.key)))
+    // a setting comes in only when it was changed there after it was changed here (Alex, 4 Nov 2026: "I make the accent blue
+    // and it turns red": the other computer's whole copy, sent for any small change, put back its own older colour).
+    // A copy from before these times overwrites nothing that is already set here.
+    const theirs: Record<string, number> = (T.settings_at?.[0]?.at as Record<string, number>) || {}
+    const mine = this.settingsAt()
+    const have = new Set((this.db.prepare('select key from settings').all() as Row[]).map((r) => String(r.key)))
+    T.settings = (T.settings || []).filter((x) => {
+      const k = String(x.key)
+      if (LOCAL_ONLY.has(k)) return false
+      return (theirs[k] || 0) > (mine[k] || 0) || (!have.has(k) && !mine[k])
+    })
+    for (const x of T.settings) mine[String(x.key)] = Math.max(mine[String(x.key)] || 0, theirs[String(x.key)] || 0)
+    this.setLocalValue('settingsAt', JSON.stringify(mine))
+    delete T.settings_at
     const before = new Set((this.db.prepare('select lower(email) e from accounts').all() as Row[]).map((r) => r.e as string))
     this.importSetup({ ...b, tables: T }, false)
     const ins = this.db.prepare(`insert into block_rules (kind, value, label, created) values (?, ?, ?, ?) on conflict(kind, value) do nothing`)
@@ -2928,6 +2949,7 @@ export class MailService {
   setSetting(key: keyof Settings, value: unknown) {
     if (!(key in SETTINGS)) return
     this.db.prepare(`insert into settings (key, value) values (?, ?) on conflict(key) do update set value = excluded.value`).run(key, String(value))
+    const at = this.settingsAt(); at[key] = Date.now(); this.setLocalValue('settingsAt', JSON.stringify(at))
     if (key === 'checkEvery') this.schedulePoll()
     if (key === 'dockBadge') this.badge()
     if (key === 'promosApart' || key === 'learnQuiet') this.inboxesChanged()
