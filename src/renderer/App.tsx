@@ -115,7 +115,7 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), tst.ms ?? 6000)
   }, [])
 
-  useEffect(() => { api.lockState().then((l) => { setLocked(l.locked); if (!l.locked) { loadAccounts(); loadOutbox(); api.settings().then(setPrefs) } }) }, [])
+  useEffect(() => { api.lockState().then((l) => { setLocked(l.locked); if (!l.locked) { loadAccounts(); loadOutbox(); api.settings().then((x) => { setPrefs(x); applyLook(x) }) } }) }, [])
   useEffect(() => { loadFolders(); loadRows(); setSelected([]) }, [scope])
   // RoarMe's opening: the side from the left, the rows in turn, the reader rising (once)
   useEffect(() => { const h = setTimeout(() => setIntro(false), 1600); return () => clearTimeout(h) }, [])
@@ -157,7 +157,7 @@ export default function App() {
     if (e.type === 'outbox') loadOutbox()
     if (e.type === 'opFailed') flash({ text: `${t.opFailed} (${e.error})` })
     if (e.type === 'sound') playNewMail(e.sound)
-    if (e.type === 'lock') { setLocked(e.locked); if (!e.locked) { loadAccounts(); loadOutbox(); loadFolders(); loadRows(); api.settings().then(setPrefs) } }
+    if (e.type === 'lock') { setLocked(e.locked); if (!e.locked) { loadAccounts(); loadOutbox(); loadFolders(); loadRows(); api.settings().then((x) => { setPrefs(x); applyLook(x) }) } }
   }), [])
   useEffect(() => setActionSounds(!!prefs.actionSounds), [prefs.actionSounds])
   // Settings > General > Language: kept where i18n reads it before anything is drawn; a change reloads the window

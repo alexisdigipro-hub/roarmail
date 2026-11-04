@@ -32,7 +32,7 @@ let background = false // keep running in the menu bar / tray when the window cl
 
 // App lock (Touch ID on a Mac). While locked the main process answers nothing but these, so a locked
 // window cannot read mail even through its developer tools.
-const OPEN_WHEN_LOCKED = new Set(['mail:platform', 'mail:lockState', 'mail:unlock'])
+const OPEN_WHEN_LOCKED = new Set(['mail:platform', 'mail:lockState', 'mail:unlock', 'mail:settings'])
 const lockAvailable = () => process.platform === 'darwin' && systemPreferences.canPromptTouchID()
 function handle(channel: string, fn: (e: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown) {
   ipcMain.handle(channel, (e, ...args) => {
