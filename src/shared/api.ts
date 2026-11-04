@@ -209,7 +209,7 @@ export interface Security {
 }
 
 /** a block in Settings > Privacy: an address, a sender's name (from any address) or a whole domain */
-export interface BlockItem { kind: 'email' | 'name' | 'domain'; value: string; label: string }
+export interface BlockItem { kind: 'email' | 'name' | 'domain' | 'brand'; value: string; label: string }
 
 /** what a panel window asks of the main window */
 export type PanelAction =

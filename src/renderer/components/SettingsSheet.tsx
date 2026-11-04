@@ -944,7 +944,7 @@ function Privacy({ s, set }: { s: Settings; set: Set }) {
         <Toggle label={t.bl_danger} hint={t.bl_dangerHint} on={s.junkDanger} set={(v) => set('junkDanger', v)} />
         <Toggle label={t.bl_share} hint={t.bl_shareHint} on={s.shareBlocks} set={(v) => set('shareBlocks', v)} />
         {blocked.map((b) => (
-          <Line key={`${b.kind}:${b.value}`} label={<span className="ellipsis">{b.kind === 'domain' ? `@${b.label}` : b.label}{b.kind !== 'email' && <span className="muted"> · {b.kind === 'name' ? t.bl_kindName : t.bl_kindDomain}</span>}</span>}>
+          <Line key={`${b.kind}:${b.value}`} label={<span className="ellipsis">{b.kind === 'domain' ? `@${b.label}` : b.label}{b.kind !== 'email' && <span className="muted"> · {b.kind === 'name' ? t.bl_kindName : b.kind === 'brand' ? t.bl_kindBrand : t.bl_kindDomain}</span>}</span>}>
             <button className="pill small ghost" onClick={async () => { await window.roarmail.unblock({ kind: b.kind, value: b.value }); setBlocked(blocked.filter((x) => x !== b)) }}>{t.unblock}</button>
           </Line>
         ))}
