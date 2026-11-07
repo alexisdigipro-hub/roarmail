@@ -27,5 +27,6 @@ jobs:
           grep -q 'class="rows' dom.html && grep -q 'class="rail-tools' dom.html || { echo "The screens did not open:"; head -c 3000 dom.html; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: screens
           path: dist/renderer
