@@ -20,3 +20,5 @@ A desktop mail client for Mac and Windows, in the THEMADLIONS look. TheMadlions 
 
 `npm install`, then `npm start` to run, `npm test` for the tests of the plain parts (rules, calendar invitations, templates; Node 22's own test runner), `npm run dist:mac` / `npm run dist:win` for installers.
 Releases: bump `version` in package.json, push, then push a tag `desktop-vX.Y.Z`.
+
+0.34.4: new icon (the Lab's one family of icons, 10 Nov 2026).
