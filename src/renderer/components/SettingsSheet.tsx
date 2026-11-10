@@ -342,6 +342,7 @@ function ListPage({ s, set }: { s: Settings; set: Set }) {
   return (
     <div className="stack">
       <Group title={t.sec_rows}>
+        <Toggle label={t.ap_subject} hint={t.ap_subjectHint} on={s.listSubject !== false} set={(v) => set('listSubject', v)} />
         <Line label={t.ap_preview}>
           <Choice value={s.previewLines} onChange={(v) => set('previewLines', v)} options={[[0, t.ap_previewNone], [1, t.ap_preview1], [2, t.ap_preview2], [3, t.ap_preview3]]} />
         </Line>
