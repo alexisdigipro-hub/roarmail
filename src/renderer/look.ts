@@ -27,7 +27,7 @@ export const GENERAL_DEFAULTS = {
   language: 'auto', unifiedInbox: true, linksInBackground: false, dockMode: 'both', notifyReply: true, markRead: 'open',
   accountColours: true, accountBadges: true, inboxCounter: 'unread', folderCounter: 'unread',
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
-  autoUpdate: true, senderPictures: true, previewLines: 2, listSubject: true, listAvatars: true, threadOrder: 'oldest',
+  autoUpdate: true, senderPictures: true, previewLines: 2, listSubject: true, glassAvatars: false, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,waiting,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '', accountOrder: '',
   promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true, syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '',
 } as const satisfies Partial<Settings>
@@ -64,17 +64,28 @@ const inkOn = (hex: string) => {
 }
 
 const dark = () => window.matchMedia('(prefers-color-scheme: dark)')
+let accentHex = ''
+/** a colour mixed toward black (0..1) */
+const deepen = (hex: string, k: number) => '#' + [16, 8, 0].map((sh) => Math.round(((parseInt(hex.slice(1), 16) >> sh) & 255) * (1 - k)).toString(16).padStart(2, '0')).join('')
+/** the accent for the mode it is seen in (Alex, 10 Nov 2026: "on some buttons the letters do not show"): a light accent
+ *  (white, yellow, cyan) is deepened on the light Day mode so its text and buttons still stand out on white, and the text
+ *  on it is dark or white by its own lightness */
+function wearAccent() {
+  const r = document.documentElement
+  if (!accentHex) { ['--accent', '--accent-2', '--accent-ink'].forEach((v) => r.style.removeProperty(v)); return }
+  const light = inkOn(accentHex) !== '#ffffff'
+  const hex = r.dataset.mode === 'light' && light ? deepen(accentHex === '#ffffff' ? '#5b6170' : accentHex, accentHex === '#ffffff' ? 0 : 0.35) : accentHex
+  r.style.setProperty('--accent', hex)
+  r.style.setProperty('--accent-2', hex === '#d40000' ? '#ff3b30' : hex)
+  r.style.setProperty('--accent-ink', inkOn(hex))
+}
 let followSystem: (() => void) | null = null
 
 export function applyLook(s: Settings) {
   const r = document.documentElement
   r.dataset.theme = s.theme || 'simba'
-  const hex = ACCENTS.find(([k]) => k === s.accent)?.[2]
-  if (hex) {
-    r.style.setProperty('--accent', hex)
-    r.style.setProperty('--accent-2', hex === '#d40000' ? '#ff3b30' : hex)
-    r.style.setProperty('--accent-ink', inkOn(hex))
-  } else ['--accent', '--accent-2', '--accent-ink'].forEach((v) => r.style.removeProperty(v))
+  accentHex = ACCENTS.find(([k]) => k === s.accent)?.[2] || ''
+  if (s.glassAvatars) r.dataset.glassAv = '1'; else delete r.dataset.glassAv
   const f = FONTS.find(([k]) => k === s.font)
   if (f && s.font !== 'system') { r.style.setProperty('--font', f[2]); r.dataset.font = s.font } else { r.style.removeProperty('--font'); delete r.dataset.font }
   r.dataset.density = s.density || 'standard'
@@ -90,6 +101,7 @@ export function applyLook(s: Settings) {
   r.dataset.surface = s.glass === false ? 'solid' : 'glass'
   if (s.lite) r.dataset.lite = '1'; else delete r.dataset.lite
   applyMode(s.appearance)
+  wearAccent()
   window.dispatchEvent(new Event('roarmail-look'))
 }
 
@@ -101,6 +113,7 @@ export function applyMode(mode: Settings['appearance']) {
     r.dataset.mode = mode === 'light' || (mode === 'system' && !dark().matches) ? 'light' : 'dark'
     // the window's own colour follows, so a growing window never shows the other mode at its edges
     window.roarmail?.windowColor?.(r.dataset.mode === 'light' ? '#eceef1' : '#1b1e23')
+    wearAccent()
   }
   set()
   if (mode === 'system') { followSystem = set; dark().addEventListener('change', set) }

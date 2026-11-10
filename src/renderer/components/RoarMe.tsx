@@ -123,7 +123,7 @@ export function ShareSheet({ message, onClose, onDone }: { message: MessageFull;
               {!rooms && <div className="spinner" />}
               {list.map((r) => (
                 <button key={r.id} className={`room ${pick === r.id ? 'on' : ''}`} onClick={() => setPick(r.id)} onDoubleClick={() => { setPick(r.id); setTimeout(send, 0) }}>
-                  <div className="avatar" style={{ background: tint(r.title) }}>{r.avatar ? <img src={r.avatar} alt="" /> : initials(r.title)}</div>
+                  <div className="avatar" style={{ background: tint(r.title), ['--av-c' as any]: tint(r.title) }}>{r.avatar ? <img src={r.avatar} alt="" /> : initials(r.title)}</div>
                   <span className="grow ellipsis"><b>{r.title}</b>{r.kind !== 'direct' && <small className="muted"> · {r.members.length}</small>}</span>
                   {r.unread > 0 && <span className="count">{r.unread}</span>}
                 </button>

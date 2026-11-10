@@ -347,6 +347,7 @@ function ListPage({ s, set }: { s: Settings; set: Set }) {
           <Choice value={s.previewLines} onChange={(v) => set('previewLines', v)} options={[[0, t.ap_previewNone], [1, t.ap_preview1], [2, t.ap_preview2], [3, t.ap_preview3]]} />
         </Line>
         <Toggle label={t.ap_avatars} hint={t.ap_avatarsHint} on={s.listAvatars} set={(v) => set('listAvatars', v)} />
+        <Toggle label={t.ap_glassAv} hint={t.ap_glassAvHint} on={!!s.glassAvatars} disabled={!s.listAvatars} set={(v) => set('glassAvatars', v)} />
         <Toggle label={t.ap_senderPics} hint={s.privacyMode ? t.ap_senderPicsOff : t.ap_senderPicsHint} on={s.senderPictures && !s.privacyMode} disabled={s.privacyMode || !s.listAvatars} set={(v) => set('senderPictures', v)} />
         <Toggle label={t.ap_accColours} hint={t.ap_accColoursHint} on={s.accountColours} set={(v) => set('accountColours', v)} />
       </Group>
