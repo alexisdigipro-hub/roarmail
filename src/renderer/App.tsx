@@ -1094,7 +1094,7 @@ function RowView({ r, pic, on, multi, acc, prefs, acts }: { r: MessageRow; pic: 
           <Icon name={side === 'archive' ? 'archive' : side === 'trash' ? 'trash' : side === 'flag' ? 'star' : 'dot'} size={18} />
         </div>
       )}
-      <div className={`msg ${on ? 'on' : ''} ${r.seen ? '' : 'unread'}`} style={dx ? { transform: `translateX(${dx}px)` } : undefined} onClick={onClick} onContextMenu={onMenu}>
+      <div className={`msg ${on ? 'on' : ''} ${r.seen ? '' : 'unread'} ${prefs.listSubject === false ? 'only-name' : ''}`} style={dx ? { transform: `translateX(${dx}px)` } : undefined} onClick={onClick} onContextMenu={onMenu}>
         {/* the picture is also the row's checkbox: a click there adds it to the selection (or takes it out) */}
         <div className={`pick-wrap ${on && multi ? 'picked' : ''} ${prefs.listAvatars ? '' : 'bare'}`} title={t.pickRow}
           onClick={(e) => { e.stopPropagation(); onPick() }}>
@@ -1112,8 +1112,8 @@ function RowView({ r, pic, on, multi, acc, prefs, acts }: { r: MessageRow; pic: 
             {r.flagged && <span className="star"><Icon name="star" size={13} filled /></span>}
             <span className="muted small">{when(r.date)}</span>
           </div>
-          <div className="ellipsis subj">{r.subject || t.noSubject}</div>
-          {prefs.previewLines > 0 && <div className="snip muted" style={{ WebkitLineClamp: prefs.previewLines }}>{r.snippet}</div>}
+          {prefs.listSubject !== false && <div className="ellipsis subj">{r.subject || t.noSubject}</div>}
+          {prefs.listSubject !== false && prefs.previewLines > 0 && <div className="snip muted" style={{ WebkitLineClamp: prefs.previewLines }}>{r.snippet}</div>}
         </div>
         {acc && <i className="acc-bar" style={{ background: acc.color }} />}
         <div className="quick" onClick={(e) => e.stopPropagation()}>

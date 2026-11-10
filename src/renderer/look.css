@@ -1066,3 +1066,7 @@ html[data-still] .msg:hover .quick { animation: none; }
 /* Roar Account projects in the side list (3 Nov 2026) */
 .folder-group { padding: 14px 14px 4px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .pj-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; margin: 0 3px; box-shadow: 0 0 8px currentColor; }
+
+/* only the sender in the list (Alex, 10 Nov 2026): one line a message, the picture smaller */
+.msg.only-name { padding-top: 7px; padding-bottom: 7px; align-items: center; }
+.msg.only-name .avatar { width: 28px; height: 28px; font-size: 11px; }
