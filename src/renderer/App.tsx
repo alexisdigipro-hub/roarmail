@@ -1100,7 +1100,7 @@ function RowView({ r, pic, on, multi, acc, prefs, acts }: { r: MessageRow; pic: 
           onClick={(e) => { e.stopPropagation(); onPick() }}>
           {prefs.listAvatars && (pic && !badPic
             ? <div className="avatar pic" style={{ background: '#fff' }}><img src={pic} alt="" onError={() => setBadPic(true)} /></div>
-            : <div className="avatar" style={{ background: tint(r.fromEmail) }}>{initials(r.fromName || r.fromEmail)}</div>)}
+            : <div className="avatar" style={{ background: tint(r.fromEmail), ['--av-c' as any]: tint(r.fromEmail) }}>{initials(r.fromName || r.fromEmail)}</div>)}
           <span className="pick-mark"><Icon name="check" size={14} /></span>
         </div>
         <div className="msg-body">

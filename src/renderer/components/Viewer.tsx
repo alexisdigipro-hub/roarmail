@@ -108,7 +108,7 @@ export function Viewer({ row, accounts, prefs, way, onCompose, onAct, onRoar, on
               onCompose={onCompose} onRule={onRule} onContact={onContact} onWriteTo={onWriteTo} onAllMail={onAllMail} onFind={onFind} onSnooze={() => onAct('snooze')} />
           : (
             <button key={m.id} className="folded" onClick={() => setOpen((s) => new Set(s).add(m.id))}>
-              <div className="avatar small-av" style={{ background: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
+              <div className="avatar small-av" style={{ background: tint(m.fromEmail), ['--av-c' as any]: tint(m.fromEmail) }}>{initials(m.fromName || m.fromEmail)}</div>
               <b className={m.seen ? '' : 'unread'}>{m.fromName || m.fromEmail}</b>
               <span className="grow ellipsis muted">{m.snippet}</span>
               <span className="muted small">{when(m.date)}</span>

@@ -380,6 +380,8 @@ export interface Settings {
   previewLines: number
   /** the subject under the sender in the list; off: only the sender, one line a message (Alex, 10 Nov 2026) */
   listSubject: boolean
+  /** the pictures and initials as see-through glass with a trace of colour (Alex, 10 Nov 2026) */
+  glassAvatars: boolean
   /** Appearance > List: the round picture or initials at the start of each row */
   listAvatars: boolean
   /** Appearance > List > Conversations: the messages of a conversation from the oldest down, or the newest on top */

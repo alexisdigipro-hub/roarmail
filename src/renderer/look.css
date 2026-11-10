@@ -218,7 +218,7 @@ html[data-theme='pumba'] .accent-dot.theme-own { --c: #ff5d4a; }
 .switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--edge); transition: background .25s, box-shadow .25s; pointer-events: none; }
 .switch i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); transition: transform .35s var(--spring); }
 .switch input:checked + i { background: var(--accent); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 55%, transparent); }
-.switch input:checked + i::after { transform: translateX(18px); }
+.switch input:checked + i::after { transform: translateX(18px); background: var(--accent-ink); }
 
 .set-preview { display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: var(--R); background: var(--panel); box-shadow: var(--shadow), inset 0 0 0 1px var(--edge); }
 .set-preview .msg { cursor: default; }
@@ -394,7 +394,7 @@ small.block { display: block; margin-top: 2px; font-size: 12px; }
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
 .pill-group .tool, .composer-tools .tool { width: 30px; height: 30px; border-radius: 50%; color: var(--text); opacity: .85; }
 .pill-group .tool:hover, .composer-tools .tool:hover { opacity: 1; background: var(--glass-2); }
-.pill-group .tool.on-filter, .composer-tools .tool.on-filter { opacity: 1; color: #fff; background: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent); }
+.pill-group .tool.on-filter, .composer-tools .tool.on-filter { opacity: 1; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 80%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent); }
 html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { background: rgba(255, 255, 255, .7); }
 .composer-tools .sep { height: 16px; margin: 0 3px; }
 /* the sheet's own inputs are tall; the format bar and the reminder menu stay compact */
@@ -422,7 +422,7 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 /* dragging mail onto a folder */
 .folder.drop { background: var(--sel); box-shadow: inset 0 0 0 1.5px var(--accent-2), var(--glow); }
 .drag-ghost { position: fixed; top: -100px; left: -100px; max-width: 260px; padding: 6px 12px; border-radius: 999px; font: 600 12.5px var(--font);
-  color: #fff; background: var(--accent); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  color: var(--accent-ink); background: var(--accent); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .swipe[draggable='true'] { -webkit-user-drag: element; }
 
 /* picking rows with the mouse: the picture turns into a checkbox on hover and when picked */
@@ -431,7 +431,7 @@ html[data-mode='light'] .pill-group, html[data-mode='light'] .composer-tools { b
 .pick-mark { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center; color: #fff; opacity: 0;
   background: color-mix(in srgb, var(--panel-3) 80%, transparent); box-shadow: inset 0 0 0 1.5px var(--edge-2); transition: opacity .15s; }
 .msg:hover .pick-wrap:hover .pick-mark, .pick-wrap.bare .pick-mark { opacity: .9; }
-.pick-wrap.picked .pick-mark { opacity: 1; background: var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 60%, transparent); }
+.pick-wrap.picked .pick-mark { opacity: 1; color: var(--accent-ink); background: var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 60%, transparent); }
 .pick-wrap.bare:not(.picked) .pick-mark .ic { opacity: 0; }
 .pick-wrap { align-self: flex-start; line-height: 0; }
 .pick-wrap .avatar { margin: 0; }
@@ -1006,9 +1006,9 @@ html.panel-window .sheet.settings .set-head { padding-top: 40px; }
 @media (max-width: 760px) { .acct-layout { grid-template-columns: 1fr; } .acct-list { position: static; max-height: 220px; } }
 
 /* New message (3 Nov 2026): a bigger round button in the accent, the one action of the list's top row that stands out */
-.tool.compose-btn { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent); }
+.tool.compose-btn { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent); }
 .tool.compose-btn:hover { filter: brightness(1.12); background: var(--accent); }
-.tool.compose-btn svg { color: #fff; }
+.tool.compose-btn svg { color: var(--accent-ink); }
 
 /* one soft ring around a search pill, never a square one inside it (Alex, 3 Nov 2026: "the glow looks thick and odd"):
    the text field inside a pill carries no ring of its own, also with Strong focus rings on; the strong ring itself is
@@ -1044,12 +1044,12 @@ html[data-still] .msg:hover .quick { animation: none; }
 /* New message as a flat pill as tall as the filter bar under it (Alex, 3 Nov 2026: "too big and round") */
 .tool.compose-btn { width: auto; height: 38px; padding: 0 16px 0 13px; gap: 7px; display: inline-flex; align-items: center; border-radius: 999px;
   font-size: 13.5px; font-weight: 600; box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent); }
-.tool.compose-btn span { color: #fff; }
+.tool.compose-btn span { color: var(--accent-ink); }
 
 /* Promotions' unread count on its filter button in the bar (3 Nov 2026), in place of the pill under the bar */
 .tool.promo-btn { position: relative; }
 .promo-count { position: absolute; top: -3px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; font-style: normal;
-  font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; color: #fff; background: var(--accent); box-shadow: 0 0 0 2px var(--panel-3); }
+  font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; color: var(--accent-ink); background: var(--accent); box-shadow: 0 0 0 2px var(--panel-3); }
 
 /* the rail's tool buttons, smaller (3 Nov 2026): seven round buttons that sit comfortably */
 .rail-tools { gap: 6px; }
@@ -1070,3 +1070,21 @@ html[data-still] .msg:hover .quick { animation: none; }
 /* only the sender in the list (Alex, 10 Nov 2026): one line a message, the picture smaller */
 .msg.only-name { padding-top: 7px; padding-bottom: 7px; align-items: center; }
 .msg.only-name .avatar { width: 28px; height: 28px; font-size: 11px; }
+
+/* text on the accent always reads (Alex, 10 Nov 2026: "on some buttons the letters do not show"): with a light accent
+   (white, yellow, cyan) the ink is dark, see look.ts inkOn; nothing on the accent keeps a fixed white */
+
+/* Glass pictures (Alex, 10 Nov 2026, Settings > the list): initials as see-through glass with a trace of their colour,
+   pictures faded into a glass ring, everywhere an avatar shows */
+html[data-glass-av] .avatar, html[data-glass-av] .acct-av, html[data-glass-av] .big-acc {
+  background: color-mix(in srgb, var(--av-c, #8a8f98) 14%, rgba(255, 255, 255, .05)) !important;
+  color: color-mix(in srgb, var(--av-c, #c9ced6) 55%, var(--text)) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), inset 0 1px 0 rgba(255, 255, 255, .12);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+}
+html[data-glass-av] .avatar.pic img, html[data-glass-av] .acct-av img, html[data-glass-av] .big-acc img { filter: saturate(.35); opacity: .78; }
+html[data-mode='light'][data-glass-av] .avatar, html[data-mode='light'][data-glass-av] .acct-av, html[data-mode='light'][data-glass-av] .big-acc {
+  background: color-mix(in srgb, var(--av-c, #8a8f98) 12%, rgba(255, 255, 255, .55)) !important;
+  color: color-mix(in srgb, var(--av-c, #5b6170) 70%, #222) !important;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08);
+}
