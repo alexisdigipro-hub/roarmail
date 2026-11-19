@@ -1,7 +1,7 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
 import { useSwipeTabs } from './swipe'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
+import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, PromoCount, RoarProject, Rule, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
 import { ICON_NAMES, Icon, folderIcon, iconPng } from './components/Icon'
@@ -10,20 +10,22 @@ import { AddAccount } from './components/AddAccount'
 import { Viewer, initials, tint, type ComposeKind } from './components/Viewer'
 import { Composer, type ComposeSeed } from './components/Composer'
 import { MovePicker } from './components/MovePicker'
-import { SettingsSheet, type Page } from './components/SettingsSheet'
-import { ContactsSheet } from './components/Contacts'
-import { FilesSheet } from './components/Files'
+import type { Page } from './components/SettingsSheet'
 import { blankRule } from './components/Rules'
 import { TimePicker } from './components/TimePicker'
 import { ShareSheet, TaskSheet, WorkPanel } from './components/RoarMe'
 import { short } from './when'
 import { Splitter, useWidths } from './components/Splitter'
-import { StatsSheet } from './components/Stats'
 import { actionSound, playNewMail, setActionSounds } from './sounds'
 import { useSenderIcons } from './senders'
 import { blockableDomain, emailDomain } from '../main/shield'
 
 const api = window.roarmail
+// the big sheets load the first time they open, not with the window (0.38.0: a lighter start)
+const SettingsSheet = lazy(() => import('./components/SettingsSheet').then((m) => ({ default: m.SettingsSheet })))
+const ContactsSheet = lazy(() => import('./components/Contacts').then((m) => ({ default: m.ContactsSheet })))
+const FilesSheet = lazy(() => import('./components/Files').then((m) => ({ default: m.FilesSheet })))
+const StatsSheet = lazy(() => import('./components/Stats').then((m) => ({ default: m.StatsSheet })))
 const keyOf = (r: MessageRow) => r.threadId || r.id
 // the filter buttons above the list, like Airmail's
 const FILTERS: [ListFilter, string, Key][] = [['unread', 'unread', 'fl_unread'], ['flagged', 'star', 'fl_flagged'], ['attachments', 'clip', 'fl_attachments'], ['threads', 'chat', 'fl_threads'], ['promos', 'funnel', 'fl_promos']]
@@ -140,7 +142,8 @@ export default function App() {
   }, [loadRows, loadFolders, loadAccounts])
   useEffect(() => api.on((e) => {
     if (e.type === 'accounts') reloadSoon('accounts')
-    if (e.type === 'folders' && e.accountId === scopeRef.current.accountId) reloadSoon('folders')
+    // All accounts' counts are made of every account's folders
+    if (e.type === 'folders' && (e.accountId === scopeRef.current.accountId || scopeRef.current.accountId === 'all')) reloadSoon('folders')
     if (e.type === 'folders') reloadSoon('accounts')
     if (e.type === 'messages') { if (scopeRef.current.accountId === 'all' || scopeRef.current.accountId === e.accountId) reloadSoon('rows') }
     if (e.type === 'sync') setSyncing((s) => ({ ...s, [e.accountId]: e.busy }))
@@ -167,6 +170,8 @@ export default function App() {
   useEffect(() => setActionSounds(!!prefs.actionSounds), [prefs.actionSounds])
   // Settings > General > Language: kept where i18n reads it before anything is drawn; a change reloads the window
   useEffect(() => { api.settings().then((x) => { if (syncLanguage(x.language)) location.reload() }).catch(() => {}) }, [prefs.language])
+  // Waiting for a reply turned off in Settings: its list goes back to the Inbox
+  useEffect(() => { if (!prefs.waitingOn && scope.role === 'waiting') setScope((s) => ({ ...s, role: 'inbox' })) }, [prefs.waitingOn, scope.role])
   // without the unified inbox the first account opens instead
   useEffect(() => {
     if (!prefs.unifiedInbox && scope.accountId === 'all' && accounts?.length) setScope({ accountId: accounts[0].id, role: 'inbox' })
@@ -1026,6 +1031,7 @@ export default function App() {
       )}
       {folderAsk && <FolderSheet ask={folderAsk} onClose={() => setFolderAsk(null)} onDone={(text) => { setFolderAsk(null); if (text) flash({ text, ms: 3000 }) }} />}
       {adding && <AddAccount first={false} onDone={() => { setAdding(false); loadAccounts() }} onCancel={() => setAdding(false)} />}
+      <Suspense fallback={null}>
       {contactsAt !== null && <ContactsSheet start={contactsAt || undefined} pictures={prefs.senderPictures} onClose={() => setContactsAt(null)}
         onWrite={(to) => { setContactsAt(null); setCompose({ kind: 'new', to }) }}
         onAllMail={(person) => { setContactsAt(null); setScope({ accountId: 'all', person }) }} />}
@@ -1035,6 +1041,7 @@ export default function App() {
       {statsOpen && <StatsSheet accounts={accounts} onClose={() => setStatsOpen(false)}
         onOpen={(accountId, sender) => { setStatsOpen(false); setScope({ accountId, role: 'inbox', person: sender }) }} />}
       {settingsOpen && <SettingsSheet accounts={accounts} start={settingsAt} onAddAccount={() => setAdding(true)} onLook={setPrefs} onClose={() => { setSettingsOpen(false); setSettingsAt(null); api.settings().then((s) => { setPrefs(s); applyLook(s) }) }} />}
+      </Suspense>
       {moving && (
         <MovePicker accountId={moving.accountId} exclude={moving.exclude} onClose={() => setMoving(null)}
           onPick={(fid) => { const targets = list.filter((r) => moving.ids.includes(keyOf(r))); setMoving(null); act(targets, 'move', fid) }} />
@@ -1060,7 +1067,8 @@ interface RowActs {
 // a row draws again only when something it shows changed, not on every keystroke, toast or selection elsewhere
 const sameRow = (a: MessageRow, b: MessageRow) => a === b || (a.id === b.id && a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.date === b.date
   && a.count === b.count && a.subject === b.subject && a.snippet === b.snippet && a.fromName === b.fromName && a.hasAttachments === b.hasAttachments && a.ids.length === b.ids.length)
-const Row = memo(RowView, (a, b) => a.on === b.on && a.multi === b.multi && a.pic === b.pic && a.acc === b.acc && a.prefs === b.prefs && sameRow(a.r, b.r))
+// the account's colour, not the account object: accounts are read again on every count change, and every row drew again
+const Row = memo(RowView, (a, b) => a.on === b.on && a.multi === b.multi && a.pic === b.pic && a.acc?.color === b.acc?.color && a.prefs === b.prefs && sameRow(a.r, b.r))
 
 function RowView({ r, pic, on, multi, acc, prefs, acts }: { r: MessageRow; pic: string | null; on: boolean; multi: boolean; acc?: Account; prefs: Settings; acts: { current: RowActs } }) {
   const onClick = (e: MouseEvent) => acts.current.click(r, e)

@@ -349,6 +349,8 @@ export interface Settings {
   language: 'auto' | 'el' | 'en'
   /** the "all inboxes" button in the rail */
   unifiedInbox: boolean
+  /** Waiting for a reply in the side list (off until turned on, Alex 19 Nov 2026) */
+  waitingOn: boolean
   /** links open in the browser without bringing it to the front (Mac) */
   linksInBackground: boolean
   /** Mac: in the Dock and the menu bar, only the Dock, or only the menu bar */

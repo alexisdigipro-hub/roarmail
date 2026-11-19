@@ -41,7 +41,24 @@ function handle(channel: string, fn: (e: Electron.IpcMainInvokeEvent, ...args: a
   })
 }
 
-const emit = (e: MailEvent) => { BrowserWindow.getAllWindows().forEach((w) => { try { if (!w.isDestroyed()) w.webContents.send('mail:event', e) } catch { /* closing */ } }) }
+const emitNow = (e: MailEvent) => { BrowserWindow.getAllWindows().forEach((w) => { try { if (!w.isDestroyed()) w.webContents.send('mail:event', e) } catch { /* closing */ } }) }
+/**
+ * "the list changed" and "the counts changed" for an account go to the windows at most every 400 ms (0.38.0): a sync of
+ * nine accounts sent them many times a second, and each made the window read the list and the counts again. The first
+ * one goes at once (a delete or an archive answers immediately), the ones that follow within the gap become one.
+ */
+const GAP = 400
+const lastSent = new Map<string, number>()
+const held = new Map<string, MailEvent>()
+const emit = (e: MailEvent) => {
+  if (e.type !== 'messages' && e.type !== 'folders') return emitNow(e)
+  const k = `${e.type}|${e.accountId}`
+  if (held.has(k)) return
+  const since = Date.now() - (lastSent.get(k) ?? 0)
+  if (since >= GAP) { lastSent.set(k, Date.now()); return emitNow(e) }
+  held.set(k, e)
+  setTimeout(() => { held.delete(k); lastSent.set(k, Date.now()); emitNow(e) }, GAP - since)
+}
 /** the window that asked: the main one or a message being written */
 const senderWin = (e: Electron.IpcMainInvokeEvent) => BrowserWindow.fromWebContents(e.sender) || win
 

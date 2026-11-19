@@ -29,7 +29,7 @@ export const GENERAL_DEFAULTS = {
   privacyMode: false, searchConversations: false, exactSearch: false, onlineSearch: false, detectLinks: true,
   autoUpdate: true, senderPictures: true, previewLines: 2, listSubject: true, glassAvatars: false, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,waiting,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '', accountOrder: '',
-  promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true, syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '',
+  promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true, syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '', waitingOn: false,
 } as const satisfies Partial<Settings>
 
 /** a font setting as CSS: one of FONTS, or a font installed on this computer ('local:<family>') */
