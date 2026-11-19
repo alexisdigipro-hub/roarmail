@@ -967,7 +967,11 @@ export default function App() {
         {accounts.some((a) => a.state === 'offline' || a.state === 'error') && (
           <div className="list-foot muted small">
             {accounts.filter((a) => a.state === 'offline' || a.state === 'error').map((a) => (
-              <span key={a.id} className={`state ${a.state}`}>{a.email}: {t[a.state as Key] || a.state}</span>
+              // the reason, not just "Error" (Alex, 19 Nov 2026: "is there a problem?"), and a click opens the accounts
+              <button key={a.id} className={`state ${a.state} link`} title={a.error ? (t[`err_${a.error}` as Key] || a.error) : ''}
+                onClick={() => { setSettingsAt({ page: 'accounts' }); setSettingsOpen(true) }}>
+                {a.email}: {(a.error && t[`st_${a.error}` as Key]) || (a.state === 'error' && a.error ? a.error.slice(0, 70) : t[a.state as Key] || a.state)}
+              </button>
             ))}
           </div>
         )}
