@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
           printf '%s\n' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
-          PKG=$(ls out/mas-universal/*.pkg out/*.pkg 2>/dev/null | head -1)
+          PKG=$(ls out/*.pkg out/mas-universal/*.pkg 2>/dev/null | head -1 || true)
           if [ -z "$PKG" ]; then echo "::error::no .pkg was made"; exit 1; fi
           echo "sending $PKG"
           # altool where Xcode still has it, else Apple's Transporter (same API key, read from ~/.appstoreconnect/private_keys)
