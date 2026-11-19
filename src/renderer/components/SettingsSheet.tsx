@@ -6,6 +6,7 @@ import { SAFE_FONTS, knownLocalFonts, localStack, mailFontStack } from '../mailf
 import type { Account, AiStatus, BlockItem, Folder, SyncState, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
 import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
+import { useSwipeTabs } from '../swipe'
 import { NEW_MAIL_SOUNDS, playNewMail } from '../sounds'
 import { Icon } from './Icon'
 import { MoveSetup } from './MoveSetup'
@@ -39,6 +40,8 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
   const [sigs, setSigs] = useState<Signature[]>([])
   const [prefs, setPrefs] = useState<Settings | null>(null)
   const nav = useLens<HTMLDivElement>(page)
+  // a sideways swipe goes to the page above or below in the list (19 Nov 2026)
+  const pages = useSwipeTabs(PAGES.map(([k]) => k), page, setPage)
   const upd = useUpdate()
   const loadSigs = () => window.roarmail.signatures().then(setSigs)
   useEffect(() => { loadSigs(); window.roarmail.settings().then(setPrefs) }, [])
@@ -64,7 +67,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
 
   return (
     <div className="sheet-wrap" onKeyDown={(e) => { if (e.key === 'Escape') onClose() }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="sheet settings">
+      <div className="sheet settings" ref={pages.ref}>
         <nav className="set-side">
           <div className="set-brand"><b>ROAR</b><i>MAIL</i></div>
           <div className="set-list list-lens lens" ref={nav}>
@@ -77,7 +80,7 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
             ))}
           </div>
         </nav>
-        <section className="set-page" key={page}>
+        <section className="set-page" key={page} data-slide={pages.dir}>
           <div className="set-head">
             <h2>{title(page)}</h2>
             <button className="tool" onClick={onClose} title={t.done}><Icon name="close" /></button>
@@ -138,12 +141,13 @@ function Choice<V extends string | number>({ value, options, onChange }: { value
 function Tabs({ tabs, children, start }: { tabs: [string, string][]; children: (k: string) => ReactNode; start?: string }) {
   const [on, setOn] = useState(start && tabs.some(([k]) => k === start) ? start : tabs[0][0])
   const seg = useLens<HTMLDivElement>(on)
+  const sw = useSwipeTabs(tabs.map(([k]) => k), on, setOn)
   return (
-    <div className="stack">
+    <div className="stack" ref={sw.ref}>
       <div className="seg lens set-tabs" ref={seg}>
         {tabs.map(([k, label]) => <button key={k} className={on === k ? 'on' : ''} onClick={() => setOn(k)}>{label}</button>)}
       </div>
-      {children(on)}
+      <div className="tab-pane" key={on} data-slide={sw.dir}>{children(on)}</div>
     </div>
   )
 }
@@ -396,10 +400,11 @@ function Accounts({ sigs, onAdd }: { accounts: Account[]; sigs: Signature[]; onA
     return window.roarmail.on((e) => { if (e.type === 'accounts') load() })
   }, [])
   const a = all.find((x) => x.id === pick) || all[0]
+  const lens = useLens<HTMLDivElement>(`${a?.id || ''}|${all.length}`)
   return (
     // a list on the left, the chosen account on the right (Alex, 3 Nov 2026: the chips wrapped into rows and looked busy)
     <div className="acct-layout">
-      <div className="acct-list">
+      <div className="acct-list list-lens lens" ref={lens}>
         {all.map((x) => (
           <button key={x.id} className={`acct-row ${x.id === a?.id ? 'on' : ''} ${x.enabled ? '' : 'disabled'}`} onClick={() => setPick(x.id)} title={x.email}>
             <span className="acct-av" style={{ background: x.avatar ? undefined : x.color }}>
@@ -425,8 +430,9 @@ function AccountDetail({ a, sigs }: { a: Account; sigs: Signature[] }) {
   const [tab, setTab] = useState<AccTab>('info')
   const seg = useLens<HTMLDivElement>(tab)
   const tabs: [AccTab, string][] = [['info', t.ac_info], ['folders', t.ac_folders], ['server', t.ac_server]]
+  const sw = useSwipeTabs(tabs.map(([k]) => k), tab, setTab)
   return (
-    <div className="panel acct-detail">
+    <div className="panel acct-detail" ref={sw.ref}>
       <div className="row">
         <span className="acc-dot big" style={{ background: a.color }} />
         <span className="grow"><b className="ellipsis">{a.email}</b>
@@ -435,9 +441,11 @@ function AccountDetail({ a, sigs }: { a: Account; sigs: Signature[] }) {
           {tabs.map(([k, label]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>)}
         </div>
       </div>
-      {tab === 'info' && <AccountInfo a={a} sigs={sigs} />}
-      {tab === 'folders' && <AccountFolders a={a} />}
-      {tab === 'server' && <AccountServer a={a} />}
+      <div className="tab-pane" key={tab} data-slide={sw.dir}>
+        {tab === 'info' && <AccountInfo a={a} sigs={sigs} />}
+        {tab === 'folders' && <AccountFolders a={a} />}
+        {tab === 'server' && <AccountServer a={a} />}
+      </div>
     </div>
   )
 }
@@ -652,9 +660,10 @@ function AccountServer({ a }: { a: Account }) {
 function Signatures({ sigs, reload }: { sigs: Signature[]; reload: () => void }) {
   const [editing, setEditing] = useState<string | null>(sigs[0]?.id || null)
   const current = sigs.find((s) => s.id === editing)
+  const lens = useLens<HTMLDivElement>(`${editing || ''}|${sigs.length}`)
   return (
     <div className="sig-layout">
-      <div className="sig-list">
+      <div className="sig-list list-lens lens" ref={lens}>
         {sigs.map((s) => <button key={s.id} className={`folder ${s.id === editing ? 'on' : ''}`} onClick={() => setEditing(s.id)}><span className="grow ellipsis">{s.name}</span></button>)}
         <button className="pill small" onClick={async () => { const s = await window.roarmail.saveSignature({ id: '', name: t.newSignature, html: '' }); await reload(); setEditing(s.id) }}>
           <Icon name="plus" size={13} /> {t.newSignature}

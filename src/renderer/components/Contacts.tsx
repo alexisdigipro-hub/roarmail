@@ -5,6 +5,7 @@ import type { Contact, ContactFull, ContactGroup, ContactPatch } from '../../sha
 import { t, when, type Key } from '../i18n'
 import { useSenderIcons } from '../senders'
 import { useLens } from '../look'
+import { useSwipeTabs } from '../swipe'
 import { Icon } from './Icon'
 import { initials, tint } from './Viewer'
 
@@ -41,6 +42,8 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
   const [note, setNote] = useState('')
   const tabOf = (g: ContactGroup | '') => g.startsWith('@') ? 'company' : GROUP_TAGS.includes(g as ContactGroup) ? 'team' : g || 'all'
   const seg = useLens<HTMLDivElement>(tabOf(group))
+  // a sideways swipe over the sheet goes to the next group (19 Nov 2026); over the card, to the card's other tab first
+  const groups = useSwipeTabs(TABS.map((g) => g || 'all'), tabOf(group), (k) => setGroup(k === 'all' ? '' : k as ContactGroup))
   // the companies (Alex, 29 Oct: "everyone with the same @madlions.com, and others like it")
   const [domains, setDomains] = useState<{ domain: string; count: number }[]>([])
   useEffect(() => { window.roarmail.contactDomains().then(setDomains).catch(() => {}) }, [])
@@ -88,6 +91,8 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
     } else { setSel([]); setPick(c.email); anchor.current = c.email }
   }
   const many = sel.length > 1
+  // the chosen person under the sliding glass, as in the side list (only one picked: several keep their own light)
+  const rowLens = useLens<HTMLDivElement>(`${group}|${pick}|${many}|${list?.length ?? -1}`)
   /** the same thing for everyone picked */
   const bulk = async (what: 'block' | 'vip' | string) => {
     const picked = (list || []).filter((c) => sel.includes(c.email))
@@ -103,7 +108,7 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
 
   return (
     <div className="sheet-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
-      <div className="sheet contacts" tabIndex={-1}>
+      <div className="sheet contacts" tabIndex={-1} ref={groups.ref}>
         <div className="ct-head">
           <h2>{t.ct_title}</h2>
           <label className="search ct-search"><Icon name="search" size={15} /><input id="ct-q" autoFocus value={q} placeholder={t.ct_search} onChange={(e) => setQ(e.target.value)} /></label>
@@ -133,7 +138,7 @@ export function ContactsSheet({ start, pictures, onClose, onWrite, onAllMail }: 
         </div>
         {note && <p className="small ok-text">{note}</p>}
         <div className="ct-body">
-          <div className="ct-list">
+          <div className={`ct-list ${many ? '' : 'list-lens lens'}`} ref={rowLens} key={tabOf(group)} data-slide={groups.dir}>
             {list === null ? <div className="stats-wait"><div className="spinner" /></div>
               : !list.length ? <p className="muted small ct-empty">{q ? t.ct_none : t.ct_noneGroup}</p>
               : list.map((c) => (
@@ -173,6 +178,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
   // the card in two tabs (3 Nov 2026): the details, and their mail and files
   const [tab, setTab] = useState<'info' | 'mail'>('info')
   const tabSeg = useLens<HTMLDivElement>(tab)
+  const card = useSwipeTabs(['info', 'mail'] as const, tab, setTab)
   useEffect(() => { window.roarmail.contactCard(email).then(setC) }, [email])
   if (!c) return <div className="ct-card"><div className="stats-wait"><div className="spinner" /></div></div>
   const save = (p: ContactPatch) => { setC({ ...c, ...p }); window.roarmail.saveContact(email, p).then(onChanged) }
@@ -181,7 +187,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
       <input id={`ct-${k}`} defaultValue={c[k]} placeholder={ph || '—'} onBlur={(e) => { if (e.target.value.trim() !== c[k]) save({ [k]: e.target.value.trim() }) }} /></label>
   )
   return (
-    <div className="ct-card">
+    <div className="ct-card" ref={card.ref}>
       <div className="ct-top">
         {/* a photo of your own for them (19 Nov 2026): click the picture, choose one; it shows everywhere they do */}
         <label className="ct-photo" title={t.ct_photo}>
@@ -213,6 +219,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
         <button className={tab === 'info' ? 'on' : ''} onClick={() => setTab('info')}>{t.ct_tabInfo}</button>
         <button className={tab === 'mail' ? 'on' : ''} onClick={() => setTab('mail')}>{t.ct_tabMail} <span className="muted">{c.count}</span></button>
       </div>
+      <div className="tab-pane" key={tab} data-slide={card.dir}>
       {tab === 'info' && <>
       <div className="ct-tags">
         {TAGS.map((g) => {
@@ -249,6 +256,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
           </div>
         </section>
       )}
+      </div>
     </div>
   )
 }

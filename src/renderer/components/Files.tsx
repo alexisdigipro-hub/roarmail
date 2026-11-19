@@ -4,6 +4,7 @@ import { useEffect, useState, type MouseEvent as RMouseEvent } from 'react'
 import type { Account, FileKind, MailFile } from '../../shared/api'
 import { t, when, type Key } from '../i18n'
 import { useLens } from '../look'
+import { useSwipeTabs } from '../swipe'
 import { Icon } from './Icon'
 
 const KINDS: FileKind[] = ['pdf', 'image', 'video', 'audio', 'script', 'doc', 'sheet', 'slides', 'archive', 'other']
@@ -22,6 +23,9 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: 
   const [res, setRes] = useState<{ files: MailFile[]; counts: Record<string, number>; indexing?: boolean } | null>(null)
   const [tick, setTick] = useState(0)
   const seg = useLens<HTMLDivElement>(kind || 'all')
+  // a sideways swipe goes to the next kind of file shown in the bar (19 Nov 2026)
+  const kinds: (FileKind | '')[] = ['', ...KINDS.filter((k) => res?.counts[k] || k === kind)]
+  const sw = useSwipeTabs(kinds, kind, setKind)
   useEffect(() => {
     let live = true
     const h = setTimeout(() => window.roarmail.files(q, kind, sort, acc).then((r) => { if (live) setRes(r) }).catch(() => { if (live) setRes({ files: [], counts: {} }) }), q ? 160 : 0)
@@ -62,7 +66,7 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: 
 
   return (
     <div className="sheet-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
-      <div className="sheet contacts files" tabIndex={-1}>
+      <div className="sheet contacts files" tabIndex={-1} ref={sw.ref}>
         {/* one top row: the title, the search, which account, the order, close (Alex, 29 Oct: "the layout is bad") */}
         <div className="fi-head">
           <h2>{t.fi_title}</h2>
@@ -83,7 +87,7 @@ export function FilesSheet({ accounts, onClose, onPerson, onCard, onOpenMail }: 
           ))}
         </div>
         {res?.indexing && <p className="muted small fi-indexing"><span className="spinner small" /> {t.fi_indexing}</p>}
-        <div className="fi-list">
+        <div className="fi-list" key={kind || 'all'} data-slide={sw.dir}>
           {!res ? <div className="stats-wait"><div className="spinner" /></div>
             : !res.files.length ? <p className="muted ct-empty">{q || kind ? t.fi_none : t.fi_empty}</p>
             : res.files.map((f) => (

@@ -10,6 +10,7 @@ import type { ComposeKind } from './Viewer'
 import { TimePicker } from './TimePicker'
 import { SAFE_FONTS, knownLocalFonts, localStack, mailFontStack, readLocalFonts, withMailFont } from '../mailfonts'
 import { TemplatesMenu, filled, templateValues } from './Templates'
+import { useLens } from '../look'
 
 /** a quoted message inside the writing window: no pictures from the network in its styles, nothing that could sit
  * over the app (security review 29 Oct 2026) */
@@ -143,6 +144,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
   const [asLink, setAsLink] = useState<Record<string, boolean>>({})
   // RoarTransfer as on roartransfer.com (22 Oct 2026): 1 day up to 5 GB or 3 days up to 3 GB, a password, an email when downloaded
   const [rtDays, setRtDays] = useState(3)
+  const rtLens = useLens<HTMLSpanElement>(`${rtDays}|${roarReady}|${rt.length}|${files.filter((f) => asLink[f]).length}`)
   const [rtPw, setRtPw] = useState('')
   const [rtNotify, setRtNotify] = useState(true)
   const rtMax = (rtDays === 1 ? 5 : 3) * 1024 ** 3
@@ -638,7 +640,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
         )}
         {roarReady && (files.some((f) => asLink[f]) || rt.length > 0) && (
           <div className="rt-opts">
-            <span className="rt-plans">
+            <span className="rt-plans lens" ref={rtLens}>
               {[1, 3].map((d) => <button key={d} className={rtDays === d ? 'on' : ''} disabled={rt.length > 0} onClick={() => setRtDays(d)}>{d === 1 ? t.rt_day1 : t.rt_days3}</button>)}
             </span>
             <input type="password" autoComplete="new-password" placeholder={t.rt_pw} value={rtPw} disabled={rt.length > 0} onChange={(e) => setRtPw(e.target.value.slice(0, 100))} />

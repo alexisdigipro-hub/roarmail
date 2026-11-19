@@ -1098,3 +1098,91 @@ html[data-mode='light'][data-glass-av] .avatar, html[data-mode='light'][data-gla
 .ct-photo .ct-photo-hint { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center; color: #fff;
   background: rgba(0, 0, 0, .45); opacity: 0; transition: opacity .2s; }
 .ct-photo:hover .ct-photo-hint { opacity: 1; }
+
+/* =====================================================================
+   Swipe, slide and glass everywhere (Alex, 19 Nov 2026: "wherever the app has pages or tabs, swipe left and right;
+   animation everywhere; the glass that slides to the chosen item, wherever else it can go").
+   swipe.ts useSwipeTabs moves between tabs and pages; the new content carries data-slide="next" / "prev" and comes in
+   from the side it came from. The lens (look.ts useLens) now also sits under the Statistics accounts, the list's filter
+   bar, the accounts, signatures, templates and contacts lists and the small choices (rules, invites, tasks, links).
+   Only transform and opacity move; all of it rests under Motion off (html[data-still]), power saving (html[data-lite])
+   and the system's Reduce motion, and no blur is added (31 Oct: nothing in the window blurs).
+   ===================================================================== */
+:root { --slide: cubic-bezier(.25, 1.2, .4, 1); }
+@keyframes rm-pane-next { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+@keyframes rm-pane-prev { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+@keyframes rm-rise { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes rm-panel-in { from { opacity: 0; transform: translateX(28px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* a tab or page that came in by a click or a swipe slides in from its side */
+[data-slide='next'], .set-page[data-slide='next'] { animation: rm-pane-next .44s var(--slide) both; }
+[data-slide='prev'], .set-page[data-slide='prev'] { animation: rm-pane-prev .44s var(--slide) both; }
+/* a tab's content in one box that keeps the gaps of the card it sits in */
+.tab-pane { display: flex; flex-direction: column; gap: inherit; min-width: 0; }
+.ct-card > .tab-pane > .muted.small { margin: -4px 0 0; }
+/* what slides in never makes its box scroll sideways for a moment */
+.sheet.settings .settings-body, .ct-card, .ct-list, .fi-list, .sheet.stats { overflow-x: hidden; }
+
+/* the lens on more groups: the same pill and spring as the side list */
+.acct-pick.chip-lens::before { --lens-r: 999px; background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge), var(--glow); }
+html[data-theme='pumba'] .acct-pick.chip-lens::before { background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--edge-2); }
+.acct-pick.chip-lens.lens-on > .on { background: none !important; box-shadow: none !important; }
+.sig-list.list-lens::before, .acct-list.list-lens::before, .ct-list.list-lens::before { --lens-r: var(--r); }
+html:not([data-theme='simba']) :is(.sig-list, .acct-list, .ct-list).list-lens::before { background: var(--sel); box-shadow: inset 0 0 0 1px var(--sel-edge); }
+/* the list's filter bar: the chosen filter is a lit circle that springs from filter to filter */
+.pill-group.filter-lens::before { --lens-r: 50%; background: color-mix(in srgb, var(--accent) 80%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 rgba(255, 255, 255, .25); }
+html[data-theme='pumba'] .pill-group.filter-lens::after { display: none; }
+.pill-group.filter-lens.lens-on > .lens-pick { background: none !important; box-shadow: none !important; }
+/* the link's days in the writing window */
+.rt-opts .rt-plans.lens::before { background: var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 40%, transparent); }
+html[data-theme='pumba'] .rt-opts .rt-plans.lens::after { display: none; }
+.rt-opts .rt-plans.lens.lens-on > .on { color: var(--accent-ink); }
+.rt-opts .rt-plans > button { position: relative; transition: color .2s; }
+
+/* lists and cards rise in, one after another (only the first few wait, so a long list is never slow) */
+:is(.ct-row, .fi-row, .acct-row, .task, .ev, .st-sender, .st-line, .sig-list > .folder, .set-sec, .ct-mail, .ct-file) { animation: rm-rise .36s var(--ease) both; }
+:is(.ct-list, .fi-list, .acct-list, .work-body, .sig-list, .settings-body .stack, .ct-sec, .ct-files, .sheet.stats .card) > :nth-child(2) { animation-delay: 25ms; }
+:is(.ct-list, .fi-list, .acct-list, .work-body, .sig-list, .settings-body .stack, .ct-sec, .ct-files, .sheet.stats .card) > :nth-child(3) { animation-delay: 50ms; }
+:is(.ct-list, .fi-list, .acct-list, .work-body, .sig-list, .settings-body .stack, .ct-sec, .ct-files, .sheet.stats .card) > :nth-child(4) { animation-delay: 75ms; }
+:is(.ct-list, .fi-list, .acct-list, .work-body, .sig-list, .settings-body .stack, .ct-sec, .ct-files, .sheet.stats .card) > :nth-child(5) { animation-delay: 100ms; }
+:is(.ct-list, .fi-list, .acct-list, .work-body, .sig-list, .settings-body .stack, .ct-sec, .ct-files, .sheet.stats .card) > :nth-child(n + 6) { animation-delay: 120ms; }
+:is(.ct-list, .fi-list) > :nth-child(n + 16) { animation: none; }
+.sheet.stats .stack > .card { animation: rm-rise .4s var(--ease) both; }
+.sheet.stats .stack > .card:nth-child(2) { animation-delay: 40ms; } .sheet.stats .stack > .card:nth-child(3) { animation-delay: 80ms; }
+.sheet.stats .stack > .card:nth-child(n + 4) { animation-delay: 120ms; }
+/* the side panel of tasks and calls comes in from the right; the cards in it pop */
+.work-panel { animation: rm-panel-in .45s var(--slide) both; }
+.roarme-card, .invite, .rule-edit { animation: rm-rise .4s var(--ease) both; }
+.tpl-menu, .day-pop { transform-origin: top right; }
+
+/* ---------- glass where it was still flat: a soft light from the top and a bright top edge ---------- */
+:root { --sheen: linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, 0) 46%); --hi: inset 0 1px 0 rgba(255, 255, 255, .09); }
+html[data-mode='light'] { --sheen: linear-gradient(180deg, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0) 55%); --hi: inset 0 1px 0 rgba(255, 255, 255, .95); }
+html[data-surface='solid'], html[data-lite] { --sheen: linear-gradient(transparent, transparent); }
+/* cards and boxes on glass (their colour stays, the light is laid over it) */
+:is(.set-group, .panel, .ct-card, .roarme-card, .invite, .st-tile, .acct-list, .banner, .set-preview) { background-image: var(--sheen); }
+:is(.set-group, .ct-card, .roarme-card, .invite, .st-tile, .acct-list) { box-shadow: inset 0 0 0 1px var(--edge), var(--hi); }
+/* menus, cards over things and the writing window's AI card: the same light on their float */
+:is(.pop, .hover-card, .attach-menu, .suggest, .toast, .sheet) { background-image: var(--sheen); }
+.composer .ai-card { background-image: var(--sheen); }
+/* Statistics: the sections were ruled lines, now soft glass tiles with gaps */
+.sheet.stats .stack { gap: 12px; }
+.sheet.stats .card:not(.st-tiles) { padding: 14px 16px 16px; border: 0; border-radius: calc(var(--r) + 4px); background: var(--glass) var(--sheen);
+  box-shadow: inset 0 0 0 1px var(--edge), var(--hi); }
+.sheet.stats .card.st-tiles { padding: 0; border: 0; }
+/* the side panel's tasks and calls: soft glass tiles that lift a little under the pointer */
+.work-body .task, .work-body .ev { margin-bottom: 4px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge); }
+.work-body .task:hover, .work-body .ev:hover { background: var(--glass-2); }
+:is(.st-tile, .work-body .task, .work-body .ev, .ct-file) { transition: transform .25s var(--spring), background .2s, box-shadow .2s; }
+:is(.st-tile, .work-body .ev, .ct-file):hover { transform: translateY(-2px); }
+/* a segmented choice is a glass track with a bright top edge */
+.seg { box-shadow: inset 0 0 0 1px var(--edge), inset 0 1px 2px rgba(0, 0, 0, .18); }
+html[data-mode='light'] .seg { box-shadow: inset 0 0 0 1px var(--edge), inset 0 1px 2px rgba(20, 24, 30, .06); }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slide], .tab-pane, .work-panel, :is(.ct-row, .fi-row, .acct-row, .task, .ev, .st-sender, .st-line, .set-sec, .ct-mail, .ct-file, .roarme-card, .invite, .rule-edit),
+  .sheet.stats .stack > .card { animation: none !important; }
+  :is(.st-tile, .work-body .ev, .ct-file):hover { transform: none; }
+}
+html[data-still] :is(.st-tile, .work-body .ev, .ct-file):hover, html[data-lite] :is(.st-tile, .work-body .ev, .ct-file):hover { transform: none; }
