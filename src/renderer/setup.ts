@@ -23,7 +23,8 @@ try {
   })
 } catch { /* the web demo */ }
 
-if (web) {
+// ?shot: the App Store's pictures of the demo, without the demo's pill (.github/workflows/appstore.yml)
+if (web && !/[?&]shot\b/.test(location.search)) {
   const el = (navigator.language || '').toLowerCase().startsWith('el')
   const pill = document.createElement('a')
   pill.className = 'demo-pill'

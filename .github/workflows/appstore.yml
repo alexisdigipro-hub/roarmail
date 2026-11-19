@@ -12,6 +12,14 @@ on:
         description: 'Only put the ready builds in the TestFlight groups (no new build)'
         type: boolean
         default: false
+      listing:
+        description: 'Fill the App Store page: texts, category, age rating, price, build, review notes, screenshots (no new build)'
+        type: boolean
+        default: false
+      submit:
+        description: 'Send the version for App Review (no new build)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,7 +27,7 @@ permissions:
 jobs:
   # every build Apple has finished with goes into every TestFlight group, and what Apple made of each is printed
   testers:
-    if: ${{ inputs.only_testers }}
+    if: ${{ inputs.only_testers && !inputs.listing && !inputs.submit }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,8 +40,52 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
 
+  # the App Store page, with two pictures of the web demo at 2880 x 1800 (light and dark)
+  listing:
+    if: ${{ inputs.listing }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run build:renderer
+      - name: Screenshots
+        run: |
+          npx vite preview --port 4173 --strictPort &
+          for i in $(seq 1 30); do curl -sf http://localhost:4173/ >/dev/null && break; sleep 1; done
+          mkdir -p shots
+          google-chrome --headless=new --no-sandbox --hide-scrollbars --window-size=1440,900 --force-device-scale-factor=2 --virtual-time-budget=9000 --screenshot=shots/1-light.png "http://localhost:4173/?shot"
+          google-chrome --headless=new --no-sandbox --hide-scrollbars --window-size=1440,900 --force-device-scale-factor=2 --virtual-time-budget=9000 --screenshot=shots/2-dark.png "http://localhost:4173/?shot&dark" || true
+          python3 -c "import struct,sys,glob;[print(f, struct.unpack('>II', open(f,'rb').read()[16:24])) for f in sorted(glob.glob('shots/*.png'))]"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appstore-screenshots
+          retention-days: 3
+          path: shots
+      - run: node scripts/appstore.mjs listing shots
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+
+  submit:
+    if: ${{ inputs.submit }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/appstore.mjs submit
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+
   testflight:
-    if: ${{ !inputs.only_testers }}
+    if: ${{ !inputs.only_testers && !inputs.listing && !inputs.submit }}
     runs-on: macos-latest
     env:
       KCPASS: ci-${{ github.run_id }}
