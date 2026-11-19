@@ -58,6 +58,10 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KC" > /dev/null
           security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
           security find-identity -v "$KC"
+          # the certificate's name for electron-builder (the plain Mac build has identity null, which the store build must not take)
+          NAME=$(security find-identity -v "$KC" | sed -n 's/.*"Apple Distribution: \(.*\)"$/\1/p' | head -1)
+          if [ -z "$NAME" ]; then echo "::error::the Apple Distribution certificate is not in the keychain"; exit 1; fi
+          echo "MAS_ID=$NAME" >> "$GITHUB_ENV"
           rm -f "$D"/*.key "$D"/*.p12
 
       - name: Build for the App Store
@@ -67,7 +71,7 @@ jobs:
           CSC_KEYCHAIN: ${{ runner.temp }}/roarmail-ci.keychain-db
         run: |
           npm run build
-          npx electron-builder --mac mas --universal --publish never -c.buildVersion=${{ github.run_number }}
+          npx electron-builder --mac mas --universal --publish never -c.buildVersion=${{ github.run_number }} -c.mas.identity="$MAS_ID"
           ls -la out out/mas-universal 2>/dev/null || true
 
       - name: Send to App Store Connect (TestFlight)
@@ -79,15 +83,31 @@ jobs:
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
           printf '%s\n' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
-          PKG=$(ls out/mas-universal/*.pkg out/*.pkg 2>/dev/null | head -1)
+          PKG=$(ls out/*.pkg out/mas-universal/*.pkg 2>/dev/null | head -1 || true)
           if [ -z "$PKG" ]; then echo "::error::no .pkg was made"; exit 1; fi
-          if ! xcrun altool --upload-app --type macos --file "$PKG" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee upload.log; then
-            if grep -qi "no suitable application records\|could not find\|app record" upload.log; then
-              echo "::error title=No RoarMail in App Store Connect yet::Make the app once: App Store Connect > Apps > + > New App > macOS, name RoarMail, bundle ID com.themadlions.roarmail. Then run this again."
-            fi
+          echo "sending $PKG"
+          # altool where Xcode still has it, else Apple's Transporter (same API key, read from ~/.appstoreconnect/private_keys)
+          T=$(ls /Applications/Xcode*.app/Contents/SharedFrameworks/ContentDeliveryServices.framework/Itms/bin/iTMSTransporter 2>/dev/null | head -1 || true)
+          set +e
+          if xcrun --find altool >/dev/null 2>&1; then
+            xcrun altool --upload-app --type macos --file "$PKG" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" --output-format normal > upload.log 2>&1
+          elif [ -n "$T" ]; then
+            "$T" -m upload -assetFile "$PKG" -apiKey "$ASC_KEY_ID" -apiIssuer "$ASC_ISSUER_ID" -v informational > upload.log 2>&1
+          else
+            echo "neither altool nor Transporter is on this Mac" > upload.log; false
+          fi
+          rc=$?
+          set -e
+          cat upload.log | tail -60
+          if grep -qi "no suitable application records\|could not find the app\|app record\|bundle.*not.*found\|cannot be found" upload.log; then
+            echo "::error title=No RoarMail in App Store Connect yet::Make the app once: App Store Connect > Apps > + > New App > macOS, name RoarMail, bundle ID com.themadlions.roarmail. Then run this again."
             exit 1
           fi
-          grep -qi "error" upload.log && ! grep -qi "No errors uploading" upload.log && exit 1 || true
+          if [ $rc -ne 0 ] || grep -qi "ERROR ITMS\|Failed to upload\|error:" upload.log && ! grep -qi "No errors uploading\|UPLOAD SUCCEEDED\|successfully uploaded" upload.log; then
+            echo "::error title=Upload::$(grep -i "error" upload.log | head -5 | tr '\n' ' ' | cut -c1-900)"
+            exit 1
+          fi
+          echo "::notice title=Sent::RoarMail is in App Store Connect; TestFlight shows it once Apple has processed it (often 10 to 30 minutes)."
 
       - uses: actions/upload-artifact@v4
         if: always()
