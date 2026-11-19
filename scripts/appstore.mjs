@@ -223,6 +223,9 @@ async function listing(shotsDir) {
           console.log('✓ age rating answered'); break
         } catch (e) {
           const m = String(e.message)
+          // a question Apple added that we did not know: answered "no" (turned to "NONE" next round if it wants that)
+          const missing = /missing a required attribute|must provide a value/i.test(m) ? [...m.matchAll(/'(\w+)'/g)].map((x) => x[1]).filter((k) => !(k in attrs)) : []
+          if (missing.length) { for (const k of missing) attrs[k] = false; continue }
           const bad = [...m.matchAll(/'(\w+)'/g)].map((x) => x[1]).filter((k) => k in attrs)
           const unknown = [...m.matchAll(/(?:not (?:a )?(?:valid|allowed|recognized)[^'"]*|unknown[^'"]*)['"](\w+)['"]/gi)].map((x) => x[1])
           if (!bad.length && !unknown.length) { console.log(`::warning title=age rating::${m}`); break }
