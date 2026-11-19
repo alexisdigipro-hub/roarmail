@@ -252,19 +252,22 @@ async function listing(shotsDir) {
   const build = (builds.data || []).find((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired && pre.get(b.relationships?.preReleaseVersion?.data?.id) === version)
     || (builds.data || []).find((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired)
   if (build) await soft(`build ${build.attributes.version} chosen`, asc('PATCH', `/appStoreVersions/${v.id}/relationships/build`, { data: { type: 'builds', id: build.id } }))
+  if (build) await soft(`build ${build.attributes.version}: standard encryption only`, asc('PATCH', `/builds/${build.id}`, { data: { type: 'builds', id: build.id, attributes: { usesNonExemptEncryption: false } } }))
   else console.log('::warning::no ready build to choose yet')
   const rd = await asc('GET', `/appStoreVersions/${v.id}/appStoreReviewDetail`).catch(() => null)
   if (rd?.data) await soft('notes for the reviewer', asc('PATCH', `/appStoreReviewDetails/${rd.data.id}`, { data: { type: 'appStoreReviewDetails', id: rd.data.id, attributes: { notes: LISTING.reviewNotes } } }))
   else await soft('notes for the reviewer', asc('POST', '/appStoreReviewDetails', { data: { type: 'appStoreReviewDetails', attributes: { notes: LISTING.reviewNotes }, relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: v.id } } } } }))
   // free
-  const sched = await asc('GET', `/apps/${app.id}/appPriceSchedule`).catch(() => null)
-  if (!sched?.data) {
+  // a schedule can exist with no price in it: look at its prices, not only at it
+  const prices = await asc('GET', `/apps/${app.id}/appPriceSchedule/manualPrices?limit=5`).catch(() => null)
+  if (!(prices?.data || []).length) {
     const pts = (await asc('GET', `/apps/${app.id}/appPricePoints?filter[territory]=USA&limit=200`).catch(() => null))?.data || []
     const free = pts.find((p) => Number(p.attributes.customerPrice) === 0)
     if (free) await soft('price: free', asc('POST', '/appPriceSchedules', { data: { type: 'appPriceSchedules', relationships: {
       app: { data: { type: 'apps', id: app.id } }, baseTerritory: { data: { type: 'territories', id: 'USA' } }, manualPrices: { data: [{ type: 'appPrices', id: '${p0}' }] } } },
       included: [{ type: 'appPrices', id: '${p0}', attributes: { startDate: null }, relationships: { appPricePoint: { data: { type: 'appPricePoints', id: free.id } } } }] }))
   } else console.log('✓ price already set')
+  if (!(prices?.data || []).length) console.log('(price: no manual price was there)')
   // the pictures (2880 x 1800), in place of any there before
   if (shotsDir && vl && fs.existsSync(shotsDir)) {
     const files = fs.readdirSync(shotsDir).filter((f) => f.endsWith('.png')).sort()
