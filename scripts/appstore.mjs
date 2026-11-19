@@ -39,7 +39,9 @@ async function asc(method, url, body) {
   if (r.status === 204) return null
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
-    const e = (j.errors || []).map((x) => `${x.title}: ${x.detail}`).join(' · ') || `HTTP ${r.status}`
+    // Apple puts the real reasons under meta.associatedErrors (what is missing on the page, and where)
+    const assoc = (j.errors || []).flatMap((x) => Object.values(x.meta?.associatedErrors || {}).flat()).map((x) => `${x.code || ''} ${x.detail || x.title || ''}`.trim())
+    const e = [...(j.errors || []).map((x) => `${x.title}: ${x.detail}`), ...assoc].join(' · ') || `HTTP ${r.status}`
     throw new Error(`${method} ${url}: ${e}`)
   }
   return j
@@ -197,19 +199,46 @@ async function listing(shotsDir) {
     const en = locs.find((l) => l.attributes.locale.startsWith('en')) || locs[0]
     if (en) await soft('subtitle and privacy policy', asc('PATCH', `/appInfoLocalizations/${en.id}`, { data: { type: 'appInfoLocalizations', id: en.id, attributes: { subtitle: LISTING.subtitle, privacyPolicyUrl: LISTING.privacyPolicyUrl } } }))
     await soft('category Productivity', asc('PATCH', `/appInfos/${info.id}`, { data: { type: 'appInfos', id: info.id, relationships: { primaryCategory: { data: { type: 'appCategories', id: 'PRODUCTIVITY' } } } } }))
-    const ar = await asc('GET', `/appInfos/${info.id}/ageRatingDeclaration`).catch(() => null)
+    let ar = await asc('GET', `/appInfos/${info.id}/ageRatingDeclaration`).catch((e) => { console.log(`(age rating through the app info: ${e.message})`); return null })
+    if (!ar?.data) {
+      const vv = await editableVersion(app)
+      if (vv) ar = await asc('GET', `/appStoreVersions/${vv.id}/ageRatingDeclaration`).catch((e) => { console.log(`(age rating through the version: ${e.message})`); return null })
+    }
+    if (!ar?.data) console.log('::warning title=age rating::App Store Connect gave no age rating form')
     if (ar?.data) {
-      // nothing a mail app shows of its own: every question answered "none" / "no", one at a time so a field Apple
-      // has renamed does not stop the others
-      const none = ['alcoholTobaccoOrDrugUseOrReferences', 'contests', 'gamblingSimulated', 'horrorOrFearThemes', 'matureOrSuggestiveThemes',
-        'medicalOrTreatmentInformation', 'profanityOrCrudeHumor', 'sexualContentGraphicAndNudity', 'sexualContentOrNudity',
-        'violenceCartoonOrFantasy', 'violenceRealistic', 'violenceRealisticProlongedGraphicOrSadistic', 'gunsOrOtherWeapons', 'healthOrWellnessTopics']
-      const no = ['gambling', 'unrestrictedWebAccess', 'lootBox', 'advertising', 'parentalControls', 'ageAssurance', 'userGeneratedContent', 'messagingAndChat']
-      for (const k of none) await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: { [k]: 'NONE' } } }).catch(() => {})
-      for (const k of no) await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: { [k]: false } } }).catch(() => {})
-      console.log('✓ age rating answered')
+      // Apple's 2025 questions, all at once (one at a time saves nothing): a mail app shows nothing of its own, so
+      // "none" / "no"; it does carry messages between people (mail), so messagingAndChat is yes. Where Apple says a
+      // field wants the other kind of answer, it is turned ("NONE" <-> false) and sent again.
+      const attrs = {
+        alcoholTobaccoOrDrugUseOrReferences: 'NONE', contests: 'NONE', gamblingSimulated: 'NONE', horrorOrFearThemes: 'NONE',
+        matureOrSuggestiveThemes: 'NONE', medicalOrTreatmentInformation: 'NONE', profanityOrCrudeHumor: 'NONE',
+        sexualContentGraphicAndNudity: 'NONE', sexualContentOrNudity: 'NONE', violenceCartoonOrFantasy: 'NONE',
+        violenceRealistic: 'NONE', violenceRealisticProlongedGraphicOrSadistic: 'NONE', gunsOrOtherWeapons: 'NONE',
+        gambling: false, unrestrictedWebAccess: false, lootBox: false, advertising: false, parentalControls: false,
+        ageAssurance: false, userGeneratedContent: false, healthOrWellnessTopics: false, messagingAndChat: true,
+      }
+      for (let n = 0; n < 40; n++) {
+        try {
+          await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: attrs } })
+          console.log('✓ age rating answered'); break
+        } catch (e) {
+          const m = String(e.message)
+          // a question Apple added that we did not know: answered "no" (turned to "NONE" next round if it wants that)
+          const missing = /missing a required attribute|must provide a value/i.test(m) ? [...m.matchAll(/'(\w+)'/g)].map((x) => x[1]).filter((k) => !(k in attrs)) : []
+          if (missing.length) { for (const k of missing) attrs[k] = false; continue }
+          const bad = [...m.matchAll(/'(\w+)'/g)].map((x) => x[1]).filter((k) => k in attrs)
+          const unknown = [...m.matchAll(/(?:not (?:a )?(?:valid|allowed|recognized)[^'"]*|unknown[^'"]*)['"](\w+)['"]/gi)].map((x) => x[1])
+          if (!bad.length && !unknown.length) { console.log(`::warning title=age rating::${m}`); break }
+          for (const k of unknown) delete attrs[k]
+          for (const k of bad) {
+            if (/not allowed|is not a valid attribute|unknown/i.test(m) && !/value/i.test(m)) delete attrs[k]
+            else attrs[k] = typeof attrs[k] === 'boolean' ? 'NONE' : attrs[k] === 'NONE' ? false : attrs[k]
+          }
+        }
+      }
     }
   }
+  await soft('content rights', asc('PATCH', `/apps/${app.id}`, { data: { type: 'apps', id: app.id, attributes: { contentRightsDeclaration: 'DOES_NOT_USE_THIRD_PARTY_CONTENT' } } }))
   // the version: its number, copyright, texts, the build, the notes for the reviewer
   let v = await editableVersion(app)
   if (!v) v = (await asc('POST', '/appStoreVersions', { data: { type: 'appStoreVersions', attributes: { platform: 'MAC_OS', versionString: version }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
@@ -223,19 +252,22 @@ async function listing(shotsDir) {
   const build = (builds.data || []).find((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired && pre.get(b.relationships?.preReleaseVersion?.data?.id) === version)
     || (builds.data || []).find((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired)
   if (build) await soft(`build ${build.attributes.version} chosen`, asc('PATCH', `/appStoreVersions/${v.id}/relationships/build`, { data: { type: 'builds', id: build.id } }))
+  if (build) await soft(`build ${build.attributes.version}: standard encryption only`, asc('PATCH', `/builds/${build.id}`, { data: { type: 'builds', id: build.id, attributes: { usesNonExemptEncryption: false } } }))
   else console.log('::warning::no ready build to choose yet')
   const rd = await asc('GET', `/appStoreVersions/${v.id}/appStoreReviewDetail`).catch(() => null)
   if (rd?.data) await soft('notes for the reviewer', asc('PATCH', `/appStoreReviewDetails/${rd.data.id}`, { data: { type: 'appStoreReviewDetails', id: rd.data.id, attributes: { notes: LISTING.reviewNotes } } }))
   else await soft('notes for the reviewer', asc('POST', '/appStoreReviewDetails', { data: { type: 'appStoreReviewDetails', attributes: { notes: LISTING.reviewNotes }, relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: v.id } } } } }))
   // free
-  const sched = await asc('GET', `/apps/${app.id}/appPriceSchedule`).catch(() => null)
-  if (!sched?.data) {
+  // a schedule can exist with no price in it: look at its prices, not only at it
+  const prices = await asc('GET', `/apps/${app.id}/appPriceSchedule/manualPrices?limit=5`).catch(() => null)
+  if (!(prices?.data || []).length) {
     const pts = (await asc('GET', `/apps/${app.id}/appPricePoints?filter[territory]=USA&limit=200`).catch(() => null))?.data || []
     const free = pts.find((p) => Number(p.attributes.customerPrice) === 0)
     if (free) await soft('price: free', asc('POST', '/appPriceSchedules', { data: { type: 'appPriceSchedules', relationships: {
       app: { data: { type: 'apps', id: app.id } }, baseTerritory: { data: { type: 'territories', id: 'USA' } }, manualPrices: { data: [{ type: 'appPrices', id: '${p0}' }] } } },
       included: [{ type: 'appPrices', id: '${p0}', attributes: { startDate: null }, relationships: { appPricePoint: { data: { type: 'appPricePoints', id: free.id } } } }] }))
   } else console.log('✓ price already set')
+  if (!(prices?.data || []).length) console.log('(price: no manual price was there)')
   // the pictures (2880 x 1800), in place of any there before
   if (shotsDir && vl && fs.existsSync(shotsDir)) {
     const files = fs.readdirSync(shotsDir).filter((f) => f.endsWith('.png')).sort()
@@ -266,8 +298,11 @@ async function submit() {
   const app = await appOf()
   const v = await editableVersion(app)
   if (!v) throw new Error('no version to send')
-  const sub = (await asc('POST', '/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'MAC_OS' }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
-  await asc('POST', '/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: {
+  // an unsent submission from an earlier try is used again (Apple allows one open at a time)
+  const open = ((await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&filter[platform]=MAC_OS&filter[state]=READY_FOR_REVIEW&include=items`).catch(() => null))?.data || [])[0]
+  const sub = open || (await asc('POST', '/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'MAC_OS' }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
+  const has = (open?.relationships?.items?.data || []).length > 0
+  if (!has) await asc('POST', '/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: {
     reviewSubmission: { data: { type: 'reviewSubmissions', id: sub.id } }, appStoreVersion: { data: { type: 'appStoreVersions', id: v.id } } } } })
   await asc('PATCH', `/reviewSubmissions/${sub.id}`, { data: { type: 'reviewSubmissions', id: sub.id, attributes: { submitted: true } } })
   console.log(`::notice title=Sent for review::RoarMail ${v.attributes.versionString} is with Apple's App Review.`)
