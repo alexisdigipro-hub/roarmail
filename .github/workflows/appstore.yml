@@ -87,7 +87,7 @@ jobs:
           if [ -z "$PKG" ]; then echo "::error::no .pkg was made"; exit 1; fi
           echo "sending $PKG"
           # altool where Xcode still has it, else Apple's Transporter (same API key, read from ~/.appstoreconnect/private_keys)
-          T=$(ls /Applications/Xcode*.app/Contents/SharedFrameworks/ContentDeliveryServices.framework/Itms/bin/iTMSTransporter 2>/dev/null | head -1)
+          T=$(ls /Applications/Xcode*.app/Contents/SharedFrameworks/ContentDeliveryServices.framework/Itms/bin/iTMSTransporter 2>/dev/null | head -1 || true)
           set +e
           if xcrun --find altool >/dev/null 2>&1; then
             xcrun altool --upload-app --type macos --file "$PKG" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" --output-format normal > upload.log 2>&1
