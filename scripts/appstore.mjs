@@ -199,7 +199,12 @@ async function listing(shotsDir) {
     const en = locs.find((l) => l.attributes.locale.startsWith('en')) || locs[0]
     if (en) await soft('subtitle and privacy policy', asc('PATCH', `/appInfoLocalizations/${en.id}`, { data: { type: 'appInfoLocalizations', id: en.id, attributes: { subtitle: LISTING.subtitle, privacyPolicyUrl: LISTING.privacyPolicyUrl } } }))
     await soft('category Productivity', asc('PATCH', `/appInfos/${info.id}`, { data: { type: 'appInfos', id: info.id, relationships: { primaryCategory: { data: { type: 'appCategories', id: 'PRODUCTIVITY' } } } } }))
-    const ar = await asc('GET', `/appInfos/${info.id}/ageRatingDeclaration`).catch(() => null)
+    let ar = await asc('GET', `/appInfos/${info.id}/ageRatingDeclaration`).catch((e) => { console.log(`(age rating through the app info: ${e.message})`); return null })
+    if (!ar?.data) {
+      const vv = await editableVersion(app)
+      if (vv) ar = await asc('GET', `/appStoreVersions/${vv.id}/ageRatingDeclaration`).catch((e) => { console.log(`(age rating through the version: ${e.message})`); return null })
+    }
+    if (!ar?.data) console.log('::warning title=age rating::App Store Connect gave no age rating form')
     if (ar?.data) {
       // Apple's 2025 questions, all at once (one at a time saves nothing): a mail app shows nothing of its own, so
       // "none" / "no"; it does carry messages between people (mail), so messagingAndChat is yes. Where Apple says a
