@@ -3,6 +3,14 @@
 import { useEffect, useState } from 'react'
 
 const cache = new Map<string, string | null>()
+// a contact's photo was set or taken away (19 Nov 2026): that address is asked for again, in every window
+try {
+  window.roarmail?.on?.((e: any) => {
+    if (e?.type !== 'contactPhoto' || !e.email) return
+    cache.delete(e.email); waiting.add(e.email)
+    if (!timer) timer = setTimeout(flush, 30)
+  })
+} catch { /* the web demo */ }
 const waiting = new Set<string>()
 const listeners = new Set<() => void>()
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -20,21 +28,20 @@ function flush() {
 }
 
 /** the picture for each sender, once known; null while unknown or when there is none */
-export function useSenderIcons(emails: string[], on: boolean): (email: string) => string | null {
+export function useSenderIcons(emails: string[], _found?: boolean): (email: string) => string | null {
   const [, tick] = useState(0)
-  const key = on ? emails.join(',') : ''
+  const key = emails.join(',')
   useEffect(() => {
     const l = () => tick((n) => n + 1)
     listeners.add(l)
     return () => { listeners.delete(l) }
   }, [])
   useEffect(() => {
-    if (!on) return
     for (const raw of emails) {
       const e = raw.toLowerCase()
       if (e && !cache.has(e) && !waiting.has(e)) waiting.add(e)
     }
     if (waiting.size && !timer) timer = setTimeout(flush, 30)
   }, [key])
-  return (email: string) => (on ? cache.get(email.toLowerCase()) ?? null : null)
+  return (email: string) => cache.get(email.toLowerCase()) ?? null
 }

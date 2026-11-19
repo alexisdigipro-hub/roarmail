@@ -138,6 +138,8 @@ export interface Contact {
   count: number; last: number
 }
 export interface ContactFull extends Contact {
+  /** a photo was chosen for them by hand */
+  hasPhoto?: boolean
   recent: MessageRow[]
   files: { id: string; filename: string; size: number; mime: string; date: number }[]
 }
@@ -461,6 +463,7 @@ export type MailEvent =
   | { type: 'roarSync' }
   /** a setting changed (in the Settings window): every window reads them again */
   | { type: 'settings' }
+  | { type: 'contactPhoto'; email: string }
   /** a panel window (Settings, Files, Contacts, Statistics) asks the main window to do something */
   | { type: 'panelAction'; action: PanelAction }
   /** an open panel window gets a new starting point (a rule from a sender, a contact) */
@@ -513,6 +516,8 @@ export interface MailApi {
   setAvatar(accountId: string, dataUrl: string): Promise<void>
   /** pictures for these senders (Gravatar for people, the company's icon for its domain), kept on this computer; null = none */
   senderIcons(emails: string[]): Promise<Record<string, string | null>>
+  /** a contact's own photo (a small image data URL), or null to take it away (19 Nov 2026) */
+  setContactPhoto?(email: string, photo: string | null): Promise<void>
   /** the system's emoji picker, typing into the focused field (Mac and Windows) */
   emojiPanel(): Promise<void>
   /** a message's right-click menu (the Mac's own): null is a line between groups; resolves with the picked id, or null */
