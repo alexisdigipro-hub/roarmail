@@ -7,12 +7,33 @@ name: RoarMail for the Mac App Store (TestFlight)
 # by scripts/appstore.mjs for each run and the older ones taken away, so there is nothing to keep by hand.
 on:
   workflow_dispatch:
+    inputs:
+      only_testers:
+        description: 'Only put the ready builds in the TestFlight groups (no new build)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  # every build Apple has finished with goes into every TestFlight group, and what Apple made of each is printed
+  testers:
+    if: ${{ inputs.only_testers }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/appstore.mjs distribute 1
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+
   testflight:
+    if: ${{ !inputs.only_testers }}
     runs-on: macos-latest
     env:
       KCPASS: ci-${{ github.run_id }}
@@ -108,6 +129,13 @@ jobs:
             exit 1
           fi
           echo "::notice title=Sent::RoarMail is in App Store Connect; TestFlight shows it once Apple has processed it (often 10 to 30 minutes)."
+
+      - name: Into the TestFlight groups
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: node scripts/appstore.mjs distribute 25 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
