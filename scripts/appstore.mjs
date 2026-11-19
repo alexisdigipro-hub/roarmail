@@ -103,10 +103,16 @@ async function distribute(minutes = 25) {
   const bad = builds.filter((b) => b.attributes.processingState === 'INVALID' || b.attributes.processingState === 'FAILED')
   if (bad.length) console.log(`::warning title=Builds Apple refused::${bad.map((b) => b.attributes.version).join(', ')}. Apple says why in an email to the account holder.`)
   const ready = builds.filter((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired)
+  // what TestFlight itself says of each ready build (Missing export compliance, ready to test, …)
+  for (const b of ready) {
+    const d = await asc('GET', `/builds/${b.id}/buildBetaDetail`).catch(() => null)
+    if (d?.data) console.log(`build ${b.attributes.version} for testers: internal ${d.data.attributes.internalBuildState}, external ${d.data.attributes.externalBuildState}`)
+  }
   const groups = (await asc('GET', `/apps/${app.id}/betaGroups?limit=50`)).data || []
+  for (const g of groups) console.log(`group "${g.attributes.name}": internal ${g.attributes.isInternalGroup}, gets every build by itself ${g.attributes.hasAccessToAllBuilds}`)
   if (!groups.length) console.log('::warning::no TestFlight group yet: App Store Connect > TestFlight > Internal Testing > +')
   for (const g of groups) {
-    if (!ready.length) break
+    if (!ready.length || g.attributes.hasAccessToAllBuilds) continue
     await asc('POST', `/betaGroups/${g.id}/relationships/builds`, { data: ready.map((b) => ({ type: 'builds', id: b.id })) })
       .then(() => console.log(`group "${g.attributes.name}": ${ready.map((b) => b.attributes.version).join(', ')} in it`))
       .catch((e) => console.log(`(group "${g.attributes.name}": ${e.message})`))
