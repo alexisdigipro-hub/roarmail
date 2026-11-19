@@ -223,9 +223,11 @@ function friendly(e: any): string {
   if (/ENOTFOUND|EAI_AGAIN/.test(m)) return 'host'
   if (/ETIMEDOUT|timeout|ECONNREFUSED|ECONNRESET|EPIPE|ENETUNREACH|EHOSTUNREACH|closed|Connection not available/i.test(m)) return 'network'
   if (/certificate|altname|self.signed/i.test(m)) return 'certificate'
+  // a shared host's limit on connections at once (several accounts on one server, Alex 19 Nov 2026): wait and try again
+  if (/too many|maximum number of connections|connection limit|connections from|UNAVAILABLE|try again later|throttl|rate limit/i.test(m)) return 'busy'
   return m.slice(0, 300)
 }
-const transient = (code: string) => code === 'network' || code === 'host'
+const transient = (code: string) => code === 'network' || code === 'host' || code === 'busy'
 
 export class MailService {
   private worker = new Map<string, ImapFlow>()
@@ -749,7 +751,8 @@ export class MailService {
     } catch (e) {
       const code = friendly(e)
       this.setState(id, transient(code) ? 'offline' : 'error', code)
-      this.scheduleRetry(id)
+      // a busy server gets its accounts back one by one, not all at the same second
+      this.scheduleRetry(id, code === 'busy' ? 45e3 + Math.random() * 60e3 : 30e3)
     }
   }
 
