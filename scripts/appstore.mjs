@@ -39,7 +39,9 @@ async function asc(method, url, body) {
   if (r.status === 204) return null
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
-    const e = (j.errors || []).map((x) => `${x.title}: ${x.detail}`).join(' · ') || `HTTP ${r.status}`
+    // Apple puts the real reasons under meta.associatedErrors (what is missing on the page, and where)
+    const assoc = (j.errors || []).flatMap((x) => Object.values(x.meta?.associatedErrors || {}).flat()).map((x) => `${x.code || ''} ${x.detail || x.title || ''}`.trim())
+    const e = [...(j.errors || []).map((x) => `${x.title}: ${x.detail}`), ...assoc].join(' · ') || `HTTP ${r.status}`
     throw new Error(`${method} ${url}: ${e}`)
   }
   return j
@@ -266,8 +268,11 @@ async function submit() {
   const app = await appOf()
   const v = await editableVersion(app)
   if (!v) throw new Error('no version to send')
-  const sub = (await asc('POST', '/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'MAC_OS' }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
-  await asc('POST', '/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: {
+  // an unsent submission from an earlier try is used again (Apple allows one open at a time)
+  const open = ((await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&filter[platform]=MAC_OS&filter[state]=READY_FOR_REVIEW&include=items`).catch(() => null))?.data || [])[0]
+  const sub = open || (await asc('POST', '/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'MAC_OS' }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
+  const has = (open?.relationships?.items?.data || []).length > 0
+  if (!has) await asc('POST', '/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: {
     reviewSubmission: { data: { type: 'reviewSubmissions', id: sub.id } }, appStoreVersion: { data: { type: 'appStoreVersions', id: v.id } } } } })
   await asc('PATCH', `/reviewSubmissions/${sub.id}`, { data: { type: 'reviewSubmissions', id: sub.id, attributes: { submitted: true } } })
   console.log(`::notice title=Sent for review::RoarMail ${v.attributes.versionString} is with Apple's App Review.`)
