@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import DOMPurify from 'dompurify'
 import type { Account, Address, Invite, InviteAnswer, MessageFull, MessageRow, SecurityWarning, Settings } from '../../shared/api'
 import { checkLink, isTracker, stripTracking, type LinkWarning } from '../privacy'
-import { FONTS, TEXT_SIZES, fontStack } from '../look'
+import { FONTS, TEXT_SIZES, fontStack, useLens } from '../look'
 import { fullDate, lang, size, t, when, type Key } from '../i18n'
 import { Icon } from './Icon'
 import { useSenderIcons } from '../senders'
@@ -518,6 +518,7 @@ function InviteCard({ m, invite }: { m: MessageFull; invite: Invite }) {
   const [error, setError] = useState('')
   const cancelled = invite.method === 'CANCEL'
   const asks = invite.method === 'REQUEST'
+  const answerLens = useLens<HTMLDivElement>(`${answer || ''}|${asks}`)
   const who = invite.organizer ? invite.organizer.name || invite.organizer.address : ''
   const reply = async (a: InviteAnswer) => {
     setBusy(true); setError(''); setNote('')
@@ -544,7 +545,7 @@ function InviteCard({ m, invite }: { m: MessageFull; invite: Invite }) {
         {cancelled && <span className="muted small">{t.inv_cancelledNote}</span>}
         <div className="row invite-actions">
           {asks && (
-            <div className="seg">
+            <div className="seg lens" ref={answerLens}>
               {choices.map(([a, label]) => (
                 <button key={a} className={answer === a ? 'on' : ''} disabled={busy || !invite.organizer} onClick={() => reply(a)}>{t[label]}</button>
               ))}

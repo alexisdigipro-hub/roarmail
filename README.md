@@ -23,6 +23,13 @@ Releases: bump `version` in package.json, push, then push a tag `desktop-vX.Y.Z`
 
 0.34.4: new icon (the Lab's one family of icons, 10 Nov 2026).
 
+0.37.0 (Alex, 19 Nov 2026): swipe, slide and glass everywhere. `src/renderer/swipe.ts` `useSwipeTabs` moves between tabs
+and pages with a two-finger sideways swipe on the trackpad or a finger on a touch screen (Settings pages and their tabs,
+an account's tabs, Contacts groups and a contact's tabs, Files kinds, Statistics accounts, the list's filter bar); never on
+the message rows, in text fields or over something that scrolls sideways. New content slides in from its side
+(`data-slide`), the sliding glass lens is on every choice group, lists and cards rise in, cards and menus have the glass
+light (look.css, last block). All of it rests under Motion off, Power saving and Reduce motion.
+
 ## App Store (Mac, TestFlight)
 
 Since 0.36.0 RoarMail can also be built for the Mac App Store (Alex, 19 Nov 2026): `.github/workflows/appstore.yml`,

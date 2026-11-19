@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { Account, Folder, Rule, RuleAction, RuleCondition, RuleField } from '../../shared/api'
 import { t, type Key } from '../i18n'
 import { Icon } from './Icon'
+import { useLens } from '../look'
 
 const FIELDS: RuleField[] = ['from', 'to', 'subject', 'list', 'attachment']
 const ACTIONS: RuleAction['kind'][] = ['move', 'read', 'flag', 'archive']
@@ -84,6 +85,7 @@ function RuleEditor({ rule, accounts, folders, onDone }: {
 }) {
   const [r, setR] = useState<Rule>(rule)
   const [error, setError] = useState('')
+  const matchLens = useLens<HTMLDivElement>(r.match)
   const cond = (i: number, c: Partial<RuleCondition>) => setR({ ...r, conditions: r.conditions.map((x, j) => (j === i ? { ...x, ...c } : x)) })
   const act = (i: number, a: Partial<RuleAction>) => setR({ ...r, actions: r.actions.map((x, j) => (j === i ? { ...x, ...a } : x)) })
   const save = () => {
@@ -98,7 +100,7 @@ function RuleEditor({ rule, accounts, folders, onDone }: {
       <label>{t.name}<input autoFocus value={r.name} placeholder={t.ru_namePh} onChange={(e) => setR({ ...r, name: e.target.value })} /></label>
       <div className="row rule-head">
         <b>{t.ru_if}</b>
-        <div className="seg">
+        <div className="seg lens" ref={matchLens}>
           {(['all', 'any'] as const).map((m) => <button key={m} className={r.match === m ? 'on' : ''} onClick={() => setR({ ...r, match: m })}>{m === 'all' ? t.ru_all : t.ru_any}</button>)}
         </div>
       </div>

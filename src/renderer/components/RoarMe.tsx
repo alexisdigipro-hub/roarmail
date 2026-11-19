@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { MessageFull, RoarMeStatus, RoarPerson, RoarRoom, RoarTask, RoarWork } from '../../shared/api'
 import { lang, t, type Key } from '../i18n'
 import { Icon } from './Icon'
+import { useLens } from '../look'
 import { initials, tint } from './Viewer'
 
 const api = () => window.roarmail
@@ -163,6 +164,7 @@ export function TaskSheet({ message, onClose, onDone }: { message: MessageFull; 
   const [error, setError] = useState('')
   const ready = status?.signedIn && !status.needsMfa
   useEffect(() => { if (ready) api().roarmeContacts().then(setPeople).catch(() => {}) }, [ready])
+  const prLens = useLens<HTMLDivElement>(`${priority}|${ready}`)
 
   const save = async () => {
     setBusy(true); setError('')
@@ -187,7 +189,7 @@ export function TaskSheet({ message, onClose, onDone }: { message: MessageFull; 
               <label>{t.rm_due}<input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
             </div>
             <div className="row"><span className="muted small">{t.rm_priority}</span>
-              <div className="seg">{(['low', 'normal', 'high'] as const).map((p) => <button key={p} className={priority === p ? 'on' : ''} onClick={() => setPriority(p)}>{t[`pr_${p}` as Key]}</button>)}</div>
+              <div className="seg lens" ref={prLens}>{(['low', 'normal', 'high'] as const).map((p) => <button key={p} className={priority === p ? 'on' : ''} onClick={() => setPriority(p)}>{t[`pr_${p}` as Key]}</button>)}</div>
             </div>
             <label>{t.rm_notes}<textarea rows={6} value={notes} maxLength={4000} onChange={(e) => setNotes(e.target.value)} /></label>
             {assignee && <p className="muted small">{t.rm_askHint}</p>}

@@ -1,5 +1,6 @@
 // RoarMail's window, laid out like Airmail: accounts rail, folders, conversation list, reader.
 import { GENERAL_DEFAULTS, LOOK_DEFAULTS, applyLook, useLens } from './look'
+import { useSwipeTabs } from './swipe'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type WheelEvent } from 'react'
 import type { Account, Action, Folder, ListFilter, ListScope, ListSort, MessageFull, MessageRow, OutboxItem, PromoCount, RoarProject, Rule, Settings, SwipeAction } from '../shared/api'
 import { syncLanguage, t, when, type Key } from './i18n'
@@ -87,6 +88,10 @@ export default function App() {
   const [intro, setIntro] = useState(true)
   const [widths, setWidth] = useWidths()
   const folderLens = useLens<HTMLDivElement>(`${scope.accountId}|${scope.folderId || ''}|${scope.role || ''}|${folders.length}`)
+  // the filter bar over the list: the chosen filter under the sliding glass, and a sideways swipe over the bar goes to
+  // the next filter (19 Nov 2026; the rows keep their own swipe actions)
+  const filterLens = useLens<HTMLDivElement>(`${scope.filter || ''}|${scope.accountId}|${scope.role || ''}|${!results}|${searchOpen}`, 'lens-pick')
+  const filterSwipe = useSwipeTabs<ListFilter | ''>(['', ...FILTERS.map(([f]) => f)], scope.filter || '', (f) => setScope((s) => ({ ...s, filter: f || undefined })))
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const loadAccounts = useCallback(() => api.accounts().then(setAccounts), [])
@@ -870,12 +875,12 @@ export default function App() {
             </label>
           )}
           {!results && !searchOpen && (<>
-            <div className="filters">
-              <div className="pill-group">
+            <div className="filters" ref={filterSwipe.ref}>
+              <div className="pill-group lens filter-lens" ref={filterLens}>
               <button className="tool small" title={`${t.search} (/)`} onClick={openSearch}><Icon name="search" size={15} /></button>
               <span className="sep" />
               {FILTERS.map(([f, icon, label]) => (
-                <button key={f} className={`tool small ${scope.filter === f ? 'on-filter' : ''} ${f === 'promos' ? 'promo-btn' : ''}`} title={t[label]}
+                <button key={f} className={`tool small ${scope.filter === f ? 'on-filter lens-pick' : ''} ${f === 'promos' ? 'promo-btn' : ''}`} title={t[label]}
                   onClick={() => setScope((s) => ({ ...s, filter: s.filter === f ? undefined : f }))}><Icon name={icon} size={15} filled={f === 'flagged' && scope.filter === f} />
                   {/* Promotions' unread count rides on its own filter button (Alex, 3 Nov 2026: the pill under the bar sat oddly) */}
                   {f === 'promos' && inboxOf(scope) && prefs.promosApart && !!promos?.unread && <i className="promo-count">{promos.unread > 99 ? '99+' : promos.unread}</i>}</button>

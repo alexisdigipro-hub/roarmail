@@ -4,11 +4,18 @@ import { useEffect, useState } from 'react'
 import type { Account, MailStats } from '../../shared/api'
 import { size, t, when } from '../i18n'
 import { Icon } from './Icon'
+import { useLens } from '../look'
+import { useSwipeTabs } from '../swipe'
 
 export function StatsSheet({ accounts, onClose, onOpen }: { accounts: Account[]; onClose: () => void; onOpen: (accountId: string, sender: string) => void }) {
   const [scope, setScope] = useState('all')
   const [s, setS] = useState<MailStats | null>(null)
   const [by, setBy] = useState<'bytes' | 'count'>('bytes')
+  // one account after another under the sliding glass, and a sideways swipe to the next one (19 Nov 2026)
+  const scopes = ['all', ...accounts.filter((a) => a.enabled).map((a) => a.id)]
+  const pickLens = useLens<HTMLDivElement>(`${scope}|${scopes.length}`)
+  const byLens = useLens<HTMLDivElement>(`${by}|${!!s}`)
+  const sw = useSwipeTabs(scopes, scope, setScope)
 
   useEffect(() => {
     let live = true
@@ -24,12 +31,12 @@ export function StatsSheet({ accounts, onClose, onOpen }: { accounts: Account[];
 
   return (
     <div className="sheet-wrap" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }} onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}>
-      <div className="sheet stats" tabIndex={-1}>
+      <div className="sheet stats" tabIndex={-1} ref={sw.ref}>
         <div className="row">
           <h1 className="grow">{t.st_title}</h1>
           <button className="tool" title={t.cancel} onClick={onClose}><Icon name="close" /></button>
         </div>
-        <div className="acct-pick">
+        <div className="acct-pick chip-lens lens" ref={pickLens}>
           <button className={`acct-chip ${scope === 'all' ? 'on' : ''}`} onClick={() => setScope('all')}>{t.allAccounts}</button>
           {accounts.filter((a) => a.enabled).map((a) => (
             <button key={a.id} className={`acct-chip ${scope === a.id ? 'on' : ''}`} onClick={() => setScope(a.id)}>
@@ -39,7 +46,7 @@ export function StatsSheet({ accounts, onClose, onOpen }: { accounts: Account[];
         </div>
 
         {!s ? <div className="stats-wait"><div className="spinner" /></div> : (
-          <div className="stack">
+          <div className="stack" data-slide={sw.dir}>
             <section className="card">
               <h3>{t.st_space}</h3>
               {s.accounts.map((a) => (
@@ -80,7 +87,7 @@ export function StatsSheet({ accounts, onClose, onOpen }: { accounts: Account[];
             <section className="card">
               <div className="row">
                 <h3 className="grow">{t.st_senders}</h3>
-                <div className="seg small">
+                <div className="seg small lens" ref={byLens}>
                   <button className={by === 'bytes' ? 'on' : ''} onClick={() => setBy('bytes')}>{t.st_bySize}</button>
                   <button className={by === 'count' ? 'on' : ''} onClick={() => setBy('count')}>{t.st_byCount}</button>
                 </div>

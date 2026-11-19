@@ -6,6 +6,7 @@ import type { Template } from '../../shared/api'
 import { lang, t } from '../i18n'
 import { fillTemplate, recipientName, type TemplateValues } from '../templates'
 import { Icon } from './Icon'
+import { useLens } from '../look'
 
 const api = window.roarmail
 const PROJECT_KEY = 'roarmail.tplProject'
@@ -16,10 +17,11 @@ export function TemplatesPage() {
   const load = () => api.templates().then((l) => { setList(l); setEditing((e) => e ?? l[0]?.id ?? null); return l })
   useEffect(() => { load() }, [])
   const current = list.find((x) => x.id === editing)
+  const lens = useLens<HTMLDivElement>(`${editing || ''}|${list.length}`)
   return (
     <div className="stack">
       <div className="sig-layout">
-        <div className="sig-list">
+        <div className="sig-list list-lens lens" ref={lens}>
           {list.map((x) => <button key={x.id} className={`folder ${x.id === editing ? 'on' : ''}`} onClick={() => setEditing(x.id)}><span className="grow ellipsis">{x.name}</span></button>)}
           <button className="pill small" onClick={async () => { const n = await api.saveTemplate({ id: '', name: t.tp_new, subject: '', html: '' }); await load(); setEditing(n.id) }}>
             <Icon name="plus" size={13} /> {t.tp_new}

@@ -147,15 +147,16 @@ export function revealFrom(e: { clientX: number; clientY: number } | null, chang
 
 /**
  * RoarMe's lens: the container gets class "lens", the chosen child has "on"; this measures the chosen child
- * and moves a pill (the container's ::before) under it with a spring. Works across and down.
+ * and moves a pill (the container's ::before) under it with a spring. Works across and down. `pick` is the class of
+ * the chosen child when it is not "on" (the list's filter bar, where several buttons can be lit at once).
  */
-export function useLens<T extends HTMLElement>(dep: unknown) {
+export function useLens<T extends HTMLElement>(dep: unknown, pick = 'on') {
   const ref = useRef<T>(null)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return undefined
     const put = () => {
-      const on = el.querySelector(':scope > .on') as HTMLElement | null
+      const on = el.querySelector(`:scope > .${pick}`) as HTMLElement | null
       if (!on) { el.classList.remove('lens-on'); return }
       el.style.setProperty('--lx', `${on.offsetLeft}px`)
       el.style.setProperty('--ly', `${on.offsetTop}px`)
@@ -166,7 +167,9 @@ export function useLens<T extends HTMLElement>(dep: unknown) {
     put()
     const ro = new ResizeObserver(put)
     ro.observe(el)
-    ;[...el.children].forEach((c) => ro.observe(c))
+    // a long list (contacts, accounts) watches only the chosen row; a short group every item, as they move each other
+    const kids = [...el.children]
+    ;(kids.length <= 40 ? kids : kids.filter((c) => c.classList.contains(pick))).forEach((c) => ro.observe(c))
     const later = () => requestAnimationFrame(() => requestAnimationFrame(put))
     window.addEventListener('roarmail-look', later)
     return () => { ro.disconnect(); window.removeEventListener('roarmail-look', later) }
