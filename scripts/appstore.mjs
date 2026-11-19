@@ -201,17 +201,36 @@ async function listing(shotsDir) {
     await soft('category Productivity', asc('PATCH', `/appInfos/${info.id}`, { data: { type: 'appInfos', id: info.id, relationships: { primaryCategory: { data: { type: 'appCategories', id: 'PRODUCTIVITY' } } } } }))
     const ar = await asc('GET', `/appInfos/${info.id}/ageRatingDeclaration`).catch(() => null)
     if (ar?.data) {
-      // nothing a mail app shows of its own: every question answered "none" / "no", one at a time so a field Apple
-      // has renamed does not stop the others
-      const none = ['alcoholTobaccoOrDrugUseOrReferences', 'contests', 'gamblingSimulated', 'horrorOrFearThemes', 'matureOrSuggestiveThemes',
-        'medicalOrTreatmentInformation', 'profanityOrCrudeHumor', 'sexualContentGraphicAndNudity', 'sexualContentOrNudity',
-        'violenceCartoonOrFantasy', 'violenceRealistic', 'violenceRealisticProlongedGraphicOrSadistic', 'gunsOrOtherWeapons', 'healthOrWellnessTopics']
-      const no = ['gambling', 'unrestrictedWebAccess', 'lootBox', 'advertising', 'parentalControls', 'ageAssurance', 'userGeneratedContent', 'messagingAndChat']
-      for (const k of none) await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: { [k]: 'NONE' } } }).catch(() => {})
-      for (const k of no) await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: { [k]: false } } }).catch(() => {})
-      console.log('✓ age rating answered')
+      // Apple's 2025 questions, all at once (one at a time saves nothing): a mail app shows nothing of its own, so
+      // "none" / "no"; it does carry messages between people (mail), so messagingAndChat is yes. Where Apple says a
+      // field wants the other kind of answer, it is turned ("NONE" <-> false) and sent again.
+      const attrs = {
+        alcoholTobaccoOrDrugUseOrReferences: 'NONE', contests: 'NONE', gamblingSimulated: 'NONE', horrorOrFearThemes: 'NONE',
+        matureOrSuggestiveThemes: 'NONE', medicalOrTreatmentInformation: 'NONE', profanityOrCrudeHumor: 'NONE',
+        sexualContentGraphicAndNudity: 'NONE', sexualContentOrNudity: 'NONE', violenceCartoonOrFantasy: 'NONE',
+        violenceRealistic: 'NONE', violenceRealisticProlongedGraphicOrSadistic: 'NONE', gunsOrOtherWeapons: 'NONE',
+        gambling: false, unrestrictedWebAccess: false, lootBox: false, advertising: false, parentalControls: false,
+        ageAssurance: false, userGeneratedContent: false, healthOrWellnessTopics: false, messagingAndChat: true,
+      }
+      for (let n = 0; n < 40; n++) {
+        try {
+          await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: attrs } })
+          console.log('✓ age rating answered'); break
+        } catch (e) {
+          const m = String(e.message)
+          const bad = [...m.matchAll(/'(\w+)'/g)].map((x) => x[1]).filter((k) => k in attrs)
+          const unknown = [...m.matchAll(/(?:not (?:a )?(?:valid|allowed|recognized)[^'"]*|unknown[^'"]*)['"](\w+)['"]/gi)].map((x) => x[1])
+          if (!bad.length && !unknown.length) { console.log(`::warning title=age rating::${m}`); break }
+          for (const k of unknown) delete attrs[k]
+          for (const k of bad) {
+            if (/not allowed|is not a valid attribute|unknown/i.test(m) && !/value/i.test(m)) delete attrs[k]
+            else attrs[k] = typeof attrs[k] === 'boolean' ? 'NONE' : attrs[k] === 'NONE' ? false : attrs[k]
+          }
+        }
+      }
     }
   }
+  await soft('content rights', asc('PATCH', `/apps/${app.id}`, { data: { type: 'apps', id: app.id, attributes: { contentRightsDeclaration: 'DOES_NOT_USE_THIRD_PARTY_CONTENT' } } }))
   // the version: its number, copyright, texts, the build, the notes for the reviewer
   let v = await editableVersion(app)
   if (!v) v = (await asc('POST', '/appStoreVersions', { data: { type: 'appStoreVersions', attributes: { platform: 'MAC_OS', versionString: version }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
