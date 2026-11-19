@@ -126,12 +126,161 @@ async function distribute(minutes = 25) {
   if (!ready.length) console.log('::warning::no build is ready for testers yet')
 }
 
+// ---------- the App Store page (Alex, 19 Nov 2026: "now we can put it out on the App Store") ----------
+const LISTING = {
+  subtitle: 'Private mail for all accounts',
+  privacyPolicyUrl: 'https://themadlions.com/legal/roarmail/#privacy',
+  supportUrl: 'https://themadlions.com/lab/roarmail/',
+  marketingUrl: 'https://themadlions.com/lab/roarmail/',
+  copyright: '2026 The Mad Lions',
+  keywords: 'mail,email,inbox,imap,gmail,outlook,privacy,unified,snooze,spam',
+  promotionalText: 'Every mail account in one calm, fast window. Your mail stays between your Mac and your servers.',
+  description: `RoarMail brings every mail account into one calm, fast window: Gmail, Outlook, iCloud and any IMAP account. Your mail stays between your Mac and your servers.
+
+UNIFIED INBOX
+All your accounts together, or one at a time, with their own colours.
+
+WORK THE WAY YOU WANT
+• Snooze a message until the time you need it
+• Send later, and undo send
+• Waiting for a reply: the mail you sent that nobody has answered yet
+• Rules, signatures and templates
+• Files: every attachment from every message in one place
+• Contacts with photos, VIP and groups
+
+SAFE
+• Blocking that stops fake banks and couriers, whatever address they come from
+• Pictures from senders you do not know stay off until you allow them
+• Tracking links and pixels removed
+
+WITH YOUR ROAR ACCOUNT (optional)
+• Your setup on every Mac
+• Projects, calendar and tasks across The Mad Lions' apps
+
+Made in Athens by The Mad Lions.`,
+  reviewNotes: `RoarMail is an email app: it needs a mail account to show anything.
+A test mailbox is in the sign-in fields above (an IMAP account at themadlions.com).
+
+How to try it:
+1. Open RoarMail and choose Add Account.
+2. Type the email address and the password from the fields above and press Add. The server is found by itself.
+3. The inbox has a few test messages, among them one with a PDF and a picture, one with a calendar invitation (Accept / Decline appear on it) and one with a photo.
+
+The Roar Account (Settings > Roar Account) is optional and not needed to use the app.
+RoarMail AI (the ✦ button when writing) asks for permission before any text is sent, and needs a Roar Account; it is optional.
+RoarMail uses only standard encryption (TLS to mail servers).`,
+}
+
+async function appOf() {
+  const apps = await asc('GET', `/apps?filter[bundleId]=${BUNDLE}`)
+  const app = apps.data?.[0]
+  if (!app) throw new Error(`no app with the bundle ID ${BUNDLE} in App Store Connect yet`)
+  return app
+}
+const md5 = (b) => crypto.createHash('md5').update(b).digest('hex')
+const soft = (what, p) => p.then((r) => { console.log(`✓ ${what}`); return r }).catch((e) => { console.log(`::warning title=${what}::${e.message}`); return null })
+
+async function editableVersion(app) {
+  const vs = (await asc('GET', `/apps/${app.id}/appStoreVersions?filter[platform]=MAC_OS&limit=10`)).data || []
+  const open = vs.find((v) => ['PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED', 'METADATA_REJECTED', 'INVALID_BINARY'].includes(v.attributes.appStoreState || v.attributes.appVersionState))
+  return open || vs[0]
+}
+
+async function listing(shotsDir) {
+  const app = await appOf()
+  const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version
+  // the app's information: subtitle, privacy policy, category, age rating
+  const infos = (await asc('GET', `/apps/${app.id}/appInfos`)).data || []
+  const info = infos.find((i) => !['READY_FOR_DISTRIBUTION', 'READY_FOR_SALE'].includes(i.attributes.appStoreState || i.attributes.state)) || infos[0]
+  if (info) {
+    const locs = (await asc('GET', `/appInfos/${info.id}/appInfoLocalizations`)).data || []
+    const en = locs.find((l) => l.attributes.locale.startsWith('en')) || locs[0]
+    if (en) await soft('subtitle and privacy policy', asc('PATCH', `/appInfoLocalizations/${en.id}`, { data: { type: 'appInfoLocalizations', id: en.id, attributes: { subtitle: LISTING.subtitle, privacyPolicyUrl: LISTING.privacyPolicyUrl } } }))
+    await soft('category Productivity', asc('PATCH', `/appInfos/${info.id}`, { data: { type: 'appInfos', id: info.id, relationships: { primaryCategory: { data: { type: 'appCategories', id: 'PRODUCTIVITY' } } } } }))
+    const ar = await asc('GET', `/appInfos/${info.id}/ageRatingDeclaration`).catch(() => null)
+    if (ar?.data) {
+      // nothing a mail app shows of its own: every question answered "none" / "no", one at a time so a field Apple
+      // has renamed does not stop the others
+      const none = ['alcoholTobaccoOrDrugUseOrReferences', 'contests', 'gamblingSimulated', 'horrorOrFearThemes', 'matureOrSuggestiveThemes',
+        'medicalOrTreatmentInformation', 'profanityOrCrudeHumor', 'sexualContentGraphicAndNudity', 'sexualContentOrNudity',
+        'violenceCartoonOrFantasy', 'violenceRealistic', 'violenceRealisticProlongedGraphicOrSadistic', 'gunsOrOtherWeapons', 'healthOrWellnessTopics']
+      const no = ['gambling', 'unrestrictedWebAccess', 'lootBox', 'advertising', 'parentalControls', 'ageAssurance', 'userGeneratedContent', 'messagingAndChat']
+      for (const k of none) await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: { [k]: 'NONE' } } }).catch(() => {})
+      for (const k of no) await asc('PATCH', `/ageRatingDeclarations/${ar.data.id}`, { data: { type: 'ageRatingDeclarations', id: ar.data.id, attributes: { [k]: false } } }).catch(() => {})
+      console.log('✓ age rating answered')
+    }
+  }
+  // the version: its number, copyright, texts, the build, the notes for the reviewer
+  let v = await editableVersion(app)
+  if (!v) v = (await asc('POST', '/appStoreVersions', { data: { type: 'appStoreVersions', attributes: { platform: 'MAC_OS', versionString: version }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
+  await soft(`version ${version}`, asc('PATCH', `/appStoreVersions/${v.id}`, { data: { type: 'appStoreVersions', id: v.id, attributes: { versionString: version, copyright: LISTING.copyright } } }))
+  const vlocs = (await asc('GET', `/appStoreVersions/${v.id}/appStoreVersionLocalizations`)).data || []
+  const vl = vlocs.find((l) => l.attributes.locale.startsWith('en')) || vlocs[0]
+  if (vl) await soft('description, keywords, links', asc('PATCH', `/appStoreVersionLocalizations/${vl.id}`, { data: { type: 'appStoreVersionLocalizations', id: vl.id,
+    attributes: { description: LISTING.description, keywords: LISTING.keywords, supportUrl: LISTING.supportUrl, marketingUrl: LISTING.marketingUrl, promotionalText: LISTING.promotionalText } } }))
+  const builds = (await asc('GET', `/builds?filter[app]=${app.id}&sort=-uploadedDate&limit=20&fields[builds]=version,processingState,expired&include=preReleaseVersion`))
+  const pre = new Map((builds.included || []).map((x) => [x.id, x.attributes.version]))
+  const build = (builds.data || []).find((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired && pre.get(b.relationships?.preReleaseVersion?.data?.id) === version)
+    || (builds.data || []).find((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired)
+  if (build) await soft(`build ${build.attributes.version} chosen`, asc('PATCH', `/appStoreVersions/${v.id}/relationships/build`, { data: { type: 'builds', id: build.id } }))
+  else console.log('::warning::no ready build to choose yet')
+  const rd = await asc('GET', `/appStoreVersions/${v.id}/appStoreReviewDetail`).catch(() => null)
+  if (rd?.data) await soft('notes for the reviewer', asc('PATCH', `/appStoreReviewDetails/${rd.data.id}`, { data: { type: 'appStoreReviewDetails', id: rd.data.id, attributes: { notes: LISTING.reviewNotes } } }))
+  else await soft('notes for the reviewer', asc('POST', '/appStoreReviewDetails', { data: { type: 'appStoreReviewDetails', attributes: { notes: LISTING.reviewNotes }, relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: v.id } } } } }))
+  // free
+  const sched = await asc('GET', `/apps/${app.id}/appPriceSchedule`).catch(() => null)
+  if (!sched?.data) {
+    const pts = (await asc('GET', `/apps/${app.id}/appPricePoints?filter[territory]=USA&limit=200`).catch(() => null))?.data || []
+    const free = pts.find((p) => Number(p.attributes.customerPrice) === 0)
+    if (free) await soft('price: free', asc('POST', '/appPriceSchedules', { data: { type: 'appPriceSchedules', relationships: {
+      app: { data: { type: 'apps', id: app.id } }, baseTerritory: { data: { type: 'territories', id: 'USA' } }, manualPrices: { data: [{ type: 'appPrices', id: '${p0}' }] } } },
+      included: [{ type: 'appPrices', id: '${p0}', attributes: { startDate: null }, relationships: { appPricePoint: { data: { type: 'appPricePoints', id: free.id } } } }] }))
+  } else console.log('✓ price already set')
+  // the pictures (2880 x 1800), in place of any there before
+  if (shotsDir && vl && fs.existsSync(shotsDir)) {
+    const files = fs.readdirSync(shotsDir).filter((f) => f.endsWith('.png')).sort()
+    if (files.length) {
+      const sets = (await asc('GET', `/appStoreVersionLocalizations/${vl.id}/appScreenshotSets`)).data || []
+      let set = sets.find((x) => x.attributes.screenshotDisplayType === 'APP_DESKTOP')
+      if (!set) set = (await asc('POST', '/appScreenshotSets', { data: { type: 'appScreenshotSets', attributes: { screenshotDisplayType: 'APP_DESKTOP' },
+        relationships: { appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: vl.id } } } } })).data
+      for (const old of (await asc('GET', `/appScreenshotSets/${set.id}/appScreenshots`)).data || []) await asc('DELETE', `/appScreenshots/${old.id}`).catch(() => {})
+      for (const f of files) {
+        const buf = fs.readFileSync(path.join(shotsDir, f))
+        const r = (await asc('POST', '/appScreenshots', { data: { type: 'appScreenshots', attributes: { fileName: f, fileSize: buf.length },
+          relationships: { appScreenshotSet: { data: { type: 'appScreenshotSets', id: set.id } } } } })).data
+        for (const op of r.attributes.uploadOperations || []) {
+          const headers = Object.fromEntries((op.requestHeaders || []).map((h) => [h.name, h.value]))
+          const put = await fetch(op.url, { method: op.method, headers, body: buf.subarray(op.offset, op.offset + op.length) })
+          if (!put.ok) throw new Error(`screenshot ${f}: upload ${put.status}`)
+        }
+        await asc('PATCH', `/appScreenshots/${r.id}`, { data: { type: 'appScreenshots', id: r.id, attributes: { uploaded: true, sourceFileChecksum: md5(buf) } } })
+        console.log(`✓ screenshot ${f}`)
+      }
+    }
+  }
+  console.log('::notice title=App Store page::Filled. Still by hand in App Store Connect: App Privacy, and the review sign-in (already done by Alex).')
+}
+
+async function submit() {
+  const app = await appOf()
+  const v = await editableVersion(app)
+  if (!v) throw new Error('no version to send')
+  const sub = (await asc('POST', '/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'MAC_OS' }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
+  await asc('POST', '/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: {
+    reviewSubmission: { data: { type: 'reviewSubmissions', id: sub.id } }, appStoreVersion: { data: { type: 'appStoreVersions', id: v.id } } } } })
+  await asc('PATCH', `/reviewSubmissions/${sub.id}`, { data: { type: 'reviewSubmissions', id: sub.id, attributes: { submitted: true } } })
+  console.log(`::notice title=Sent for review::RoarMail ${v.attributes.versionString} is with Apple's App Review.`)
+}
+
 const [cmd, arg] = process.argv.slice(2)
 try {
   if (cmd === 'prepare') await prepare(arg || '.')
   else if (cmd === 'tidy') await tidy()
   else if (cmd === 'distribute') await distribute(Number(arg) || 25)
-  else throw new Error('use: prepare <dir> | tidy | distribute [minutes]')
+  else if (cmd === 'listing') await listing(arg)
+  else if (cmd === 'submit') await submit()
+  else throw new Error('use: prepare <dir> | tidy | distribute [minutes] | listing [screenshots dir] | submit')
 } catch (e) {
   const m = String(e.message || e)
   const hint = /maximum|limit|already have a current/i.test(m)

@@ -786,7 +786,30 @@ app.whenReady().then(() => {
   handle('mail:syncNow', () => roarAccount!.syncNow())
   handle('mail:aiStatus', () => roarAccount!.aiStatus())
   handle('mail:aiSetKey', (_e, provider, key) => roarAccount!.aiSetKey(provider === 'openai' ? 'openai' : 'claude', String(key || '')))
-  handle('mail:ai', (_e, req) => roarAccount!.ai(req))
+  // Before any text goes to an AI, the person says yes once (Apple 5.1.2(i): personal data to a third-party AI needs a
+  // clear yes first, 19 Nov 2026). Who gets it is said plainly; Settings > Roar Account > AI can take the yes back.
+  handle('mail:ai', async (e, req) => {
+    const s = mail.settings()
+    if (!s.aiConsent) {
+      const el = s.language === 'el' || (s.language === 'auto' && app.getLocale().startsWith('el'))
+      const who = s.aiProvider === 'openai' ? 'OpenAI (ChatGPT)' : 'Anthropic (Claude)'
+      const via = s.aiProvider === 'roar'
+        ? (el ? `μέσω του server της The Mad Lions, στην ${who}` : `through The Mad Lions' server to ${who}`)
+        : (el ? `απευθείας στην ${who}, με το δικό σου κλειδί` : `straight to ${who}, with your own key`)
+      function box(): Electron.MessageBoxOptions {
+        return el
+          ? { type: 'question', buttons: ['Επιτρέπω', 'Όχι τώρα'], defaultId: 0, cancelId: 1, message: 'Να χρησιμοποιηθεί το RoarMail AI;',
+              detail: `Για να γράψει ή να διορθώσει το κείμενο, το RoarMail στέλνει ό,τι του ζητάς, το κείμενο που γράφεις, το μήνυμα στο οποίο απαντάς και τους παραλήπτες ${via}. Δεν κρατιέται εκεί και δεν χρησιμοποιείται για εκπαίδευση. Μπορείς να το σταματήσεις στις Ρυθμίσεις > Roar Account > AI.` }
+          : { type: 'question', buttons: ['Allow', 'Not Now'], defaultId: 0, cancelId: 1, message: 'Use RoarMail AI?',
+              detail: `To write or change the text, RoarMail sends what you ask, the text you are writing, the message you are answering and the recipients ${via}. It is not kept there and not used for training. You can stop it in Settings > Roar Account > AI.` }
+      }
+      const w = BrowserWindow.fromWebContents(e.sender) || undefined
+      const r = await (w ? dialog.showMessageBox(w, box()) : dialog.showMessageBox(box()))
+      if (r.response !== 0) throw new Error('ai-declined')
+      mail.setSetting('aiConsent', true); emit({ type: 'settings' })
+    }
+    return roarAccount!.ai(req)
+  })
   handle('mail:roarmeStatus', () => roarme.status())
   handle('mail:roarmeSignIn', (_e, email, pass) => roarme.signIn(email, pass))
   handle('mail:roarmeVerify', (_e, code) => roarme.verify(code))

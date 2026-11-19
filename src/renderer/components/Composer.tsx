@@ -377,6 +377,7 @@ export function Composer({ seed, accounts, onClose, onSent, windowed = false }: 
       else setAiOut(out)
     } catch (e: any) {
       const m = String(e?.message || e)
+      if (/ai-declined/.test(m)) { setAiNote(''); return }
       setAiNote(/ai-signin/.test(m) ? t.ai_signin : /ai-limit/.test(m) ? t.ai_limit : /ai-nokey/.test(m) ? t.ai_nokey : /ai-badkey/.test(m) ? t.ai_badkey : roarError(e))
     } finally { setAiBusy(false) }
   }

@@ -85,6 +85,8 @@ const templates: Template[] = [{ id: 'tp1', name: 'Call sheet', subject: '{proje
 
 const sigs: Signature[] = [{ id: 's1', name: 'THEMADLIONS', html: '<b>Alex Konstantinidis</b><br>THEMADLIONS · themadlions.com' }]
 let settings: Settings = { ...LOOK_DEFAULTS, ...GENERAL_DEFAULTS, undoSendSeconds: 5, swipeLeft: 'trash', swipeRight: 'archive', blockTrackers: true, stripTracking: true, lock: false, lockAfter: 15, appearance: 'system', runAtLogin: false }
+// ?dark: the App Store's dark picture (.github/workflows/appstore.yml)
+if (typeof location !== 'undefined' && /[?&]dark\b/.test(location.search)) settings = { ...settings, appearance: 'dark' }
 const outbox: (OutboxItem & { draft: Draft })[] = []
 const snoozes: (SnoozedItem & { msgId: string; origin: string; timer?: ReturnType<typeof setTimeout> })[] = []
 const pending = new Map<string, { ids: string[]; from: Map<string, string>; timer: ReturnType<typeof setTimeout> }>()
