@@ -30,6 +30,17 @@ the message rows, in text fields or over something that scrolls sideways. New co
 (`data-slide`), the sliding glass lens is on every choice group, lists and cards rise in, cards and menus have the glass
 light (look.css, last block). All of it rests under Motion off, Power saving and Reduce motion.
 
+0.38.0 (Alex, 19 Nov 2026: "it is quite heavy, make it not heavy at all"): the same app and look, lighter. Measured on a
+made-up mailbox of 9 accounts and 50,000 messages: the 5-minute sweep of blocked senders held the window for 1.9 s and now
+does nothing when no rule changed and no mail came (the first one after the update judges everything once, in small steps);
+Junk is judged once per message (`shield_judged`, schema017), not on every sync (38 ms to 2 ms); Waiting for a reply is
+counted only when mail came or went (56 ms to 0.1 ms on every count change) and its query uses an index (56 ms to 5 ms);
+the list and the Promotions numbers are kept while nothing in the database changed; a folder check that found nothing new
+tells the window nothing; "the list changed" events go to the window at most every 400 ms per account; compiled SQL is kept
+(`store.ts keepStatements`); after sleep the accounts reconnect two at a time; rows out of sight are not drawn
+(`content-visibility`); Settings, Files and Statistics load when first opened. Waiting for a reply is now a switch in
+Settings > General > Inboxes, off until turned on.
+
 ## App Store (Mac, TestFlight)
 
 Since 0.36.0 RoarMail can also be built for the Mac App Store (Alex, 19 Nov 2026): `.github/workflows/appstore.yml`,

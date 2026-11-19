@@ -47,9 +47,13 @@ export function SettingsSheet({ accounts, onAddAccount, onClose, onLook, start }
   useEffect(() => { loadSigs(); window.roarmail.settings().then(setPrefs) }, [])
 
   // one way to change a setting, for every page: kept, applied to the look, told to the window
+  // two changes in one go (Waiting for a reply and the All accounts list) both land: each builds on the last
+  const latest = useRef(prefs); latest.current = prefs
   const set: Set = (k, v, e) => {
-    if (!prefs) return
-    const next = { ...prefs, [k]: v }
+    const base = latest.current
+    if (!base) return
+    const next = { ...base, [k]: v }
+    latest.current = next
     window.roarmail.setSetting(k, v)
     const apply = () => { setPrefs(next); applyLook(next); onLook(next) }
     if (e && (k === 'appearance' || k === 'theme')) revealFrom(e, apply); else apply()
@@ -176,6 +180,13 @@ function General({ s, set }: { s: Settings; set: Set }) {
       </Group>
       <Group title={t.sec_inboxes}>
         <Toggle label={t.g_unified} hint={t.g_unifiedHint} on={s.unifiedInbox} set={(v) => set('unifiedInbox', v)} />
+        {/* Waiting for a reply: off until turned on (Alex, 19 Nov 2026); on, it also shows in All accounts' list */}
+        <Toggle label={t.g_waiting} hint={t.g_waitingHint} on={s.waitingOn} set={(v) => {
+          const shown = s.unifiedShown.split(',').filter((r) => r && r !== 'waiting')
+          if (v) shown.splice(Math.max(0, shown.indexOf('snoozed') + 1), 0, 'waiting')
+          set('unifiedShown', shown.join(','))
+          set('waitingOn', v)
+        }} />
         <Line label={t.g_checkEvery}>
           <Choice value={s.checkEvery} onChange={(v) => set('checkEvery', v)}
             options={[[1, t.g_every1], [5, t.g_every5], [15, t.g_every15], [30, t.g_every30], [60, t.g_every60], [0, t.g_manually]]} />

@@ -73,7 +73,7 @@ const SETTINGS: Settings = {
   autoUpdate: true, senderPictures: true, previewLines: 2, listSubject: true, glassAvatars: false, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,waiting,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
   accountOrder: '', promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true,
-  syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '',
+  syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '', waitingOn: false,
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 /** how far back Waiting for a reply looks */
@@ -81,7 +81,7 @@ const WAITING_DAYS = 30
 /** settings that belong to this computer, never carried by the Roar Account's sync (ids made here, a folder here, its
  *  own fingerprint, the window's lock) */
 const LOCAL_ONLY = new Set(['installId', 'sharedOnce', 'downloadsFolder', 'accountOrder', 'unifiedOrder', 'lock', 'lockAfter', 'runAtLogin', 'dockMode', 'syncPulled',
-  'settingsAt', 'roarProjects', 'waitingAdded'])
+  'settingsAt', 'roarProjects', 'waitingAdded', 'shieldKey', 'shieldGen', 'communityPrint'])
 /** only accounts that are switched on show anywhere */
 const ON = 'f.account_id in (select id from accounts where enabled = 1)'
 // Promotions apart and learns from you (Alex, 1 Nov 2026), as SQL over a message m:
@@ -261,6 +261,16 @@ export class MailService {
   private lastDraftPush = 0
   private snoozeTokens = new Map<string, string[]>()
   private wakeTried = new Set<string>()
+  /** your own addresses and the people you know, kept a few seconds (they were read again for every message judged) */
+  private ownKept: { at: number; set: Set<string> } | null = null
+  private knownKept: { at: number; set: Set<string> } | null = null
+  /** Waiting for a reply's number, kept until mail comes or goes (it was counted again on every folders event) */
+  private waitingKept: { at: number; print: string; n: number } | null = null
+  /** the block rules as they were at the last sweep, and the rules, shield and mail together */
+  private sweptStamp = ''
+  private sweptKey = ''
+  private sweeping = false
+  private sweepAgain = false
   /** a system notification for things RoarMail itself brings back (snoozes, reminders) */
   alert: (title: string, body: string, key?: string) => void = () => {}
 
@@ -276,14 +286,11 @@ export class MailService {
         if (badT || badC) fix.run(badT ? 1 : 0, badC ? 1 : 0, c.email)
       }
     } catch { /* the next start tries again */ }
-    // Waiting for a reply (4 Nov 2026) shows in All accounts for everyone once, also where the list was chosen by hand
-    try {
-      if (!db.prepare(`select 1 from settings where key = 'waitingAdded'`).get()) {
-        const cur = (db.prepare(`select value from settings where key = 'unifiedShown'`).get() as Row | undefined)?.value as string | undefined
-        if (cur && !cur.split(',').includes('waiting')) db.prepare(`update settings set value = ? where key = 'unifiedShown'`).run(`${cur},waiting`)
-        db.prepare(`insert into settings (key, value) values ('waitingAdded', '1')`).run()
-      }
-    } catch { /* next start */ }
+    // Waiting for a reply is off until it is turned on in Settings > General (Alex, 19 Nov 2026), so the one-time step
+    // of 4 Nov that put it in everyone's All accounts list is gone
+    // what is kept in memory about accounts and people is read again when they change
+    const send = emit
+    this.emit = (e: MailEvent) => { if (e.type === 'accounts') { this.ownKept = null; this.knownKept = null } send(e) }
     // Block by name (2 Nov 2026): the sender's name as block_rules keeps it
     db.function('blockname', { deterministic: true }, (v: unknown) => blockNameKey(String(v ?? '')))
     // anything cut off by a crash or quit goes back in the queue
@@ -444,13 +451,20 @@ export class MailService {
   /** the Roar Account's copy of this setup (3 Nov 2026): as exportSetup, without any password or token, without
    *  what belongs to this computer only, the contacts only where something was set by hand, and the blocks */
   syncBundle(): SetupBundle {
-    const b = this.exportSetup()
-    const T = b.tables
-    T.accounts = T.accounts.map(({ secret: _s, updated_at: _u, ...a }) => a)
+    // built here, not from exportSetup (0.38.0, it runs every minute): no password is opened only to be dropped, and only the
+    // contacts that go up are read, not every sender with their photo
+    const all = (t: string) => this.db.prepare(`select * from ${t}`).all() as Row[]
+    const T: Record<string, Row[]> = {
+      accounts: all('accounts').map(({ secret: _s, updated_at: _u, ...a }) => a), identities: all('identities'),
+      folders: this.db.prepare('select id, account_id, path, name, delimiter, role, special, color, hidden from folders').all() as Row[],
+      signatures: all('signatures'), templates: all('templates'), rules: all('rules'), smart_folders: all('smart_folders'), settings: all('settings'),
+    }
+    const b: SetupBundle = { format: 'roarmail-setup', version: 1, at: now(), tables: T }
     T.settings = T.settings.filter((x) => !LOCAL_ONLY.has(String(x.key)))
     // the people who matter (3 Nov 2026: one contact list in the Roar Account for every Roar app): marked, in a group, edited
     // or written to, with their card; never every sender
-    T.contacts = (T.contacts || []).filter((c) => c.vip || c.blocked || c.images_allowed || (c.groups || '') !== '' || (c.edited || '') !== '' || (c.use_count || 0) > 0)
+    T.contacts = (this.db.prepare(`select * from contacts where vip <> 0 or blocked <> 0 or images_allowed <> 0 or coalesce(groups, '') != ''
+        or coalesce(edited, '') != '' or use_count > 0`).all() as Row[])
       .map((c) => ({ email: c.email, name: c.name ?? null, vip: c.vip ? 1 : 0, blocked: c.blocked ? 1 : 0, images_allowed: c.images_allowed ? 1 : 0,
         title: c.title ?? null, company: c.company ?? null, phone: c.phone ?? null, website: c.website ?? null, notes: c.notes || '', groups: c.groups || '', use_count: c.use_count || 0 }))
     T.block_rules = (this.db.prepare('select kind, value, label from block_rules order by kind, value').all() as Row[])
@@ -619,16 +633,31 @@ export class MailService {
     const roles: FolderRole[] = ['inbox', 'snoozed', 'waiting', 'flagged', 'drafts', 'sent', 'archive', 'all', 'spam', 'trash']
     const rows = this.db.prepare(`select coalesce(f.special, f.role) as r, sum(f.unread) as unread, sum(f.total) as total, count(*) as n from folders f
       where coalesce(f.special, f.role) is not null and ${ON} group by r`).all() as Row[]
-    // Waiting for a reply: a virtual list over Sent, its number is how many wait
-    if (rows.some((x) => x.r === 'sent')) {
-      const n = (this.db.prepare(`select count(distinct coalesce(m.thread_id, m.id)) n from messages m join message_folders mf on mf.message_id = m.id
-        join folders f on f.id = mf.folder_id where ${this.waitingSql()} and ${ON}`).get({ since: now() - WAITING_DAYS * 864e5 }) as Row).n as number
+    // Waiting for a reply: a virtual list over Sent, its number is how many wait; only when turned on in Settings
+    if (this.settings().waitingOn && rows.some((x) => x.r === 'sent')) {
+      const n = this.waitingCount()
       rows.push({ r: 'waiting', unread: n, total: n, n: 1 })
     }
     return roles.flatMap((role) => {
       const r = rows.find((x) => x.r === role)
       return r || role === 'inbox' ? [{ id: `all:${role}`, accountId: 'all', path: role, name: role, role, unread: r?.unread || 0, total: r?.total || 0, depth: 0 }] : []
     })
+  }
+
+  /**
+   * how many wait for a reply (0.38.0): folders events come many times a second while mail syncs, and this was counted
+   * again for each. Counted again only when mail came or went (the newest message, how many there are, Not waiting),
+   * at most every 5 seconds then, and once a minute anyway (the 30 days move on)
+   */
+  private waitingCount(): number {
+    const p = this.db.prepare(`select (select max(rowid) from messages) a, (select count(*) from waiting_done) b, (select count(*) from accounts where enabled = 1) c`).get() as Row
+    const print = `${p.a}|${p.b}|${p.c}|${[...this.ownAddresses()].length}`
+    const k = this.waitingKept, age = k ? now() - k.at : Infinity
+    if (k && age < 60e3 && (k.print === print || age < 5e3)) return k.n
+    const n = (this.db.prepare(`select count(distinct coalesce(m.thread_id, m.id)) n from messages m join message_folders mf on mf.message_id = m.id
+      join folders f on f.id = mf.folder_id where ${this.waitingSql()} and ${ON}`).get({ since: now() - WAITING_DAYS * 864e5 }) as Row).n as number
+    this.waitingKept = { at: now(), print, n }
+    return n
   }
 
   /** every folder of the account, for choosing which is Sent, Trash and the rest */
@@ -718,17 +747,14 @@ export class MailService {
 
   startAll() {
     // two accounts at a time: nine connecting at once is what made the first seconds heavy (31 Oct 2026)
-    const ids = this.accounts().map((a) => a.id)
-    let next = 0
-    const worker = async () => { while (next < ids.length) await this.startAccount(ids[next++]) }
-    worker(); worker()
+    this.startTwoAtATime(this.accounts().map((a) => a.id))
     this.schedulePoll()
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000)
     // blocked senders' mail already here (Inbox to Junk, Junk to Trash): soon after start and every 5 minutes, so a block
     // made before, or mail that came while RoarMail was closed, does not stay (Alex, 4 Nov 2026)
     if (!this.blockTimer) {
-      setTimeout(() => { try { this.sweepBlocked() } catch { /* next time */ } }, 20e3)
-      this.blockTimer = setInterval(() => { try { this.sweepBlocked() } catch { /* next time */ } }, 5 * 60e3)
+      setTimeout(() => { this.sweepBlocked().catch(() => {}) }, 20e3)
+      this.blockTimer = setInterval(() => { this.sweepBlocked().catch(() => {}) }, 5 * 60e3)
     }
     // the shared spam list: half a minute after start, then every 6 hours
     if (!this.communityTimer) {
@@ -949,7 +975,16 @@ export class MailService {
 
   /** after sleep or a network change: drop every connection and start again */
   reconnectAll() {
-    for (const a of this.accounts()) { this.stopAccount(a.id); this.startAccount(a.id) }
+    const ids = this.accounts().map((a) => a.id)
+    for (const id of ids) this.stopAccount(id)
+    // two at a time, as at the start (0.38.0: after sleep all nine connected at the same second, which a shared host refuses)
+    this.startTwoAtATime(ids)
+  }
+
+  private startTwoAtATime(ids: string[]) {
+    let next = 0
+    const worker = async () => { while (next < ids.length) await this.startAccount(ids[next++]) }
+    worker(); worker()
   }
 
   async refresh(accountId?: string) {
@@ -1220,12 +1255,15 @@ export class MailService {
     const fresh: MessageRow[] = []
     // new mail in an inbox (not the first download of the folder): what Settings > Rules look at
     const arrived: string[] = []
+    // whether anything here changed: a check that found nothing new tells the window nothing (0.38.0: every check of every
+    // folder of nine accounts made the window read its list and counts again)
+    let changed = false
     await this.run(accountId, async (c) => {
       const lock = await c.getMailboxLock(folder.path)
       try {
         const mb = c.mailbox as any
         const uidValidity = Number(mb.uidValidity)
-        if (folder.uidvalidity && folder.uidvalidity !== uidValidity) this.dropFolderMessages(folderId)
+        if (folder.uidvalidity && folder.uidvalidity !== uidValidity) { this.dropFolderMessages(folderId); changed = true }
         const max = (this.db.prepare('select max(uid) m from message_folders where folder_id = ?').get(folderId) as Row).m as number | null
         let range: string | number[] | null = null
         if (max == null) {
@@ -1264,6 +1302,7 @@ export class MailService {
             if (seen !== l.seen || flagged !== l.flagged || answered !== l.answered) updates.push([seen, flagged, answered, l.message_id])
           }
           const gone = [...local].filter(([uid, l]) => !remote.has(uid) && !l.pending_op)
+          if (updates.length || gone.length) changed = true
           if (updates.length || gone.length) this.db.transaction(() => {
             for (const u of updates) setFlags.run(...u)
             for (const [, l] of gone) this.deleteMessage(l.message_id)
@@ -1279,21 +1318,25 @@ export class MailService {
             batch.push(m as any)
           }
           for (const r of this.storeFetched(accountId, folderId, batch)) {
+            changed = true
             if (announce && !r.seen) fresh.push(r)
             if (max != null) arrived.push(r.id)
           }
         }
+        if ((mb.exists || 0) !== folder.total) changed = true
         this.db.prepare('update folders set uidvalidity = ?, uidnext = ?, total = ? where id = ?').run(uidValidity, mb.uidNext || null, mb.exists || 0, folderId)
-        this.recount(folderId)
+        if (changed) this.recount(folderId)
       } finally {
         lock.release()
       }
     })
-    this.assignThreads(accountId)
-    this.emit({ type: 'messages', accountId })
-    this.emit({ type: 'folders', accountId })
-    if (folder.role === 'inbox') this.badge()
-    if (folder.role === 'inbox') {
+    if (changed) {
+      this.assignThreads(accountId)
+      this.emit({ type: 'messages', accountId })
+      this.emit({ type: 'folders', accountId })
+      if (folder.role === 'inbox') this.badge()
+    }
+    if (folder.role === 'inbox' && changed) {
       // blocked senders (the address, their name from any address, a whole domain) and mail the shield calls dangerous
       // go to Junk, not Trash, so the mail server learns too (Alex, 2 Nov 2026)
       const gone = new Set([...this.blockedIn(folderId), ...this.dangerous(arrived), ...this.community(arrived), ...this.brandBlocked(arrived)])
@@ -1446,8 +1489,28 @@ export class MailService {
 
   // ---------- reading ----------
 
+  /**
+   * an answer kept while nothing in the database changed (0.38.0): the window asks for the same list and counts again
+   * after every event, filter and folder switch; total_changes() moves with every write this app makes, and the day and
+   * the minute are in the key for what depends on the time (Today, Waiting's 30 days)
+   */
+  private memo = new Map<string, unknown>()
+  private remembered<T>(key: string, make: () => T): T {
+    const n = (this.db.prepare('select total_changes() n').get() as Row).n
+    const k = `${n}|${Math.floor(now() / 60e3)}|${new Date().toDateString()}|${key}`
+    if (this.memo.has(k)) return this.memo.get(k) as T
+    const v = make()
+    this.memo.set(k, v)
+    if (this.memo.size > 16) this.memo.delete(this.memo.keys().next().value!)
+    return v
+  }
+
   /** the list: one row per conversation, its newest message on top */
   list(scope: ListScope, before?: number): MessageRow[] {
+    return this.remembered(`list|${JSON.stringify(scope)}|${before ?? ''}`, () => this.listNow(scope, before))
+  }
+
+  private listNow(scope: ListScope, before?: number): MessageRow[] {
     // a sort other than by date has no paging: one longer page
     const byDate = !scope.sort || scope.sort === 'date'
     const limit = byDate ? 120 : 600
@@ -1465,6 +1528,8 @@ export class MailService {
     // Promotions (1 Nov 2026): the promos filter shows conversations with any; with Promotions apart the Inbox leaves out
     // the conversations that are nothing but promotions (a real person's reply in one keeps it there)
     const s = this.settings()
+    // Waiting for a reply turned off in Settings: its list is the Inbox
+    if (scope.role === 'waiting' && !s.waitingOn) scope = { ...scope, role: 'inbox' }
     const apart = s.promosApart && !who && !scope.project && !scope.folderId && (scope.role || 'inbox') === 'inbox' && scope.filter !== 'promos'
     const promoCol = scope.filter === 'promos' || apart ? `, sum(${this.promoSql(s)}) as promo_n` : ''
     const promos = scope.filter === 'promos' ? 'and promo_n > 0' : apart ? 'and promo_n < n' : ''
@@ -1791,6 +1856,10 @@ export class MailService {
 
   /** the Promotions pill: unread and all promotions in this account's inbox ('all' = every inbox), and the senders never opened */
   promotions(accountId: string): PromoCount {
+    return this.remembered(`promos|${accountId}`, () => this.promotionsNow(accountId))
+  }
+
+  private promotionsNow(accountId: string): PromoCount {
     const r = this.db.prepare(`select count(distinct m.id) as total, count(distinct case when m.seen = 0 then m.id end) as unread
       from messages m join message_folders mf on mf.message_id = m.id join folders f on f.id = mf.folder_id
       where coalesce(f.special, f.role) = 'inbox' and ${ON} and m.pending_op is null ${accountId === 'all' ? '' : 'and f.account_id = @account'}
@@ -1822,7 +1891,11 @@ export class MailService {
 
   /** the addresses of your own accounts and aliases: never learned about */
   private ownAddresses(): Set<string> {
-    return new Set((this.db.prepare('select lower(email) as e from accounts union select lower(email) from identities').all() as Row[]).map((r) => String(r.e)))
+    const k = this.ownKept
+    if (k && now() - k.at < 10e3) return k.set
+    const set = new Set((this.db.prepare('select lower(email) as e from accounts union select lower(email) from identities').all() as Row[]).map((r) => String(r.e)))
+    this.ownKept = { at: now(), set }
+    return set
   }
 
   /** counts what you did with a sender's mail; when that makes them quiet, or not, the inbox numbers follow */
@@ -1905,7 +1978,7 @@ export class MailService {
       const b = claimedBrand(who || m?.from_name || '', m?.subject || '', emailDomain(e), true)
       if (b) this.db.prepare(`insert into block_rules (kind, value, label, created) values ('brand', ?, ?, ?) on conflict(kind, value) do nothing`).run(b, b, now())
     }
-    if (blocked) this.sweepBlocked()
+    if (blocked) this.sweepBlocked().catch(() => {})
     // the shared list: the address, and the name when it was blocked (or taken off with the unblock)
     const shared: { kind: string; value: string }[] = [{ kind: 'email', value: e }]
     if (byName || (!blocked && blockableName(who))) shared.push({ kind: 'name', value: who })
@@ -1919,7 +1992,7 @@ export class MailService {
     if (on && !blockableDomain(d)) return false
     if (on) this.db.prepare(`insert into block_rules (kind, value, label, created) values ('domain', ?, ?, ?) on conflict(kind, value) do nothing`).run(d, d, now())
     else this.db.prepare(`delete from block_rules where kind = 'domain' and value = ?`).run(d)
-    if (on) this.sweepBlocked()
+    if (on) this.sweepBlocked().catch(() => {})
     this.shareBlocks([{ kind: 'domain', value: d }], on).catch(() => {})
     return true
   }
@@ -1994,6 +2067,9 @@ export class MailService {
       for (const r of rows) if (/^[0-9a-f]{64}$/.test(r.hash)) ins.run(r.hash, r.kind)
     })()
     this.communitySet = null
+    // the shield judges Junk once more only when the list really changed
+    const print = MailService.sha(rows.map((r) => r.hash).sort().join(','))
+    if (this.localValue('communityPrint') !== print) this.setLocalValue('communityPrint', print)
   }
 
   /** new mail from a sender on the shared list: to Junk, never from people you know or a sender you kept */
@@ -2018,8 +2094,13 @@ export class MailService {
 
   /** someone you wrote to, a VIP or yourself: a name or the shield never sends them to Junk */
   private isKnown(email: string) {
-    const c = this.db.prepare('select vip, use_count from contacts where email = ?').get(email) as Row | undefined
-    return this.ownAddresses().has(email) || !!c?.vip || (c?.use_count || 0) > 0
+    if (this.ownAddresses().has(email)) return true
+    // read once for a whole batch (0.38.0): it was two queries for every message the shield judged
+    let k = this.knownKept
+    if (!k || now() - k.at > 5e3) {
+      k = this.knownKept = { at: now(), set: new Set((this.db.prepare('select email from contacts where vip = 1 or use_count > 0').all() as Row[]).map((r) => String(r.email))) }
+    }
+    return k.set.has(email)
   }
 
   /** the messages in an inbox that a block catches: the address, the name (not from people you know), the domain */
@@ -2055,11 +2136,6 @@ export class MailService {
     return out
   }
 
-  private idsIn(folderId: string): string[] {
-    return (this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id where mf.folder_id = ? and m.pending_op is null`)
-      .all(folderId) as Row[]).map((r) => r.id as string)
-  }
-
   /** a brand blocked (4 Nov 2026): Block on a fake bank or courier mail keeps the brand it pretended to be, and from then on
    *  every mail that claims that brand from an address the brand does not own is caught, whatever address it comes from */
   private brandBlocked(ids: string[]): string[] {
@@ -2083,8 +2159,15 @@ export class MailService {
    *  a lookalike address, a name posing as another address). Phishing comes from a new address every time, so blocking
    *  the address alone never kept them out of Junk. Never mail from people you know. */
   private junkToTrash(folderId: string): string[] {
-    const all = this.idsIn(folderId)
-    const out = new Set([...this.blockedIn(folderId), ...this.brandBlocked(all), ...this.community(all)])
+    // only what was not judged yet under these rules (0.38.0: all of Junk was read and judged on every sync of it and every
+    // 5 minutes, about 75 ms for 550 messages, on the window's thread); the blocks by address, name and domain are one query
+    const gen = this.shieldGen()
+    return [...new Set([...this.blockedIn(folderId), ...this.judgeJunk(folderId, this.unjudged(folderId, gen), gen)])]
+  }
+
+  /** Junk's messages judged by brand, the shared list and the shield; what stays is marked as judged under gen */
+  private judgeJunk(folderId: string, all: string[], gen: number): string[] {
+    const out = new Set([...this.brandBlocked(all), ...this.community(all)])
     if (this.settings().junkDanger) {
       for (let i = 0; i < all.length; i += 500) {
         const part = all.slice(i, i + 500)
@@ -2097,19 +2180,82 @@ export class MailService {
         }
       }
     }
+    // what goes to the Trash is not marked, so it is tried again if the move does not happen
+    this.judged(folderId, all.filter((id) => !out.has(id)), gen)
     return [...out]
   }
 
+  /**
+   * the rules the shield judges by, as a number that grows when they change (a brand blocked, the shared list renewed,
+   * Junk's shield or the shared list switched): messages judged under an older number are judged once more
+   */
+  private shieldGen(): number {
+    const s = this.settings()
+    const brands = (this.db.prepare(`select value from block_rules where kind = 'brand' order by value`).all() as Row[]).map((r) => r.value).join(',')
+    const key = `${s.junkDanger}|${s.shareBlocks}|${this.localValue('communityPrint') || ''}|${brands}`
+    let gen = Number(this.localValue('shieldGen') || 0)
+    if (this.localValue('shieldKey') !== key) { gen++; this.setLocalValue('shieldGen', String(gen)); this.setLocalValue('shieldKey', key) }
+    return gen
+  }
+
+  /** a folder's messages the shield has not judged under these rules */
+  private unjudged(folderId: string, gen: number): string[] {
+    return (this.db.prepare(`select m.id from messages m join message_folders mf on mf.message_id = m.id where mf.folder_id = ? and m.pending_op is null
+      and not exists (select 1 from shield_judged j where j.message_id = m.id and j.folder_id = mf.folder_id and j.gen = ?)`)
+      .all(folderId, gen) as Row[]).map((r) => r.id as string)
+  }
+
+  private judged(folderId: string, ids: string[], gen: number) {
+    if (!ids.length) return
+    const put = this.db.prepare('insert or replace into shield_judged (message_id, folder_id, gen) values (?, ?, ?)')
+    this.db.transaction(() => { for (const id of ids) put.run(id, folderId, gen) })()
+  }
+
   /** after a new block: what is already in the inboxes from them goes to Junk too */
-  private sweepBlocked() {
+  private async sweepBlocked() {
+    // one sweep at a time; a block made while one runs gets another right after
+    if (this.sweeping) { this.sweepAgain = true; return }
+    this.sweeping = true
+    try {
+      do { this.sweepAgain = false; await this.sweepOnce() } while (this.sweepAgain)
+    } finally { this.sweeping = false }
+  }
+
+  private async sweepOnce() {
+    // 0.38.0: the sweep read and judged every message of every Inbox and Junk every 5 minutes (about 1.9 s on 50,000
+    // messages, the window frozen meanwhile). Now: nothing at all when no rule changed and no mail came since the last
+    // sweep (new mail meets the rules when it arrives); the blocks by address, name and domain are looked for again only
+    // when one was added; brands and the shield judge only what they have not judged; a breath between folders and
+    // between batches lets the window answer
+    const b = this.db.prepare(`select (select count(*) || ':' || coalesce(max(created), 0) from block_rules) r,
+      (select count(*) from contacts where blocked = 1) c, (select max(rowid) from message_folders) l`).get() as Row
+    const stamp = `${b.r}|${b.c}`
+    const gen = this.shieldGen()
+    const key = `${stamp}|${gen}|${b.l}`
+    if (key === this.sweptKey) return
+    const rulesNew = stamp !== this.sweptStamp
+    const breath = () => new Promise<void>((ok) => setImmediate(ok))
     const ids: string[] = [], junk: string[] = []
     for (const f of this.db.prepare(`select f.id, f.role from folders f where f.role in ('inbox', 'spam') and ${ON}`).all() as Row[]) {
-      if (f.role === 'spam') junk.push(...this.junkToTrash(f.id))
-      else ids.push(...new Set([...this.blockedIn(f.id), ...this.brandBlocked(this.idsIn(f.id))]))
+      await breath()
+      const spam = f.role === 'spam'
+      if (rulesNew) (spam ? junk : ids).push(...this.blockedIn(f.id))
+      const fresh = this.unjudged(f.id, gen)
+      const step = spam ? 400 : 1500
+      for (let i = 0; i < fresh.length; i += step) {
+        if (i) await breath()
+        const part = fresh.slice(i, i + step)
+        if (spam) { junk.push(...this.judgeJunk(f.id, part, gen)); continue }
+        const caught = new Set(this.brandBlocked(part))
+        this.judged(f.id, part.filter((id) => !caught.has(id)), gen)
+        ids.push(...caught)
+      }
     }
-    if (ids.length) this.act(ids, 'junk', undefined, true).catch(() => {})
+    this.sweptStamp = stamp
+    this.sweptKey = key
+    if (ids.length) this.act([...new Set(ids)], 'junk', undefined, true).catch(() => {})
     // what a blocked sender has in Junk already goes to the Trash (3 Nov 2026)
-    if (junk.length) this.act(junk, 'trash', undefined, true).catch(() => {})
+    if (junk.length) this.act([...new Set(junk)], 'trash', undefined, true).catch(() => {})
   }
 
   /** Waiting for a reply (Alex, 4 Nov 2026): mail you sent in the last weeks to someone else, with nothing after it in its
@@ -2118,8 +2264,9 @@ export class MailService {
     const own = [...this.ownAddresses()].map((e) => `'${e.replace(/'/g, "''")}'`).join(',') || "''"
     return `coalesce(f.special, f.role) = 'sent' and m.date > @since and m.id not in (select message_id from waiting_done)
       and lower(coalesce(m.to_json, '')) not in ('[]', '')
-      and not exists (select 1 from messages r where r.account_id = m.account_id and r.date > m.date
-        and ((m.thread_id is not null and r.thread_id = m.thread_id) or (m.message_id is not null and r.in_reply_to = m.message_id))
+      and not exists (select 1 from messages r where r.thread_id = m.thread_id and r.date > m.date and r.account_id = m.account_id
+        and lower(coalesce(r.from_email, '')) not in (${own}))
+      and not exists (select 1 from messages r where r.account_id = m.account_id and r.in_reply_to = m.message_id and r.date > m.date
         and lower(coalesce(r.from_email, '')) not in (${own}))`
   }
 
@@ -2127,6 +2274,7 @@ export class MailService {
   notWaiting(ids: string[]) {
     const ins = this.db.prepare('insert or ignore into waiting_done (message_id, at) values (?, ?)')
     this.db.transaction(() => { for (const id of ids) ins.run(id, now()) })()
+    this.waitingKept = null
     for (const a of this.accounts()) this.emit({ type: 'folders', accountId: a.id })
     this.emit({ type: 'messages', accountId: 'all' })
   }
@@ -2978,6 +3126,7 @@ export class MailService {
     if (key === 'checkEvery') this.schedulePoll()
     if (key === 'dockBadge') this.badge()
     if (key === 'promosApart' || key === 'learnQuiet') this.inboxesChanged()
+    if (key === 'waitingOn') { this.waitingKept = null; for (const a of this.accounts()) this.emit({ type: 'folders', accountId: a.id }); this.emit({ type: 'folders', accountId: 'all' }) }
     if (key === 'shareBlocks') { if (String(value) === 'true') this.refreshCommunity().catch(() => {}); else { this.db.prepare('delete from community_blocks').run(); this.communitySet = null } }
   }
 }

@@ -1,6 +1,6 @@
 import './setup'
 import './tips'
-import { Component, type ReactNode } from 'react'
+import { Component, Suspense, lazy, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource/jost/300.css'
 import '@fontsource/jost/700.css'
@@ -8,7 +8,10 @@ import './styles.css'
 import './look.css'
 import App from './App'
 import { ComposeWindow } from './ComposeWindow'
-import { PanelWindow, type PanelKind } from './PanelWindow'
+import type { PanelKind } from './PanelWindow'
+
+// a panel's own window loads its sheet when it opens; the main window does not carry them at start (0.38.0)
+const PanelWindow = lazy(() => import('./PanelWindow').then((m) => ({ default: m.PanelWindow })))
 
 // a file dropped anywhere outside a drop area is not opened as a page in the window (security review 29 Oct 2026)
 document.addEventListener('dragover', (e) => e.preventDefault())
@@ -39,4 +42,4 @@ class Guard extends Component<{ children: ReactNode }, { broke: string }> {
 const composeId = (location.hash.match(/^#compose=([0-9a-f]+)$/) || [])[1]
 // Settings, Files, Contacts or Statistics in its own window (index.html#panel=<kind>&id=<id>)
 const panel = location.hash.match(/^#panel=(settings|files|contacts|stats)&id=([0-9a-f]+)$/)
-createRoot(document.getElementById('root')!).render(<Guard>{composeId ? <ComposeWindow id={composeId} /> : panel ? <PanelWindow kind={panel[1] as PanelKind} id={panel[2]} /> : <App />}</Guard>)
+createRoot(document.getElementById('root')!).render(<Guard>{composeId ? <ComposeWindow id={composeId} /> : panel ? <Suspense fallback={<div className="boot" />}><PanelWindow kind={panel[1] as PanelKind} id={panel[2]} /></Suspense> : <App />}</Guard>)
