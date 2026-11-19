@@ -15,7 +15,6 @@ jobs:
   testflight:
     runs-on: macos-latest
     env:
-      KC: ${{ runner.temp }}/roarmail-ci.keychain-db
       KCPASS: ci-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +32,7 @@ jobs:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
           D="$RUNNER_TEMP/asc"; mkdir -p "$D"
+          KC="$RUNNER_TEMP/roarmail-ci.keychain-db"; echo "KC=$KC" >> "$GITHUB_ENV"
           for k in app installer; do
             openssl req -new -newkey rsa:2048 -nodes -keyout "$D/$k.key" -subj "/CN=RoarMail CI $k/C=GR" -out "$D/$k.csr" 2>/dev/null
           done
