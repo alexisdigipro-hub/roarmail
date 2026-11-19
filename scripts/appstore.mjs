@@ -107,6 +107,12 @@ async function distribute(minutes = 25) {
   for (const b of ready) {
     const d = await asc('GET', `/builds/${b.id}/buildBetaDetail`).catch(() => null)
     if (d?.data) console.log(`build ${b.attributes.version} for testers: internal ${d.data.attributes.internalBuildState}, external ${d.data.attributes.externalBuildState}`)
+    // RoarMail uses only the system's standard encryption (TLS to mail servers): exempt, said once per build
+    if (d?.data && d.data.attributes.internalBuildState === 'MISSING_EXPORT_COMPLIANCE') {
+      await asc('PATCH', `/builds/${b.id}`, { data: { type: 'builds', id: b.id, attributes: { usesNonExemptEncryption: false } } })
+        .then(() => console.log(`build ${b.attributes.version}: export compliance answered (standard encryption only)`))
+        .catch((e) => console.log(`(build ${b.attributes.version}: ${e.message})`))
+    }
   }
   const groups = (await asc('GET', `/apps/${app.id}/betaGroups?limit=50`)).data || []
   for (const g of groups) console.log(`group "${g.attributes.name}": internal ${g.attributes.isInternalGroup}, gets every build by itself ${g.attributes.hasAccessToAllBuilds}`)
