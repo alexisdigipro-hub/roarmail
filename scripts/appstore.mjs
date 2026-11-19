@@ -128,7 +128,7 @@ async function distribute(minutes = 25) {
 
 // ---------- the App Store page (Alex, 19 Nov 2026: "now we can put it out on the App Store") ----------
 const LISTING = {
-  subtitle: 'Private mail, all your accounts',
+  subtitle: 'Private mail for all accounts',
   privacyPolicyUrl: 'https://themadlions.com/legal/roarmail/#privacy',
   supportUrl: 'https://themadlions.com/lab/roarmail/',
   marketingUrl: 'https://themadlions.com/lab/roarmail/',
