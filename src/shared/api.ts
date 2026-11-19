@@ -409,6 +409,8 @@ export interface Settings {
   syncSetup: boolean
   /** the ✦ button's AI: RoarMail AI through the Roar Account, or the person's own Claude or ChatGPT key */
   aiProvider: AiProvider
+  /** asked once before any text goes to an AI (Apple 5.1.2(i), 19 Nov 2026): yes from the person, revocable in Settings */
+  aiConsent: boolean
   /** the model for an own key ('' = RoarMail's choice) */
   aiClaudeModel: string
   aiOpenaiModel: string

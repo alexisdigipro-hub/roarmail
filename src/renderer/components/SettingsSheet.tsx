@@ -915,6 +915,7 @@ function RoarAccountPage({ s, set }: { s: Settings; set: Set }) {
             options={[['roar', t.ra_aiRoar], ['claude', t.ra_aiClaude], ['openai', t.ra_aiOpenai]]} />
         </Line>
         {s.aiProvider === 'roar' && <p className="muted small">{ai?.signedIn ? t.ra_aiRoarHint : t.ra_aiRoarSignIn}</p>}
+        <Toggle label={t.ra_aiConsent} hint={t.ra_aiConsentHint} on={!!s.aiConsent} set={(v) => set('aiConsent', v)} />
         {own && (
           <Line label={hasKey ? t.ra_keySaved : t.ra_keyAdd} hint={t.ra_keyHint}>
             {hasKey

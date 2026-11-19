@@ -164,9 +164,10 @@ A test mailbox is in the sign-in fields above (an IMAP account at themadlions.co
 How to try it:
 1. Open RoarMail and choose Add Account.
 2. Type the email address and the password from the fields above and press Add. The server is found by itself.
-3. The inbox shows three messages: one with a PDF and a picture, one with a calendar invitation (Accept / Decline appear on it), one with a photo.
+3. The inbox has a few test messages, among them one with a PDF and a picture, one with a calendar invitation (Accept / Decline appear on it) and one with a photo.
 
 The Roar Account (Settings > Roar Account) is optional and not needed to use the app.
+RoarMail AI (the ✦ button when writing) asks for permission before any text is sent, and needs a Roar Account; it is optional.
 RoarMail uses only standard encryption (TLS to mail servers).`,
 }
 

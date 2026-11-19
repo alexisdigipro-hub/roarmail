@@ -73,7 +73,7 @@ const SETTINGS: Settings = {
   autoUpdate: true, senderPictures: true, previewLines: 2, listSubject: true, glassAvatars: false, listAvatars: true, threadOrder: 'oldest',
   unifiedShown: 'inbox,snoozed,waiting,flagged,drafts,sent,archive,all,spam,trash', unifiedOrder: '',
   accountOrder: '', promosApart: true, learnQuiet: true, junkDanger: true, shareBlocks: true,
-  syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '', waitingOn: false,
+  syncSetup: true, aiProvider: 'roar', aiClaudeModel: '', aiOpenaiModel: '', waitingOn: false, aiConsent: false,
 }
 const ROLE_KEYS = ['drafts', 'sent', 'spam', 'trash', 'archive'] as const
 /** how far back Waiting for a reply looks */
@@ -81,7 +81,7 @@ const WAITING_DAYS = 30
 /** settings that belong to this computer, never carried by the Roar Account's sync (ids made here, a folder here, its
  *  own fingerprint, the window's lock) */
 const LOCAL_ONLY = new Set(['installId', 'sharedOnce', 'downloadsFolder', 'accountOrder', 'unifiedOrder', 'lock', 'lockAfter', 'runAtLogin', 'dockMode', 'syncPulled',
-  'settingsAt', 'roarProjects', 'waitingAdded', 'shieldKey', 'shieldGen', 'communityPrint'])
+  'settingsAt', 'roarProjects', 'waitingAdded', 'shieldKey', 'shieldGen', 'communityPrint', 'aiConsent'])
 /** only accounts that are switched on show anywhere */
 const ON = 'f.account_id in (select id from accounts where enabled = 1)'
 // Promotions apart and learns from you (Alex, 1 Nov 2026), as SQL over a message m:
