@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- RoarMail in the Mac App Store's sandbox (19 Nov 2026): it reaches mail servers and the Roar Account, reads and
+     writes only what the person picks (attachments to send, a folder for downloads) and the Downloads folder.
+     TEAMID is replaced with the Apple team in .github/workflows/appstore.yml. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key><true/>
+  <key>com.apple.security.network.client</key><true/>
+  <!-- the Microsoft sign-in comes back to RoarMail on 127.0.0.1 (src/main/microsoft.ts) -->
+  <key>com.apple.security.network.server</key><true/>
+  <key>com.apple.security.files.user-selected.read-write</key><true/>
+  <key>com.apple.security.files.downloads.read-write</key><true/>
+  <key>com.apple.security.files.bookmarks.app-scope</key><true/>
+  <key>com.apple.security.application-groups</key>
+  <array><string>TEAMID.com.themadlions.roarmail</string></array>
+</dict>
+</plist>

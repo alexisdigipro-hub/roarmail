@@ -704,6 +704,7 @@ function About({ s, set, replace }: { s: Settings; set: Set; replace: (s: Settin
   const api = (window.roarmail as any).update
   const since = u?.checkedAt ? when(u.checkedAt) : ''
   const line = !u ? t.up_noUpdater
+    : u.store ? t.up_store
     : u.status === 'checking' ? t.up_checking
     : u.status === 'downloading' ? `${t.up_downloading} ${u.version} · ${u.progress}%`
     : u.status === 'ready' ? `${t.up_ready} ${u.version}`
@@ -720,16 +721,16 @@ function About({ s, set, replace }: { s: Settings; set: Set; replace: (s: Settin
             <div className="row"><div className="brand"><b>ROAR</b><i>MAIL</i></div>{u?.current && <span className="update-ver">{u.current}</span>}</div>
             <p className={`small ${u?.status === 'error' ? 'error' : u?.status === 'ready' ? 'ok-text' : 'muted'}`}>{line}</p>
           </div>
-          {u?.status === 'ready'
+          {u?.store ? null : u?.status === 'ready'
             ? <button className="pill small primary update-btn" onClick={() => api.install()}>{t.up_restart}</button>
             : <button className="pill small update-btn" disabled={!api || u?.status === 'checking' || u?.status === 'downloading'} onClick={() => api.check()}>
                 <Icon name="refresh" size={14} /> {t.up_check}</button>}
         </div>
         {u?.status === 'downloading' && <div className="update-bar"><i style={{ width: `${u.progress}%` }} /></div>}
       </div>
-      <Group note={t.up_how}>
+      {!u?.store && <Group note={t.up_how}>
         <Toggle label={t.up_auto} hint={t.up_autoHint} on={s.autoUpdate} set={(v) => set('autoUpdate', v)} />
-      </Group>
+      </Group>}
       <Group title={t.pg_keys}><Shortcuts /></Group>
       <Advanced replace={replace} />
       {/* Privacy Policy and Terms (Alex, 25 Oct): on the company site, opened in the browser */}

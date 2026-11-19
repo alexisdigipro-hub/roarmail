@@ -5,3 +5,4 @@ out/
 *.log
 replica/
 .claude/
+build/embedded.provisionprofile

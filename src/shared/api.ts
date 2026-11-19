@@ -422,6 +422,8 @@ export interface UpdateState {
   current: string
   /** when GitHub last answered (0 = not yet) */
   checkedAt: number
+  /** the Mac App Store copy: the App Store updates it */
+  store?: boolean
 }
 
 export type NewMailSound = 'roar' | 'chime' | 'drop' | 'pop' | 'breeze'

@@ -1,7 +1,7 @@
 {
   "name": "roarmail",
   "productName": "RoarMail",
-  "version": "0.36.0",
+  "version": "0.36.1",
   "description": "RoarMail: a desktop mail client for Mac and Windows. TheMadlions Lab, Experiment 03.",
   "author": "THEMADLIONS",
   "license": "UNLICENSED",
@@ -16,7 +16,8 @@
     "start": "npm run build && electron .",
     "postinstall": "electron-builder install-app-deps",
     "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never && electron-builder --mac dmg --x64 --publish never",
-    "dist:win": "npm run build && electron-builder --win --publish never"
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mas": "npm run build && electron-builder --mac mas --universal --publish never"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
@@ -105,6 +106,18 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "RoarMail"
+    },
+    "mas": {
+      "entitlements": "build/entitlements.mas.plist",
+      "entitlementsInherit": "build/entitlements.mas.inherit.plist",
+      "provisioningProfile": "build/embedded.provisionprofile",
+      "hardenedRuntime": false,
+      "type": "distribution",
+      "category": "public.app-category.productivity",
+      "artifactName": "RoarMail-${version}-AppStore.${ext}",
+      "extendInfo": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     }
   }
 }
