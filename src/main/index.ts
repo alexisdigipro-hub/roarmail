@@ -339,7 +339,7 @@ let picked = '' // the last folder chosen in the folder picker
 function markDownloaded(file: string) {
   try {
     if (process.platform === 'win32') fs.writeFileSync(`${file}:Zone.Identifier`, '[ZoneTransfer]\r\nZoneId=3\r\n')
-    else if (process.platform === 'darwin') execFileSync('xattr', ['-w', 'com.apple.quarantine', `0081;${Math.floor(Date.now() / 1000).toString(16)};RoarMail;`, file])
+    else if (process.platform === 'darwin' && !process.mas) execFileSync('xattr', ['-w', 'com.apple.quarantine', `0081;${Math.floor(Date.now() / 1000).toString(16)};RoarMail;`, file])
   } catch { /* a disk that keeps no such marks */ }
 }
 

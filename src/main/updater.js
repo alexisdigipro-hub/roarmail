@@ -9,6 +9,8 @@ const fs = require('fs')
 const path = require('path')
 
 const REPO = 'alexisdigipro-hub/roarmail'
+// the Mac App Store copy (TestFlight, the App Store: Alex, 19 Nov 2026) is updated by the App Store, never by this
+const APP_STORE = !!process.mas
 const EVERY = 2 * 3600e3
 
 // current: this version; checkedAt: the last answer from GitHub (Settings > Updates shows "up to date" from it)
@@ -73,6 +75,7 @@ const sha256 = (file) => new Promise((ok, bad) => {
 })
 
 async function check() {
+  if (APP_STORE) { send({ status: 'idle', version: '', checkedAt: Date.now(), store: true }); return state }
   if (busy || state.status === 'ready') return state
   // a copy run from the source has nothing to update: it says so instead of checking
   if (!app.isPackaged) { send({ status: 'idle', error: 'dev', checkedAt: Date.now() }); return state }
@@ -139,6 +142,7 @@ const canReplace = (bundle) => {
 
 /* swap the app for the downloaded one; relaunch after a restart, not after a quit */
 function install(relaunch) {
+  if (APP_STORE) return false
   if (state.status !== 'ready' || !file || !fs.existsSync(file)) return false
   if (process.platform === 'darwin') {
     const bundle = macBundle()
@@ -180,6 +184,7 @@ exit 0
 
 // restart into the new version now (the page's Restart to update and the paw's menu)
 function restart(onQuitting) {
+  if (APP_STORE) return false
   if (!install(true)) return false
   onQuitting()
   setTimeout(() => app.quit(), 200)
@@ -193,6 +198,7 @@ function start(ipcMain, onQuitting, onState) {
   ipcMain.handle('mail:update-install', () => restart(onQuitting))
   // quitting with an update waiting installs it (no reopening)
   app.on('will-quit', () => { if (state.status === 'ready') install(false) })
+  if (APP_STORE) { state = { ...state, store: true }; return }
   setTimeout(check, 15e3)
   timer = setInterval(check, EVERY)
 }
