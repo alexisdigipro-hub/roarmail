@@ -58,6 +58,7 @@ const api: MailApi & { update: Record<string, (...a: any[]) => any>; rescue: (wh
   setAvatar: call('setAvatar') as MailApi['setAvatar'],
   emojiPanel: call('emojiPanel') as MailApi['emojiPanel'],
   senderIcons: call('senderIcons') as MailApi['senderIcons'],
+  setContactPhoto: call('setContactPhoto') as MailApi['setContactPhoto'],
   unifiedFolders: call('unifiedFolders') as MailApi['unifiedFolders'],
   folderMenu: call('folderMenu') as MailApi['folderMenu'],
   popMenu: call('popMenu') as MailApi['popMenu'],

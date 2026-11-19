@@ -14,6 +14,15 @@ const GROUP_TAGS: ContactGroup[] = ['team', 'clients', 'crew', 'written', 'recen
 const TAGS = ['team', 'clients', 'crew']
 const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
 
+/** a chosen picture made small: a 256 px square from its middle, as JPEG */
+async function smallPhoto(file: File): Promise<string> {
+  const img = await createImageBitmap(file)
+  const side = Math.min(img.width, img.height), out = 256
+  const cv = document.createElement('canvas'); cv.width = out; cv.height = out
+  cv.getContext('2d')!.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, out, out)
+  return cv.toDataURL('image/jpeg', 0.86)
+}
+
 export function Avatar({ email, name, pic, big }: { email: string; name: string; pic: string | null; big?: boolean }) {
   return <div className={`avatar ${pic ? 'pic' : ''} ${big ? 'big-av' : ''}`} style={{ background: pic ? '#fff' : tint(email) }}>{pic ? <img src={pic} alt="" /> : initials(name || email)}</div>
 }
@@ -174,7 +183,17 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
   return (
     <div className="ct-card">
       <div className="ct-top">
-        <Avatar email={email} name={c.name} pic={pic(email)} big />
+        {/* a photo of your own for them (19 Nov 2026): click the picture, choose one; it shows everywhere they do */}
+        <label className="ct-photo" title={t.ct_photo}>
+          <Avatar email={email} name={c.name} pic={pic(email)} big />
+          <span className="ct-photo-hint"><Icon name="image" size={16} /></span>
+          <input type="file" accept="image/*" hidden onChange={async (e) => {
+            const f = e.target.files?.[0]; e.target.value = ''
+            if (!f) return
+            const url = await smallPhoto(f).catch(() => null)
+            if (url) { await window.roarmail.setContactPhoto?.(email, url); setC({ ...c, hasPhoto: true }) }
+          }} />
+        </label>
         <div className="grow ct-id">
           <h3 className="ellipsis">{c.name || email}</h3>
           <span className="muted ellipsis">{[c.title, c.company].filter(Boolean).join(' · ')}</span>
@@ -182,6 +201,7 @@ function ContactCard({ email, pictures, onWrite, onAllMail, onChanged, onCompany
         </div>
       </div>
       <div className="row wrap ct-acts">
+        {c.hasPhoto && <button className="pill small ghost" onClick={async () => { await window.roarmail.setContactPhoto?.(email, null); setC({ ...c, hasPhoto: false }) }}><Icon name="close" size={13} /> {t.ct_photoOff}</button>}
         <button className="pill small primary" onClick={() => onWrite(email)}><Icon name="compose" size={14} /> {t.ct_write}</button>
         <button className="pill small" onClick={() => onAllMail(email)}><Icon name="target" size={14} /> {t.ct_allMail}</button>
         {c.phone && <button className="pill small" title={t.ct_copyPhone} onClick={() => navigator.clipboard.writeText(c.phone)}><Icon name="phone" size={14} /> {c.phone}</button>}

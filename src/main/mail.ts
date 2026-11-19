@@ -571,6 +571,15 @@ export class MailService {
    */
   async senderIcons(emails: string[]): Promise<Record<string, string | null>> {
     const out: Record<string, string | null> = {}
+    // a photo you gave a contact comes first, always (it never leaves this computer, so privacy mode keeps it too)
+    const own = this.db.prepare('select photo from contacts where email = ? and photo is not null')
+    const rest: string[] = []
+    for (const raw of emails) {
+      const e = String(raw || '').toLowerCase().trim()
+      const p = e ? (own.get(e) as Row | undefined)?.photo : null
+      if (p) out[e] = p as string; else rest.push(raw)
+    }
+    emails = rest
     if (!this.settings().senderPictures || this.settings().privacyMode) { for (const e of emails) out[e] = null; return out }
     const get = this.db.prepare('select data, fetched_at from sender_icons where key = ?')
     const put = this.db.prepare(`insert into sender_icons (key, data, fetched_at) values (?,?,?)
@@ -593,6 +602,16 @@ export class MailService {
       }))
     }
     return out
+  }
+
+  /** a contact's own photo (a JPEG, PNG or WebP data URL the window made small), or null to take it away */
+  setContactPhoto(email: string, photo: string | null) {
+    const e = String(email || '').toLowerCase().trim()
+    if (!e) return
+    const p = photo && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo) && photo.length < 400_000 ? photo : null
+    if (photo && !p) throw new Error('photo')
+    this.db.prepare(`insert into contacts (email, photo) values (?, ?) on conflict(email) do update set photo = excluded.photo`).run(e, p)
+    this.emit({ type: 'contactPhoto', email: e })
   }
 
   /** the unified folders: each role across every switched-on account, with the counts added up */
@@ -2270,7 +2289,7 @@ export class MailService {
     const files = (this.db.prepare(`select a.id, a.filename, a.size, a.mime, m.date from attachments a join messages m on m.id = a.message_id
       where m.from_email = ? and a.inline = 0 and a.filename is not null order by m.date desc limit 40`).all(e) as Row[])
       .map((f) => ({ id: f.id, filename: f.filename, size: f.size || 0, mime: f.mime || '', date: f.date }))
-    return { ...contactOf(r), recent: this.list({ accountId: 'all', person: e }).slice(0, 12), files }
+    return { ...contactOf(r), hasPhoto: !!r.photo, recent: this.list({ accountId: 'all', person: e }).slice(0, 12), files }
   }
 
   saveContact(email: string, patch: ContactPatch) {

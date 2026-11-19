@@ -1092,3 +1092,9 @@ html[data-mode='light'][data-glass-av] .avatar, html[data-mode='light'][data-gla
 /* an account with trouble at the foot of the list: its reason, a click opens Accounts (19 Nov 2026) */
 .list-foot .state.link { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-align: left; }
 .list-foot .state.link:hover { text-decoration: underline; }
+
+/* a contact's own photo: the picture in the card is a button (19 Nov 2026) */
+.ct-photo { position: relative; cursor: pointer; flex: none; border-radius: 50%; }
+.ct-photo .ct-photo-hint { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center; color: #fff;
+  background: rgba(0, 0, 0, .45); opacity: 0; transition: opacity .2s; }
+.ct-photo:hover .ct-photo-hint { opacity: 1; }
