@@ -84,11 +84,54 @@ async function tidy() {
   }
 }
 
+/** what Apple made of the uploads, and every build that is ready put in every TestFlight group (internal testers see
+ *  nothing until a build is in their group). Waits up to `minutes` for the newest to finish processing. */
+async function distribute(minutes = 25) {
+  const apps = await asc('GET', `/apps?filter[bundleId]=${BUNDLE}`)
+  const app = apps.data?.[0]
+  if (!app) throw new Error(`no app with the bundle ID ${BUNDLE} in App Store Connect yet`)
+  const until = Date.now() + minutes * 60e3
+  let builds
+  for (;;) {
+    builds = (await asc('GET', `/builds?filter[app]=${app.id}&sort=-uploadedDate&limit=10&fields[builds]=version,processingState,uploadedDate,expired`)).data || []
+    const newest = builds[0]
+    for (const b of builds) console.log(`build ${b.attributes.version}: ${b.attributes.processingState}${b.attributes.expired ? ' (expired)' : ''}, uploaded ${b.attributes.uploadedDate}`)
+    if (!newest || newest.attributes.processingState !== 'PROCESSING' || Date.now() > until) break
+    console.log('Apple is still processing the newest build; looking again in a minute')
+    await new Promise((r) => setTimeout(r, 60e3))
+  }
+  const bad = builds.filter((b) => b.attributes.processingState === 'INVALID' || b.attributes.processingState === 'FAILED')
+  if (bad.length) console.log(`::warning title=Builds Apple refused::${bad.map((b) => b.attributes.version).join(', ')}. Apple says why in an email to the account holder.`)
+  const ready = builds.filter((b) => b.attributes.processingState === 'VALID' && !b.attributes.expired)
+  // what TestFlight itself says of each ready build (Missing export compliance, ready to test, …)
+  for (const b of ready) {
+    const d = await asc('GET', `/builds/${b.id}/buildBetaDetail`).catch(() => null)
+    if (d?.data) console.log(`build ${b.attributes.version} for testers: internal ${d.data.attributes.internalBuildState}, external ${d.data.attributes.externalBuildState}`)
+    // RoarMail uses only the system's standard encryption (TLS to mail servers): exempt, said once per build
+    if (d?.data && d.data.attributes.internalBuildState === 'MISSING_EXPORT_COMPLIANCE') {
+      await asc('PATCH', `/builds/${b.id}`, { data: { type: 'builds', id: b.id, attributes: { usesNonExemptEncryption: false } } })
+        .then(() => console.log(`build ${b.attributes.version}: export compliance answered (standard encryption only)`))
+        .catch((e) => console.log(`(build ${b.attributes.version}: ${e.message})`))
+    }
+  }
+  const groups = (await asc('GET', `/apps/${app.id}/betaGroups?limit=50`)).data || []
+  for (const g of groups) console.log(`group "${g.attributes.name}": internal ${g.attributes.isInternalGroup}, gets every build by itself ${g.attributes.hasAccessToAllBuilds}`)
+  if (!groups.length) console.log('::warning::no TestFlight group yet: App Store Connect > TestFlight > Internal Testing > +')
+  for (const g of groups) {
+    if (!ready.length || g.attributes.hasAccessToAllBuilds) continue
+    await asc('POST', `/betaGroups/${g.id}/relationships/builds`, { data: ready.map((b) => ({ type: 'builds', id: b.id })) })
+      .then(() => console.log(`group "${g.attributes.name}": ${ready.map((b) => b.attributes.version).join(', ')} in it`))
+      .catch((e) => console.log(`(group "${g.attributes.name}": ${e.message})`))
+  }
+  if (!ready.length) console.log('::warning::no build is ready for testers yet')
+}
+
 const [cmd, arg] = process.argv.slice(2)
 try {
   if (cmd === 'prepare') await prepare(arg || '.')
   else if (cmd === 'tidy') await tidy()
-  else throw new Error('use: prepare <dir> | tidy')
+  else if (cmd === 'distribute') await distribute(Number(arg) || 25)
+  else throw new Error('use: prepare <dir> | tidy | distribute [minutes]')
 } catch (e) {
   const m = String(e.message || e)
   const hint = /maximum|limit|already have a current/i.test(m)
