@@ -311,8 +311,21 @@ async function submit() {
   const app = await appOf()
   const v = await editableVersion(app)
   if (!v) throw new Error('no version to send')
+  console.log(`version ${v.attributes.versionString}: ${v.attributes.appStoreState || v.attributes.appVersionState || '?'}`)
+  // a submission App Review sent back (unresolved issues) cannot take a changed build: it is cancelled and a fresh one
+  // is made (20 Nov 2026, after the network.server rejection)
+  const back = ((await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&filter[platform]=MAC_OS&filter[state]=UNRESOLVED_ISSUES`).catch(() => null))?.data || [])
+  for (const b of back) {
+    await asc('PATCH', `/reviewSubmissions/${b.id}`, { data: { type: 'reviewSubmissions', id: b.id, attributes: { canceled: true } } })
+    console.log(`cancelled the sent-back submission ${b.id}`)
+    for (let i = 0; i < 36; i++) {
+      const st = (await asc('GET', `/reviewSubmissions/${b.id}`)).data.attributes.state
+      if (st !== 'CANCELING') { console.log(`it is now ${st}`); break }
+      await new Promise((ok) => setTimeout(ok, 5000))
+    }
+  }
   // an unsent submission from an earlier try is used again (Apple allows one open at a time)
-  const open = ((await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&filter[platform]=MAC_OS&filter[state]=READY_FOR_REVIEW,UNRESOLVED_ISSUES&include=items`).catch(() => null))?.data || [])[0]
+  const open = ((await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&filter[platform]=MAC_OS&filter[state]=READY_FOR_REVIEW&include=items`).catch(() => null))?.data || [])[0]
   const sub = open || (await asc('POST', '/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'MAC_OS' }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
   const has = (open?.relationships?.items?.data || []).length > 0
   if (!has) await asc('POST', '/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: {
