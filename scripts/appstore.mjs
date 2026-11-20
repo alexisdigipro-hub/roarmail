@@ -58,7 +58,20 @@ async function bundleId() {
 
 async function certificate(type, csrFile, outFile) {
   const csr = fs.readFileSync(csrFile, 'utf8').replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')
-  const r = await asc('POST', '/certificates', { data: { type: 'certificates', attributes: { certificateType: type, csrContent: csr } } })
+  const make = () => asc('POST', '/certificates', { data: { type: 'certificates', attributes: { certificateType: type, csrContent: csr } } })
+  let r
+  try { r = await make() } catch (e) {
+    // Apple allows one Mac Installer Distribution certificate per account (and a few Distribution ones), shared with
+    // RoarMe's Mac build: when the limit stops a new one, the oldest of the same kind is revoked and it is tried again
+    // (20 Nov 2026). Only distribution certificates of this one kind are touched.
+    if (!/already have a current|maximum number of|as many/i.test(e.message || '')) throw e
+    const list = ((await asc('GET', `/certificates?filter[certificateType]=${type}&limit=200`)).data || [])
+      .sort((a, b) => String(a.attributes.expirationDate).localeCompare(String(b.attributes.expirationDate)))
+    if (!list.length) throw e
+    await asc('DELETE', `/certificates/${list[0].id}`)
+    console.log(`revoked the oldest ${type} certificate (${list[0].id}) to make room`)
+    r = await make()
+  }
   fs.writeFileSync(outFile, Buffer.from(r.data.attributes.certificateContent, 'base64'))
   console.log(`made a ${type} certificate (${r.data.id})`)
   return r.data.id
@@ -299,7 +312,7 @@ async function submit() {
   const v = await editableVersion(app)
   if (!v) throw new Error('no version to send')
   // an unsent submission from an earlier try is used again (Apple allows one open at a time)
-  const open = ((await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&filter[platform]=MAC_OS&filter[state]=READY_FOR_REVIEW&include=items`).catch(() => null))?.data || [])[0]
+  const open = ((await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&filter[platform]=MAC_OS&filter[state]=READY_FOR_REVIEW,UNRESOLVED_ISSUES&include=items`).catch(() => null))?.data || [])[0]
   const sub = open || (await asc('POST', '/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform: 'MAC_OS' }, relationships: { app: { data: { type: 'apps', id: app.id } } } } })).data
   const has = (open?.relationships?.items?.data || []).length > 0
   if (!has) await asc('POST', '/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems', relationships: {
