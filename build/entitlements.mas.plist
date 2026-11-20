@@ -7,8 +7,8 @@
 <dict>
   <key>com.apple.security.app-sandbox</key><true/>
   <key>com.apple.security.network.client</key><true/>
-  <!-- the Microsoft sign-in comes back to RoarMail on 127.0.0.1 (src/main/microsoft.ts) -->
-  <key>com.apple.security.network.server</key><true/>
+  <!-- no network.server (App Review, 20 Nov): the Microsoft sign-in in this build uses Microsoft's device code,
+       nothing listens on a port (src/main/microsoft.ts signInWithCode) -->
   <key>com.apple.security.files.user-selected.read-write</key><true/>
   <key>com.apple.security.files.downloads.read-write</key><true/>
   <key>com.apple.security.files.bookmarks.app-scope</key><true/>

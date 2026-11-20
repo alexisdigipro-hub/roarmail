@@ -4,7 +4,7 @@
 // The refresh token is kept like a password (sealed in the system key store); access tokens live only in memory.
 import http from 'http'
 import { createHash, randomBytes } from 'crypto'
-import { net, shell } from 'electron'
+import { clipboard, dialog, net, shell } from 'electron'
 
 /**
  * RoarMail's app registration in Microsoft Entra (portal.azure.com > App registrations): "Accounts in any
@@ -49,9 +49,54 @@ const page = (ok: boolean) => `<!doctype html><meta charset="utf-8"><title>RoarM
 <div style="text-align:center"><p style="font-size:28px;letter-spacing:.14em;margin:0 0 12px"><b style="font-weight:300">ROAR</b><b style="color:#d40000">MAIL</b></p>
 <p>${ok ? 'Έτοιμο. Μπορείς να κλείσεις αυτή τη σελίδα. / Done. You can close this page.' : 'Η σύνδεση δεν ολοκληρώθηκε. / Sign-in did not finish.'}</p></div>`
 
+/**
+ * The Mac App Store build (20 Nov 2026): Apple does not let it listen on a port (App Review flagged the
+ * network.server entitlement), so there the sign-in is Microsoft's device code flow: RoarMail shows a short code
+ * (also copied), Microsoft's page opens, the person pastes the code and signs in, and RoarMail asks Microsoft every
+ * few seconds until the tokens are ready. Needs "Allow public client flows" on the app registration, which is on.
+ */
+async function signInWithCode(): Promise<MsTokens> {
+  const r = await net.fetch(`${AUTH}/devicecode`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: MS_CLIENT_ID, scope: SCOPE }).toString(),
+  })
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok || !d.device_code) throw new Error(`Microsoft: ${d.error_description || d.error || r.status}`)
+  clipboard.writeText(d.user_code)
+  shell.openExternal(d.verification_uri || 'https://microsoft.com/devicelogin').catch(() => {})
+  let stop = false
+  dialog.showMessageBox({
+    type: 'info', buttons: ['Cancel'], title: 'Sign in with Microsoft',
+    message: `Your code: ${d.user_code}`,
+    detail: 'It is copied. Paste it on the Microsoft page that just opened and sign in. RoarMail continues by itself.\n\nΟ κωδικός αντιγράφηκε. Επικόλλησέ τον στη σελίδα της Microsoft που άνοιξε και συνδέσου.',
+  }).then(() => { stop = true }).catch(() => {})
+  const until = Date.now() + (Number(d.expires_in) || 900) * 1e3
+  let wait = (Number(d.interval) || 5) * 1e3
+  while (Date.now() < until) {
+    await new Promise((ok) => setTimeout(ok, wait))
+    if (stop) throw new Error('ms_cancelled')
+    const t = await net.fetch(`${AUTH}/token`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: MS_CLIENT_ID, grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: d.device_code }).toString(),
+    })
+    const j = await t.json().catch(() => ({}))
+    if (t.ok && j.access_token) {
+      const who = claims(j.id_token)
+      return { access: j.access_token, refresh: j.refresh_token || '', expires: Date.now() + (Number(j.expires_in) || 3600) * 1e3, email: who.email, name: who.name }
+    }
+    if (j.error === 'authorization_pending') continue
+    if (j.error === 'slow_down') { wait += 5e3; continue }
+    if (j.error === 'authorization_declined') throw new Error('ms_cancelled')
+    if (j.error === 'expired_token') break
+    throw new Error(`Microsoft: ${j.error_description || j.error || t.status}`)
+  }
+  throw new Error('ms_timeout')
+}
+
 /** the whole sign-in: browser, consent, back to RoarMail with tokens (5 minutes to finish) */
 export async function signIn(loginHint?: string): Promise<MsTokens> {
   if (!MS_CLIENT_ID) throw new Error('ms_setup')
+  if (process.mas) return signInWithCode()
   const verifier = b64url(randomBytes(32))
   const challenge = b64url(createHash('sha256').update(verifier).digest())
   const state = b64url(randomBytes(16))
