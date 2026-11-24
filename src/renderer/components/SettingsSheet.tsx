@@ -953,16 +953,16 @@ function CloudMail() {
     await load(); setBusy('')
   }
   return (
-    <Group title={t.rc_title} note={t.rc_note}>
+    <Group title={t.cm_title} note={t.cm_note}>
       {!st.signedIn && <p className="muted small">{t.ra_signInFirst}</p>}
       {st.signedIn && st.accounts.map((a) => (
-        <Line key={a.id} label={<span>{a.name}<br /><span className="muted small">{err[a.id] || (a.status === 'auth' ? t.rc_auth : a.on ? `${a.email} · ${t.rc_on}` : a.email)}</span></span>}>
-          {busy === a.id ? <span className="muted small">{t.rc_sending}</span>
+        <Line key={a.id} label={<span>{a.name}<br /><span className="muted small">{err[a.id] || (a.status === 'auth' ? t.cm_auth : a.on ? `${a.email} · ${t.cm_on}` : a.email)}</span></span>}>
+          {busy === a.id ? <span className="muted small">{t.cm_sending}</span>
             : a.on ? <>
-              {a.status === 'auth' && <button className="pill small primary" onClick={() => go(a.id, true)}>{t.rc_again}</button>}
-              <button className="pill small ghost danger" onClick={() => go(a.id, false)}>{t.rc_remove}</button>
+              {a.status === 'auth' && <button className="pill small primary" onClick={() => go(a.id, true)}>{t.cm_again}</button>}
+              <button className="pill small ghost danger" onClick={() => go(a.id, false)}>{t.cm_remove}</button>
             </>
-            : <button className="pill small primary" onClick={() => go(a.id, true)}>{t.rc_send}</button>}
+            : <button className="pill small primary" onClick={() => go(a.id, true)}>{t.cm_send}</button>}
         </Line>
       ))}
     </Group>
