@@ -12,10 +12,11 @@ import os from 'os'
 import path from 'path'
 import type { MailService, SetupBundle } from './mail'
 import type { RoarMe } from './roarme'
-import type { AiProvider, AiStatus, Invite, SyncState } from '../shared/api'
+import type { AiProvider, AiStatus, CloudState, Invite, SyncState } from '../shared/api'
 import { AI_SYSTEM, aiPrompt, type AiRequest } from '../shared/aiPrompt'
 
 const FN = 'https://bzmjhbnwhdwmncxkqkdl.supabase.co/functions/v1/roarmail-ai'
+const CLOUD = 'https://bzmjhbnwhdwmncxkqkdl.supabase.co/functions/v1/roarmail-cloud'
 const KEY = 'sb_publishable_7mQ3e0NH5lCmdoIKx2-FUA_EgCoXx9X'
 const EVERY = 60e3
 
@@ -43,6 +44,33 @@ export class RoarAccount {
 
   /** a sign-in or sign-out, or the switch: check at once */
   nudge() { this.lastPrint = ''; this.tick().catch(() => {}) }
+
+  /** Mail on RoarMe (24 Nov 2026): which accounts RoarMe can read, through RoarMe's Edge Function roarmail-cloud */
+  private async cloud(body: Record<string, unknown>) {
+    const acc = await this.roarme.account().catch(() => null)
+    if (!acc) throw new Error('Sign in to your Roar Account first.')
+    const r = await net.fetch(CLOUD, { method: 'POST', headers: { apikey: KEY, Authorization: `Bearer ${acc.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const j = await r.json().catch(() => ({})) as any
+    if (!r.ok) throw new Error(j.error || `RoarMe answered ${r.status}`)
+    return j
+  }
+  async cloudState(): Promise<CloudState> {
+    const list = this.mail.allAccounts().map((a) => ({ id: a.id, email: a.email, name: a.description || a.displayName || a.email }))
+    try {
+      const j = await this.cloud({ action: 'state' })
+      const on = new Map<string, any>((j.accounts || []).map((x: any) => [x.account_id, x]))
+      return { signedIn: true, accounts: list.map((a) => ({ ...a, on: on.has(a.id), status: on.get(a.id)?.status || '', error: on.get(a.id)?.error || '' })) }
+    } catch (e) { return { signedIn: false, error: String((e as Error).message), accounts: list.map((a) => ({ ...a, on: false, status: '', error: '' })) } }
+  }
+  async cloudSend(id: string): Promise<{ ok: boolean; error?: string }> {
+    const p = this.mail.cloudPayload(id)
+    if (!p) return { ok: false, error: 'This account has no password kept on this computer.' }
+    try { const j = await this.cloud({ action: 'connect', ...p }); return j.ok ? { ok: true } : { ok: false, error: j.error || 'Not sent' } }
+    catch (e) { return { ok: false, error: String((e as Error).message) } }
+  }
+  async cloudRemove(id: string): Promise<{ ok: boolean; error?: string }> {
+    try { await this.cloud({ action: 'disconnect', account_id: id }); return { ok: true } } catch (e) { return { ok: false, error: String((e as Error).message) } }
+  }
 
   async syncNow(): Promise<SyncState> { this.lastPrint = ''; await this.tick(true); return this.syncState() }
 

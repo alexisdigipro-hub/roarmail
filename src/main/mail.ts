@@ -313,6 +313,20 @@ export class MailService {
 
   accounts(): Account[] { return this.allAccounts().filter((a) => a.enabled) }
 
+  /** what Send to RoarMe hands to the cloud for one account (24 Nov 2026): where its mail lives and its password, or for
+   *  Sign in with Microsoft its refresh token. Only when the person presses the button, only to RoarMe's roarmail-cloud. */
+  cloudPayload(id: string) {
+    const r = this.db.prepare('select * from accounts where id = ?').get(id) as Row | undefined
+    if (!r || !r.secret) return null
+    const secret = open(r.secret)
+    const ms = secret.startsWith(OAUTH_PREFIX)
+    return {
+      account_id: String(r.id), email: String(r.email),
+      cfg: { imap_host: r.imap_host, imap_port: r.imap_port, imap_tls: r.imap_tls, smtp_host: r.smtp_host, smtp_port: r.smtp_port, smtp_tls: r.smtp_tls, username: r.username, kind: ms ? 'microsoft' : 'password' },
+      secret: ms ? secret.slice(OAUTH_PREFIX.length) : secret,
+    }
+  }
+
   /** the switched-off ones too, for Settings > Accounts */
   allAccounts(): Account[] {
     const aliases = this.db.prepare('select id, email, name from identities where account_id = ? and is_default = 0 order by email')
