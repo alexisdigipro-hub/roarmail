@@ -784,6 +784,9 @@ app.whenReady().then(() => {
   roarAccount.start()
   handle('mail:syncState', () => roarAccount!.syncState())
   handle('mail:syncNow', () => roarAccount!.syncNow())
+  handle('mail:cloudState', () => roarAccount!.cloudState())
+  handle('mail:cloudSend', (_e, id) => roarAccount!.cloudSend(String(id || '')))
+  handle('mail:cloudRemove', (_e, id) => roarAccount!.cloudRemove(String(id || '')))
   handle('mail:aiStatus', () => roarAccount!.aiStatus())
   handle('mail:aiSetKey', (_e, provider, key) => roarAccount!.aiSetKey(provider === 'openai' ? 'openai' : 'claude', String(key || '')))
   // Before any text goes to an AI, the person says yes once (Apple 5.1.2(i): personal data to a third-party AI needs a

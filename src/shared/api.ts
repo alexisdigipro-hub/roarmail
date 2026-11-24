@@ -674,6 +674,9 @@ export interface MailApi {
   /** the Roar Account (3 Nov 2026): sync of RoarMail's setup, and the ✦ AI in a new message */
   syncState?(): Promise<SyncState>
   syncNow?(): Promise<SyncState>
+  cloudState?(): Promise<CloudState>
+  cloudSend?(id: string): Promise<{ ok: boolean; error?: string }>
+  cloudRemove?(id: string): Promise<{ ok: boolean; error?: string }>
   aiStatus?(): Promise<AiStatus>
   aiSetKey?(provider: 'claude' | 'openai', key: string): Promise<AiStatus>
   ai?(req: import('./aiPrompt').AiRequest): Promise<string>
@@ -687,3 +690,6 @@ export interface MailApi {
   composeClose?(): Promise<void>
   composeDone?(done: { outboxId?: string; at?: number; saved?: boolean }): Promise<void>
 }
+
+/** Mail on RoarMe (24 Nov 2026): each account and whether RoarMe can read it through the cloud */
+export interface CloudState { signedIn: boolean; error?: string; accounts: { id: string; email: string; name: string; on: boolean; status: string; error: string }[] }

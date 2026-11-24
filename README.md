@@ -55,3 +55,11 @@ What it needs, once, from the account holder (never in the repo):
   (the whole .p8 file);
 - the app in App Store Connect: Apps > + > New App > macOS, name RoarMail, bundle ID com.themadlions.roarmail (the first
   run registers the bundle ID if it is missing).
+
+## Mail in RoarMe (0.39.0, 24 Nov 2026)
+
+Settings > Roar Account > My mail in RoarMe: Send to RoarMe hands one account's password (for Sign in with Microsoft, its
+refresh token) to the Edge Function `roarmail-cloud` in RoarMe's Supabase project (`supabase/functions/roarmail-cloud`),
+which checks it against the IMAP server and keeps it in Supabase Vault (`supabase/roarmail-cloud.sql`: `roarmail_cloud`,
+read only by its owner and never with the secret). RoarMe's ROARMAIL folder then reads that account's mail over IMAP
+through the function, on any device. Mail is not stored in the cloud. Remove from RoarMe deletes the secret.

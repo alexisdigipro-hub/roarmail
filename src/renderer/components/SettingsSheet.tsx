@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import { SAFE_FONTS, knownLocalFonts, localStack, mailFontStack } from '../mailfonts'
-import type { Account, AiStatus, BlockItem, Folder, SyncState, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
+import type { Account, AiStatus, BlockItem, CloudState, Folder, SyncState, LockState, NewMailSound, Rule, Settings, Signature, SwipeAction, Tls, UpdateState } from '../../shared/api'
 import { lang, t, when, type Key } from '../i18n'
 import { ACCENTS, FONTS, TEXT_SIZES, applyLook, fontStack, revealFrom, useLens } from '../look'
 import { useSwipeTabs } from '../swipe'
@@ -909,6 +909,7 @@ function RoarAccountPage({ s, set }: { s: Settings; set: Set }) {
         )}
         {!!sync?.added && <p className="muted small">{t.ra_added.replace('{n}', String(sync.added))}</p>}
       </Group>
+      <CloudMail />
       <Group title={t.ra_ai} note={t.ra_aiNote}>
         <Line label={t.ra_aiWho}>
           <Choice value={s.aiProvider} onChange={(v) => { set('aiProvider', v); setKey(''); setKeyErr('') }}
@@ -933,6 +934,38 @@ function RoarAccountPage({ s, set }: { s: Settings; set: Set }) {
         {keyErr && <p className="error">{keyErr}</p>}
       </Group>
     </div>
+  )
+}
+
+/** Mail on RoarMe (24 Nov 2026): each account can be sent to RoarMe, which then reads its mail through the cloud */
+function CloudMail() {
+  const api = window.roarmail
+  const [st, setSt] = useState<CloudState | null>(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState<Record<string, string>>({})
+  const load = () => api.cloudState?.().then(setSt).catch(() => {})
+  useEffect(() => { load(); return api.on((e) => { if (e.type === 'roarme') load() }) }, [])
+  if (!api.cloudState || !st) return null
+  const go = async (id: string, send: boolean) => {
+    setBusy(id); setErr((x) => ({ ...x, [id]: '' }))
+    const r = send ? await api.cloudSend!(id) : await api.cloudRemove!(id)
+    if (!r.ok) setErr((x) => ({ ...x, [id]: r.error || '' }))
+    await load(); setBusy('')
+  }
+  return (
+    <Group title={t.rc_title} note={t.rc_note}>
+      {!st.signedIn && <p className="muted small">{t.ra_signInFirst}</p>}
+      {st.signedIn && st.accounts.map((a) => (
+        <Line key={a.id} label={<span>{a.name}<br /><span className="muted small">{err[a.id] || (a.status === 'auth' ? t.rc_auth : a.on ? `${a.email} · ${t.rc_on}` : a.email)}</span></span>}>
+          {busy === a.id ? <span className="muted small">{t.rc_sending}</span>
+            : a.on ? <>
+              {a.status === 'auth' && <button className="pill small primary" onClick={() => go(a.id, true)}>{t.rc_again}</button>}
+              <button className="pill small ghost danger" onClick={() => go(a.id, false)}>{t.rc_remove}</button>
+            </>
+            : <button className="pill small primary" onClick={() => go(a.id, true)}>{t.rc_send}</button>}
+        </Line>
+      ))}
+    </Group>
   )
 }
 
