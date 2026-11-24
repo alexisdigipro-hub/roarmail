@@ -109,15 +109,24 @@ function walk(node: any, acc = { text: null as any, html: null as any, files: 0 
 }
 const who = (a: any) => a ? { name: a.name || '', address: a.address || '' } : null
 
-async function listOne(c: any, account: string, path: string, limit: number, page = 0) {
+async function listOne(c: any, account: string, path: string, limit: number, page = 0, unseen = false) {
   const box = await c.mailboxOpen(path, { readOnly: true })
-  const total = box.exists || 0
+  let total = box.exists || 0
   if (!total) return { total: 0, items: [] }
-  const top = total - limit * page
-  if (top < 1) return { total, items: [] }
-  const range = `${Math.max(1, top - limit + 1)}:${top}`
   const rows: any[] = []
-  for await (const m of c.fetch(range, { uid: true, flags: true, envelope: true, internalDate: true, size: true, bodyStructure: true })) rows.push(m)
+  const what = { uid: true, flags: true, envelope: true, internalDate: true, size: true, bodyStructure: true }
+  if (unseen) {
+    // only the unread (the Unread folder across the accounts): the newest first, a page at a time
+    const uids: number[] = ((await c.search({ seen: false }, { uid: true })) || []).sort((a: number, b: number) => b - a)
+    total = uids.length
+    const part = uids.slice(limit * page, limit * (page + 1))
+    if (!part.length) return { total, items: [] }
+    for await (const m of c.fetch(part.join(','), what, { uid: true })) rows.push(m)
+  } else {
+    const top = total - limit * page
+    if (top < 1) return { total, items: [] }
+    for await (const m of c.fetch(`${Math.max(1, top - limit + 1)}:${top}`, what)) rows.push(m)
+  }
   rows.sort((a, b) => b.uid - a.uid)
   const take = rows.slice(0, limit)
   // a few lines of each, from the first text part (at most 2 KB of it)
@@ -231,7 +240,7 @@ Deno.serve(async (req) => {
               const s = await c.status(it.path, { unseen: true, messages: true })
               out.counts[`${account}|${it.path}`] = { unseen: s.unseen || 0, messages: s.messages || 0 }
             } else {
-              const r = await listOne(c, account, it.path, limit, Math.max(0, Number(b.page) || 0))
+              const r = await listOne(c, account, it.path, limit, Math.max(0, Number(b.page) || 0), b.unseen === true)
               out.totals[`${account}|${it.path}`] = r.total
               out.items.push(...r.items)
             }
