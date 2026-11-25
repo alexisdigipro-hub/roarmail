@@ -139,6 +139,11 @@ async function distribute(minutes = 25) {
       .catch((e) => console.log(`(group "${g.attributes.name}": ${e.message})`))
   }
   if (!ready.length) console.log('::warning::no build is ready for testers yet')
+  // where the App Store version stands (Waiting for Review, In Review, Ready for Distribution, Rejected…)
+  const vs = (await asc('GET', `/apps/${app.id}/appStoreVersions?filter[platform]=MAC_OS&limit=5`).catch(() => null))?.data || []
+  for (const v of vs) console.log(`App Store version ${v.attributes.versionString}: ${v.attributes.appVersionState || v.attributes.appStoreState}`)
+  const subs = (await asc('GET', `/reviewSubmissions?filter[app]=${app.id}&limit=5`).catch(() => null))?.data || []
+  for (const x of subs) console.log(`review submission ${x.attributes.submittedDate || '(not sent)'}: ${x.attributes.state}`)
 }
 
 // ---------- the App Store page (Alex, 19 Nov 2026: "now we can put it out on the App Store") ----------
