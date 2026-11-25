@@ -329,6 +329,89 @@ async function unblock(user: string, b: any) {
   return { ok: true }
 }
 
+// ---- adding an account from RoarMe itself (Alex, 25 Nov 2026: Add Account on the phone, sample "1") -------------------
+// The well-known services by their own settings; anything else from Thunderbird's public list of providers, or a guess.
+const PRESETS: Record<string, { imap: string; smtp: string; smtpPort: number; smtpTls: string; domains: string[] }> = {
+  gmail: { imap: 'imap.gmail.com', smtp: 'smtp.gmail.com', smtpPort: 465, smtpTls: 'tls', domains: ['gmail.com', 'googlemail.com'] },
+  icloud: { imap: 'imap.mail.me.com', smtp: 'smtp.mail.me.com', smtpPort: 587, smtpTls: 'starttls', domains: ['icloud.com', 'me.com', 'mac.com'] },
+  yahoo: { imap: 'imap.mail.yahoo.com', smtp: 'smtp.mail.yahoo.com', smtpPort: 465, smtpTls: 'tls', domains: ['yahoo.com', 'yahoo.gr', 'ymail.com', 'rocketmail.com'] },
+  aol: { imap: 'imap.aol.com', smtp: 'smtp.aol.com', smtpPort: 465, smtpTls: 'tls', domains: ['aol.com'] },
+  outlook: { imap: 'outlook.office365.com', smtp: 'smtp-mail.outlook.com', smtpPort: 587, smtpTls: 'starttls', domains: ['outlook.com', 'hotmail.com', 'live.com', 'msn.com'] },
+}
+const COLORS = ['#3aa7e8', '#e5483f', '#14b89a', '#7b4dff', '#ff9f0a', '#d6338a', '#0f6e7a', '#5a4a3c']
+async function detect(email: string) {
+  const dom = email.split('@')[1] || ''
+  for (const [k, p] of Object.entries(PRESETS)) if (p.domains.includes(dom)) return { provider: k, imap_host: p.imap, imap_port: 993, smtp_host: p.smtp, smtp_port: p.smtpPort, smtp_tls: p.smtpTls }
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(dom)) return null
+  try {
+    const r = await fetch(`https://autoconfig.thunderbird.net/v1.1/${dom}`, { signal: AbortSignal.timeout(6000) })
+    if (r.ok) {
+      const x = await r.text()
+      const imap = x.match(/<incomingServer type="imap">[\s\S]*?<hostname>([^<]+)<\/hostname>[\s\S]*?<port>(\d+)<\/port>/)
+      const smtps = [...x.matchAll(/<outgoingServer type="smtp">[\s\S]*?<hostname>([^<]+)<\/hostname>[\s\S]*?<port>(\d+)<\/port>/g)]
+      const smtp = smtps.find((m) => m[2] === '465') || smtps[0]
+      if (imap) return { provider: 'other', imap_host: imap[1], imap_port: Number(imap[2]) === 143 ? 143 : 993, smtp_host: smtp?.[1] || `smtp.${dom}`, smtp_port: Number(smtp?.[2]) || 465, smtp_tls: smtp?.[2] === '465' ? 'tls' : 'starttls' }
+    }
+  } catch { /* guess */ }
+  return { provider: 'other', imap_host: `imap.${dom}`, imap_port: 993, smtp_host: `smtp.${dom}`, smtp_port: 465, smtp_tls: 'tls' }
+}
+/** an account's folders, with RoarMail's roles */
+async function foldersOf(c: any) {
+  const ROLE: Record<string, string> = { '\\Inbox': 'inbox', '\\Sent': 'sent', '\\Drafts': 'drafts', '\\Junk': 'spam', '\\Trash': 'trash', '\\Archive': 'archive', '\\Flagged': 'flagged' }
+  const l = await c.list()
+  return l.filter((f: any) => !(f.flags && (f.flags.has?.('\\Noselect') || f.flags.has?.('\\NonExistent'))))
+    .map((f: any) => ({ path: f.path, name: f.name || f.path, role: f.path.toUpperCase() === 'INBOX' ? 'inbox' : (ROLE[f.specialUse] || '') }))
+    .slice(0, 300)
+}
+async function keepNew(user: string, email: string, cfg: Cfg, secret: string, cred: { pass?: string; access?: string }, label: string) {
+  const { data: had } = await sb.from('roarmail_cloud').select('account_id, email').eq('user_id', user)
+  if ((had || []).some((r: any) => String(r.email).toLowerCase() === email)) return { ok: false, error: 'This address is in RoarMe already.' }
+  const c = client(cfg, cred)
+  let folders: any[] = []
+  try { await c.connect(); folders = await foldersOf(c) } catch (e) { return { ok: false, error: authFail(e) ? 'The mail server did not take this password. Check that it is the app password and try again.' : say(e) } } finally { await close(c) }
+  const id = 'rm-' + crypto.randomUUID().slice(0, 8)
+  const full = { ...cfg, origin: 'roarme', name: label || email.split('@')[0], color: COLORS[(had || []).length % COLORS.length], folders }
+  const { error } = await sb.rpc('roarmail_cloud_put', { p_user: user, p_account: id, p_email: email, p_cfg: full, p_secret: secret })
+  if (error) throw error
+  return { ok: true, account_id: id }
+}
+async function addAccount(user: string, b: any) {
+  const email = str(b.email, 320).trim().toLowerCase(), raw = String(b.password || '').trim()
+  const pass = /^[a-z]{4}( [a-z]{4}){3}$/i.test(raw) ? raw.replace(/ /g, '') : raw // an app password as Google shows it: four groups of four
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'Write the whole email address.' }
+  if (!pass || pass.length > 500) return { ok: false, error: 'Write the password.' }
+  const d = b.cfg?.imap_host ? { provider: 'other', ...b.cfg } : await detect(email)
+  if (!d) return { ok: false, error: 'Write the whole email address.' }
+  const cfg = cleanCfg({ ...d, imap_tls: Number(d.imap_port) === 143 ? 'starttls' : 'tls', username: str(b.username, 320).trim() || email, kind: 'password' })
+  const label = str(b.name, 60).trim() || ({ gmail: 'Gmail', icloud: 'iCloud', yahoo: 'Yahoo', aol: 'AOL', outlook: 'Outlook' } as any)[d.provider] || email.split('@')[1]
+  return await keepNew(user, email, cfg, pass, { pass }, label)
+}
+// Sign in with Microsoft from the phone: the device code flow (as RoarMail's Mac App Store build), asked from here
+const MS_AUTH = 'https://login.microsoftonline.com/common/oauth2/v2.0'
+async function msStart() {
+  const r = await fetch(`${MS_AUTH}/devicecode`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: MS_CLIENT, scope: MS_SCOPE }).toString() })
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok || !d.device_code) throw new Error(`Microsoft: ${d.error_description || d.error || r.status}`)
+  return { code: d.user_code, url: d.verification_uri || 'https://microsoft.com/devicelogin', device: d.device_code, every: Number(d.interval) || 5, expires: Number(d.expires_in) || 900 }
+}
+async function msPoll(user: string, b: any) {
+  const r = await fetch(`${MS_AUTH}/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: MS_CLIENT, grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: str(b.device, 4000) }).toString() })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok || !j.access_token) {
+    if (j.error === 'authorization_pending' || j.error === 'slow_down') return { pending: true }
+    if (j.error === 'authorization_declined') return { ok: false, error: 'The sign-in was cancelled.' }
+    if (j.error === 'expired_token') return { ok: false, error: 'The code expired. Start again.' }
+    return { ok: false, error: `Microsoft: ${j.error_description || j.error || r.status}`.slice(0, 200) }
+  }
+  let email = ''
+  try { const p = JSON.parse(atob(String(j.id_token || '').split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); email = String(p.email || p.preferred_username || '').toLowerCase() } catch { /* below */ }
+  if (!email) return { ok: false, error: 'Microsoft did not say which address signed in.' }
+  const p = PRESETS.outlook
+  const cfg = cleanCfg({ imap_host: p.imap, imap_port: 993, imap_tls: 'tls', smtp_host: 'smtp.office365.com', smtp_port: 587, smtp_tls: 'starttls', username: email, kind: 'microsoft' })
+  return await keepNew(user, email, cfg, j.refresh_token || '', { access: j.access_token }, 'Outlook')
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return reply({ error: 'POST only' }, 405)
@@ -341,8 +424,10 @@ Deno.serve(async (req) => {
   const act = String(b.action || '')
   try {
     if (act === 'state') {
-      const { data } = await sb.from('roarmail_cloud').select('account_id, email, status, error, checked_at').eq('user_id', user)
-      return reply({ accounts: data || [] })
+      const { data } = await sb.from('roarmail_cloud').select('account_id, email, status, error, checked_at, cfg').eq('user_id', user)
+      // an account added in RoarMe itself carries its name, colour and folders (RoarMail on the computer does not know it)
+      return reply({ accounts: (data || []).map(({ cfg, ...a }: any) => cfg?.origin === 'roarme'
+        ? { ...a, own: { name: cfg.name, color: cfg.color, kind: cfg.kind, folders: cfg.folders || [] } } : a) })
     }
     if (act === 'connect') {
       const account = str(b.account_id, 80), email = str(b.email, 320).trim().toLowerCase(), secret = String(b.secret || '')
@@ -427,6 +512,27 @@ Deno.serve(async (req) => {
         if (box.exists) await c.messageDelete('1:*')
         return reply({ ok: true, gone: box.exists || 0 })
       } finally { await close(c) }
+    }
+    if (act === 'detect') return reply({ cfg: await detect(str(b.email, 320).trim().toLowerCase()) })
+    if (act === 'add') return reply(await addAccount(user, b))
+    if (act === 'msStart') return reply(await msStart())
+    if (act === 'msPoll') return reply(await msPoll(user, b))
+    if (act === 'refolder') {
+      const account = str(b.account_id, 80)
+      const { data: row } = await sb.from('roarmail_cloud').select('cfg, email').eq('user_id', user).eq('account_id', account).maybeSingle()
+      if (!row || row.cfg?.origin !== 'roarme') return reply({ error: 'missing' }, 404)
+      const c = await open(user, account)
+      let folders: any[] = []
+      try { folders = await foldersOf(c) } finally { await close(c) }
+      await sb.from('roarmail_cloud').update({ cfg: { ...row.cfg, folders } }).eq('user_id', user).eq('account_id', account)
+      return reply({ folders })
+    }
+    if (act === 'rename') {
+      const account = str(b.account_id, 80)
+      const { data: row } = await sb.from('roarmail_cloud').select('cfg').eq('user_id', user).eq('account_id', account).maybeSingle()
+      if (!row || row.cfg?.origin !== 'roarme') return reply({ error: 'missing' }, 404)
+      await sb.from('roarmail_cloud').update({ cfg: { ...row.cfg, name: str(b.name, 60).trim() || row.cfg.name } }).eq('user_id', user).eq('account_id', account)
+      return reply({ ok: true })
     }
     if (act === 'send') return reply(await sendMail(user, b))
     if (act === 'block') return reply(await blockSender(user, b))

@@ -5,7 +5,7 @@
 //   a mail password or token. Checked every minute: a newer copy from another computer comes in, a change here goes up.
 // - AI: the ✦ button in a new message. Through the Roar Account (Edge Function roarmail-ai, a daily allowance), or with
 //   the person's own Claude or ChatGPT key, kept encrypted on this computer and sent only to that company.
-import { app, net, safeStorage } from 'electron'
+import { app, dialog, net, safeStorage } from 'electron'
 import { createHash } from 'crypto'
 import fs from 'fs'
 import os from 'os'
@@ -36,6 +36,36 @@ export class RoarAccount {
     if (this.timer) return
     setTimeout(() => this.tick().catch(() => {}), 8e3)
     this.timer = setInterval(() => this.tick().catch(() => {}), EVERY)
+    setInterval(() => this.asks().catch(() => {}), 15e3)
+  }
+
+  /**
+   * Import from RoarMail (25 Nov 2026): RoarMe on the phone asks for some of this computer's accounts
+   * (roarmail_cloud_asks). RoarMail asks the person here, and on Allow sends each one as Send to RoarMe does.
+   */
+  private asked = new Set<string>()
+  private async asks() {
+    const acc = await this.roarme.account().catch(() => null)
+    if (!acc) return
+    const since = new Date(Date.now() - 15 * 60e3).toISOString()
+    const { data } = await acc.sb.from('roarmail_cloud_asks').select('id, accounts').eq('user_id', acc.userId).eq('state', 'waiting').gte('created_at', since)
+    for (const a of data || []) {
+      if (this.asked.has(a.id)) continue
+      this.asked.add(a.id)
+      const list = this.mail.allAccounts().filter((x) => (a.accounts || []).includes(x.id))
+      const names = list.map((x) => `${x.description || x.displayName || x.email} (${x.email})`).join('\n')
+      const r = await dialog.showMessageBox({
+        type: 'question', buttons: ['Allow', "Don't Allow"], defaultId: 0, cancelId: 1, title: 'RoarMe asks for your mail',
+        message: `RoarMe on your phone asks to read ${list.length > 1 ? 'these accounts' : 'this account'}:`,
+        detail: `${names || 'No account of this computer'}\n\nThe passwords go sealed to RoarMe's vault, as with Send to RoarMe.\n\nΤο RoarMe στο κινητό ζητά αυτούς τους λογαριασμούς.`,
+      })
+      if (r.response !== 0 || !list.length) { await acc.sb.from('roarmail_cloud_asks').update({ state: 'declined', answered_at: new Date().toISOString() }).eq('id', a.id); continue }
+      await acc.sb.from('roarmail_cloud_asks').update({ state: 'allowed', answered_at: new Date().toISOString() }).eq('id', a.id)
+      const bad: string[] = []
+      for (const x of list) { const s = await this.cloudSend(x.id); if (!s.ok) bad.push(`${x.email}: ${s.error || 'not sent'}`) }
+      await acc.sb.from('roarmail_cloud_asks').update({ state: 'done', error: bad.length ? `Not sent: ${bad.join('; ')}`.slice(0, 500) : null }).eq('id', a.id)
+      this.emit()
+    }
   }
 
   syncState(): SyncState { return { ...this.state, on: this.mail.settings().syncSetup } }

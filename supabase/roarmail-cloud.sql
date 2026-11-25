@@ -78,3 +78,22 @@ grant execute on function public.roarmail_cloud_put(uuid, text, text, jsonb, tex
 grant execute on function public.roarmail_cloud_secret(uuid, text) to service_role;
 grant execute on function public.roarmail_cloud_drop(uuid, text) to service_role;
 grant execute on function public.roarmail_cloud_mark(uuid, text, text, text) to service_role;
+
+-- Import from RoarMail (Alex, 25 Nov 2026): RoarMe on the phone asks RoarMail on the computer to send some of its
+-- accounts. The ask waits here; RoarMail (checking every minute) shows Allow / Don't Allow and, on Allow, sends each
+-- account with roarmail-cloud connect. Only the owner reads or writes their own asks. Safe to run again.
+create table if not exists public.roarmail_cloud_asks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  accounts text[] not null check (cardinality(accounts) between 1 and 30),
+  state text not null default 'waiting' check (state in ('waiting', 'allowed', 'declined', 'done')),
+  error text,
+  created_at timestamptz not null default now(),
+  answered_at timestamptz
+);
+create index if not exists roarmail_cloud_asks_user on public.roarmail_cloud_asks (user_id, created_at desc);
+alter table public.roarmail_cloud_asks enable row level security;
+drop policy if exists roarmail_cloud_asks_own on public.roarmail_cloud_asks;
+create policy roarmail_cloud_asks_own on public.roarmail_cloud_asks for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+grant select, insert, update, delete on public.roarmail_cloud_asks to authenticated;
