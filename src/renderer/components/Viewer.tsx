@@ -153,7 +153,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
   if (!m) return <article className="card"><div className="spinner" /></article>
 
   const acc = accounts.find((a) => a.id === m.accountId)
-  const people = (list: Address[]) => list.map((a) => (acc && a.address.toLowerCase() === acc.email.toLowerCase() ? t.me : a.name || a.address)).join(', ')
+  const people = (list: Address[]) => list.map((a) => (acc && a.address.toLowerCase() === acc.email.toLowerCase() ? a.address : a.name || a.address)).join(', ')
   // every name in the head is a button (Alex, 29 Oct: "the right functions when you click on the addresses, and save it"):
   // write to them, copy the address, keep them in Contacts or open their card, all mail with them, block
   const personMenu = async (e: ReactMouseEvent, a: Address) => {
@@ -236,7 +236,7 @@ function MessageCard({ id, accounts, prefs, isLast, onLoaded, onFold, onCompose,
   }
   const chips = (list: Address[]) => list.map((a, i) => (
     <span key={a.address + i}>{i > 0 && ', '}<button type="button" className="addr" title={a.address} onClick={(e) => personMenu(e, a)} onContextMenu={(e) => personMenu(e, a)}>
-      {acc && a.address.toLowerCase() === acc.email.toLowerCase() ? t.me : a.name || a.address}</button></span>
+      {acc && a.address.toLowerCase() === acc.email.toLowerCase() ? a.address : a.name || a.address}</button></span>
   ))
 
   const toast = (text: string) => window.dispatchEvent(new CustomEvent('roarmail-toast', { detail: text }))

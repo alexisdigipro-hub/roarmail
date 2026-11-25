@@ -897,6 +897,11 @@ export default function App() {
               <button className={`tool small ${scope.person ? 'on-filter' : ''}`} disabled={!scope.person && !current}
                 title={scope.person ? `${t.fl_personOff}` : current ? `${t.fl_person} ${current.fromName || current.fromEmail}` : t.fl_personHint}
                 onClick={() => setScope((s) => ({ ...s, person: s.person ? undefined : current?.fromEmail }))}><Icon name="target" size={15} /></button>
+              {/* Select All in every folder (Alex, 25 Nov 2026: "a button to pick all the mails and delete them"); again: none */}
+              <span className="sep" />
+              <button className={`tool small ${list.length > 1 && chosen.length === list.length ? 'on-filter' : ''}`} disabled={list.length < 2}
+                title={list.length > 1 && chosen.length === list.length ? t.selNone : `${t.selAll} (⌘A)`}
+                onClick={() => setSelected(list.length > 1 && chosen.length === list.length ? (current ? [keyOf(current)] : []) : list.map(keyOf))}><Icon name="check" size={15} /></button>
               {/* several picked (Alex, 29 Oct): Delete right in the bar */}
               {chosen.length > 1 && (<>
                 <span className="sep" />
