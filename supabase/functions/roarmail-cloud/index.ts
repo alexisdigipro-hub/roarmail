@@ -7,6 +7,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4'
 import { ImapFlow } from 'npm:imapflow@2.5.8'
 import PostalMime from 'npm:postal-mime@2.4.4'
+import nodemailer from 'npm:nodemailer@6.9.16'
+import MailComposer from 'npm:nodemailer@6.9.16/lib/mail-composer/index.js'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -61,8 +63,8 @@ const say = (e: any) => authFail(e) ? 'The mail server did not take the password
   : /timeout|ETIMEDOUT/i.test(String(e?.code || e?.message)) ? 'The mail server took too long to answer.'
   : String(e?.responseText || e?.message || e).slice(0, 200)
 
-/** an account of this person, connected: its client, closed by the caller */
-async function open(user: string, account: string) {
+/** an account's settings and what signs it in (a password, or a fresh Microsoft access token) */
+async function creds(user: string, account: string) {
   const { data: row } = await sb.from('roarmail_cloud').select('cfg, email').eq('user_id', user).eq('account_id', account).maybeSingle()
   if (!row) throw Object.assign(new Error('not connected'), { missing: true })
   const { data: secret } = await sb.rpc('roarmail_cloud_secret', { p_user: user, p_account: account })
@@ -74,6 +76,12 @@ async function open(user: string, account: string) {
     if (t.refresh !== secret) await sb.rpc('roarmail_cloud_put', { p_user: user, p_account: account, p_email: row.email, p_cfg: cfg, p_secret: t.refresh })
     cred = { access: t.access }
   }
+  return { cfg, cred, email: row.email as string }
+}
+
+/** an account of this person, connected: its client, closed by the caller */
+async function open(user: string, account: string) {
+  const { cfg, cred } = await creds(user, account)
   const c = client(cfg, cred)
   try { await c.connect() } catch (e) {
     if (authFail(e)) await sb.rpc('roarmail_cloud_mark', { p_user: user, p_account: account, p_status: 'auth', p_error: say(e) })
@@ -109,15 +117,15 @@ function walk(node: any, acc = { text: null as any, html: null as any, files: 0 
 }
 const who = (a: any) => a ? { name: a.name || '', address: a.address || '' } : null
 
-async function listOne(c: any, account: string, path: string, limit: number, page = 0, unseen = false) {
+async function listOne(c: any, account: string, path: string, limit: number, page = 0, crit: any = null) {
   const box = await c.mailboxOpen(path, { readOnly: true })
   let total = box.exists || 0
   if (!total) return { total: 0, items: [] }
   const rows: any[] = []
   const what = { uid: true, flags: true, envelope: true, internalDate: true, size: true, bodyStructure: true }
-  if (unseen) {
-    // only the unread (the Unread folder across the accounts): the newest first, a page at a time
-    const uids: number[] = ((await c.search({ seen: false }, { uid: true })) || []).sort((a: number, b: number) => b - a)
+  if (crit) {
+    // a search (the unread, one day, one sender): the newest first, a page at a time
+    const uids: number[] = ((await c.search(crit, { uid: true })) || []).sort((a: number, b: number) => b - a)
     total = uids.length
     const part = uids.slice(limit * page, limit * (page + 1))
     if (!part.length) return { total, items: [] }
@@ -192,6 +200,99 @@ async function fileOf(c: any, path: string, uid: number, i: number) {
   return a
 }
 
+// ---- writing -----------------------------------------------------------------------------------------------------------
+const addr = (l: any) => (Array.isArray(l) ? l : []).slice(0, 100).map((a: any) => ({ name: str(a?.name, 200), address: str(a?.address, 320).trim() }))
+  .filter((a: any) => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(a.address))
+const FOREIGN_SENT = /(^|\.)(gmail\.com|googlemail\.com|office365\.com|outlook\.com|hotmail\.com|live\.com)$/
+
+/** a new mail, a reply or a forward: sent through the account's own SMTP (465; Supabase closes 25 and 587), then kept in Sent */
+async function sendMail(user: string, b: any) {
+  const account = str(b.account, 80)
+  const { cfg, cred, email } = await creds(user, account)
+  const to = addr(b.to), cc = addr(b.cc), bcc = addr(b.bcc)
+  if (!to.length && !cc.length && !bcc.length) throw new Error('Add who it goes to.')
+  const files = (Array.isArray(b.files) ? b.files : []).slice(0, 10)
+  let total = 0
+  const attachments = files.map((x: any) => {
+    const content = Uint8Array.from(atob(String(x.b64 || '')), (ch) => ch.charCodeAt(0))
+    total += content.byteLength
+    return { filename: str(x.name, 200) || 'file', contentType: str(x.mime, 120) || 'application/octet-stream', content }
+  })
+  // a forward carries the original mail's files with it
+  if (b.forwardOf?.account && b.forwardOf?.path && b.forwardOf?.uid) {
+    const c = await open(user, str(b.forwardOf.account, 80))
+    try {
+      await c.mailboxOpen(str(b.forwardOf.path, 500), { readOnly: true })
+      const m = await c.fetchOne(String(Number(b.forwardOf.uid)), { uid: true, source: true }, { uid: true })
+      if (m) for (const a of (await PostalMime.parse(m.source)).attachments || []) {
+        const content = new Uint8Array(a.content)
+        total += content.byteLength
+        attachments.push({ filename: a.filename || 'attachment', contentType: a.mimeType || 'application/octet-stream', content, cid: a.contentId ? String(a.contentId).replace(/^<|>$/g, '') : undefined })
+      }
+    } finally { await close(c) }
+  }
+  if (total > 18e6) throw new Error('The files are too big together (18 MB at most).')
+  const fromName = str(b.fromName, 200)
+  const msg: any = {
+    from: fromName ? { name: fromName, address: email } : email, to, cc, bcc, subject: str(b.subject, 900),
+    text: String(b.text || '').slice(0, 500000), html: b.html ? String(b.html).slice(0, 2e6) : undefined, attachments,
+    inReplyTo: str(b.inReplyTo, 900) || undefined, references: str(b.references, 4000) || undefined,
+  }
+  const raw: Uint8Array = await new Promise((ok, no) => new MailComposer(msg).compile().build((e: any, m: any) => e ? no(e) : ok(m)))
+  const host = cfg.smtp_host || cfg.imap_host.replace(/^imap\./, 'smtp.')
+  const port = cfg.smtp_port === 587 || cfg.smtp_port === 25 ? 465 : (cfg.smtp_port || 465)
+  const t = nodemailer.createTransport({
+    host, port, secure: port === 465, requireTLS: port !== 465, connectionTimeout: 15e3, greetingTimeout: 12e3, socketTimeout: 60e3,
+    auth: cred.access ? { type: 'OAuth2', user: cfg.username, accessToken: cred.access } : { user: cfg.username, pass: cred.pass },
+    tls: { servername: host },
+  } as any)
+  try {
+    await t.sendMail({ envelope: { from: email, to: [...to, ...cc, ...bcc].map((a: any) => a.address) }, raw })
+  } catch (e: any) {
+    const m = String(e?.message || e)
+    if (/ETIMEDOUT|ECONNREFUSED|timeout/i.test(m)) throw new Error(`The cloud cannot reach ${host} to send (port ${port}). Send this one from RoarMail on the computer.`)
+    throw new Error(authFail(e) ? 'The mail server did not take the password for sending.' : m.slice(0, 200))
+  }
+  // Gmail and Outlook keep their own copy in Sent; every other server is given one
+  let kept = false
+  if (b.sent && !FOREIGN_SENT.test(host)) {
+    const c = client(cfg, cred)
+    try { await c.connect(); await c.append(str(b.sent, 500), raw, ['\\Seen']); kept = true } catch { /* sent all the same */ } finally { await close(c) }
+  }
+  // the mail it answers is marked answered
+  if (b.replyOf?.path && b.replyOf?.uid) {
+    const c = client(cfg, cred)
+    try { await c.connect(); await c.mailboxOpen(str(b.replyOf.path, 500)); await c.messageFlagsAdd(String(Number(b.replyOf.uid)), ['\\Answered'], { uid: true }) } catch { /* a nicety */ } finally { await close(c) }
+  }
+  return { ok: true, kept }
+}
+
+/** Block Sender: the address (and the name) into RoarMail's own block list, which the computers take in, and the mail to Junk */
+const foldName = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ς/g, 'σ').replace(/["'`«»“”‘’]/g, '').replace(/\s+/g, ' ').trim()
+async function blockSender(user: string, b: any) {
+  const email = str(b.email, 320).trim().toLowerCase(), name = str(b.name, 200).trim()
+  if (!/@/.test(email)) throw new Error('No sender to block.')
+  const { data: row } = await sb.from('roarmail_sync').select('data').eq('user_id', user).maybeSingle()
+  if (row?.data?.tables) {
+    const T = row.data.tables
+    T.contacts = Array.isArray(T.contacts) ? T.contacts : []
+    const c = T.contacts.find((x: any) => String(x.email || '').toLowerCase() === email)
+    if (c) c.blocked = 1; else T.contacts.push({ email, name: name || null, blocked: 1, use_count: 0, vip: 0, images_allowed: 0 })
+    const key = foldName(name)
+    if (key.length >= 3 && !/@/.test(key)) {
+      T.block_rules = Array.isArray(T.block_rules) ? T.block_rules : []
+      if (!T.block_rules.some((r: any) => r.kind === 'name' && r.value === key)) T.block_rules.push({ kind: 'name', value: key, label: name })
+    }
+    await sb.from('roarmail_sync').update({ data: row.data, device: 'roarme', updated_at: new Date().toISOString() }).eq('user_id', user)
+  }
+  const account = str(b.account, 80), path = str(b.path, 500), uid = Number(b.uid), junk = str(b.junk, 500)
+  if (account && path && uid && junk && junk !== path) {
+    const c = await open(user, account)
+    try { await c.mailboxOpen(path); await c.messageMove(String(uid), junk, { uid: true }) } finally { await close(c) }
+  }
+  return { ok: true }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return reply({ error: 'POST only' }, 405)
@@ -231,6 +332,14 @@ Deno.serve(async (req) => {
       const by = new Map<string, typeof items>()
       for (const it of items) by.set(it.account, [...(by.get(it.account) || []), it])
       const out: any = { counts: {}, items: [], totals: {}, errors: {} }
+      // what to look for: the unread, mail of one day (on: 'YYYY-MM-DD'), one sender (from), words (text)
+      const f = b.find || {}
+      let crit: any = null
+      if (b.unseen === true || f.unseen) crit = { ...(crit || {}), seen: false }
+      if (f.flagged) crit = { ...(crit || {}), flagged: true }
+      if (f.from) crit = { ...(crit || {}), from: str(f.from, 320) }
+      if (f.text) crit = { ...(crit || {}), text: str(f.text, 200) }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(f.on || ''))) crit = { ...(crit || {}), on: new Date(String(f.on) + 'T12:00:00Z') }
       await Promise.all([...by.entries()].map(async ([account, list]) => {
         let c: any
         try {
@@ -240,7 +349,7 @@ Deno.serve(async (req) => {
               const s = await c.status(it.path, { unseen: true, messages: true })
               out.counts[`${account}|${it.path}`] = { unseen: s.unseen || 0, messages: s.messages || 0 }
             } else {
-              const r = await listOne(c, account, it.path, limit, Math.max(0, Number(b.page) || 0), b.unseen === true)
+              const r = await listOne(c, account, it.path, limit, Math.max(0, Number(b.page) || 0), crit)
               out.totals[`${account}|${it.path}`] = r.total
               out.items.push(...r.items)
             }
@@ -272,6 +381,19 @@ Deno.serve(async (req) => {
         return reply({ ok: true })
       } finally { await close(c) }
     }
+    if (act === 'empty') {
+      // Empty Trash (or Junk): everything in that one folder, for good
+      const account = str(b.account, 80), path = str(b.path, 500)
+      if (!account || !path) return reply({ error: 'Missing folder' }, 400)
+      const c = await open(user, account)
+      try {
+        const box = await c.mailboxOpen(path)
+        if (box.exists) await c.messageDelete('1:*')
+        return reply({ ok: true, gone: box.exists || 0 })
+      } finally { await close(c) }
+    }
+    if (act === 'send') return reply(await sendMail(user, b))
+    if (act === 'block') return reply(await blockSender(user, b))
     return reply({ error: 'Unknown action' }, 400)
   } catch (e: any) {
     if (e?.missing) return reply({ error: 'missing' }, 404)
