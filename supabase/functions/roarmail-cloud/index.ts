@@ -293,6 +293,42 @@ async function blockSender(user: string, b: any) {
   return { ok: true }
 }
 
+/** Block everyone at a domain, never a mailbox provider like gmail.com (as RoarMail's shield.ts blockableDomain) */
+const PERSONAL = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'yahoo.com', 'yahoo.gr', 'ymail.com',
+  'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net', 'zoho.com', 'yandex.com', 'otenet.gr', 'hol.gr', 'windowslive.com'])
+const baseDomain = (host: string) => { const p = host.split('.').filter(Boolean); if (p.length <= 2) return p.join('.'); const second = ['co', 'com', 'org', 'net', 'gov', 'ac', 'edu', 'gr'].includes(p[p.length - 2]) && p[p.length - 1].length === 2; return p.slice(second ? -3 : -2).join('.') }
+const blockableDomain = (d: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) && !PERSONAL.has(d) && !PERSONAL.has(baseDomain(d))
+async function editRules(user: string, fn: (T: any) => void) {
+  const { data: row } = await sb.from('roarmail_sync').select('data').eq('user_id', user).maybeSingle()
+  if (!row?.data?.tables) throw new Error('RoarMail has not synced its settings yet.')
+  const T = row.data.tables
+  T.contacts = Array.isArray(T.contacts) ? T.contacts : []
+  T.block_rules = Array.isArray(T.block_rules) ? T.block_rules : []
+  fn(T)
+  await sb.from('roarmail_sync').update({ data: row.data, device: 'roarme', updated_at: new Date().toISOString() }).eq('user_id', user)
+}
+async function blockDomain(user: string, b: any) {
+  const d = str(b.domain, 253).toLowerCase().trim().replace(/^@/, '')
+  if (!blockableDomain(d)) throw new Error('Many people use this domain (like gmail.com): it cannot be blocked as a whole.')
+  await editRules(user, (T) => { if (!T.block_rules.some((r: any) => r.kind === 'domain' && r.value === d)) T.block_rules.push({ kind: 'domain', value: d, label: d }) })
+  const account = str(b.account, 80), path = str(b.path, 500), uid = Number(b.uid), junk = str(b.junk, 500)
+  if (account && path && uid && junk && junk !== path) {
+    const c = await open(user, account)
+    try { await c.mailboxOpen(path); await c.messageMove(String(uid), junk, { uid: true }) } finally { await close(c) }
+  }
+  return { ok: true }
+}
+/** Unblock (Settings, or Not Junk): an address, a name or a domain */
+async function unblock(user: string, b: any) {
+  const kind = str(b.kind, 20), value = str(b.value, 320).trim()
+  if (!['email', 'name', 'domain', 'brand'].includes(kind) || !value) throw new Error('Nothing to unblock.')
+  await editRules(user, (T) => {
+    if (kind === 'email') { for (const c of T.contacts) if (String(c.email || '').toLowerCase() === value.toLowerCase()) c.blocked = 0 }
+    else T.block_rules = T.block_rules.filter((r: any) => !(r.kind === kind && r.value === value))
+  })
+  return { ok: true }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return reply({ error: 'POST only' }, 405)
@@ -394,6 +430,8 @@ Deno.serve(async (req) => {
     }
     if (act === 'send') return reply(await sendMail(user, b))
     if (act === 'block') return reply(await blockSender(user, b))
+    if (act === 'blockDomain') return reply(await blockDomain(user, b))
+    if (act === 'unblock') return reply(await unblock(user, b))
     return reply({ error: 'Unknown action' }, 400)
   } catch (e: any) {
     if (e?.missing) return reply({ error: 'missing' }, 404)
