@@ -97,3 +97,18 @@ drop policy if exists roarmail_cloud_asks_own on public.roarmail_cloud_asks;
 create policy roarmail_cloud_asks_own on public.roarmail_cloud_asks for all to authenticated
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 grant select, insert, update, delete on public.roarmail_cloud_asks to authenticated;
+
+-- Blocks made in RoarMe by someone without RoarMail on a computer (no roarmail_sync row), 25 Nov 2026: the addresses,
+-- names and domains, written only by roarmail-cloud, read by their owner. Safe to run again.
+create table if not exists public.roarmail_cloud_blocks (
+  user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  emails text[] not null default '{}',
+  names jsonb not null default '[]',
+  domains text[] not null default '{}',
+  updated_at timestamptz not null default now()
+);
+alter table public.roarmail_cloud_blocks enable row level security;
+drop policy if exists roarmail_cloud_blocks_read on public.roarmail_cloud_blocks;
+create policy roarmail_cloud_blocks_read on public.roarmail_cloud_blocks for select to authenticated using (user_id = auth.uid());
+revoke all on public.roarmail_cloud_blocks from anon, authenticated;
+grant select on public.roarmail_cloud_blocks to authenticated;
