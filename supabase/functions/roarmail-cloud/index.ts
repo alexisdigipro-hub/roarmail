@@ -58,7 +58,7 @@ function client(cfg: Cfg, cred: { pass?: string; access?: string }) {
   return c
 }
 const authFail = (e: any) => !!(e?.authenticationFailed || e?.auth || /auth|login|credentials|invalid/i.test(String(e?.responseText || e?.message || '')))
-const say = (e: any) => authFail(e) ? 'The mail server did not take the password. Send this account to RoarMe again from RoarMail.'
+const say = (e: any) => authFail(e) ? 'The mail server did not take the password. Add this account again in RoarMe (or send it again from RoarMail).'
   : /ENOTFOUND|getaddrinfo|dns/i.test(String(e?.code || e?.message)) ? 'The mail server could not be found.'
   : /timeout|ETIMEDOUT/i.test(String(e?.code || e?.message)) ? 'The mail server took too long to answer.'
   : String(e?.responseText || e?.message || e).slice(0, 200)
@@ -269,6 +269,23 @@ async function sendMail(user: string, b: any) {
 
 /** Block Sender: the address (and the name) into RoarMail's own block list, which the computers take in, and the mail to Junk */
 const foldName = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ς/g, 'σ').replace(/["'`«»“”‘’]/g, '').replace(/\s+/g, ' ').trim()
+// someone without RoarMail on a computer (no roarmail_sync row) keeps the blocks made in RoarMe in roarmail_cloud_blocks,
+// shaped here as RoarMail's own tables so the same edits work on both (25 Nov 2026, ROARMAIL open to everyone)
+async function rmTables(user: string) {
+  const { data } = await sb.from('roarmail_cloud_blocks').select('emails, names, domains').eq('user_id', user).maybeSingle()
+  return {
+    contacts: (data?.emails || []).map((email: string) => ({ email, blocked: 1 })),
+    block_rules: [...(data?.names || []).map((n: any) => ({ kind: 'name', value: n.value, label: n.label || n.value })), ...(data?.domains || []).map((d: string) => ({ kind: 'domain', value: d, label: d }))],
+  }
+}
+async function rmSave(user: string, T: any) {
+  await sb.from('roarmail_cloud_blocks').upsert({
+    user_id: user, updated_at: new Date().toISOString(),
+    emails: [...new Set((T.contacts || []).filter((c: any) => c.blocked).map((c: any) => String(c.email).toLowerCase()))].slice(0, 5000),
+    names: (T.block_rules || []).filter((r: any) => r.kind === 'name').map((r: any) => ({ value: r.value, label: r.label })).slice(0, 2000),
+    domains: (T.block_rules || []).filter((r: any) => r.kind === 'domain').map((r: any) => r.value).slice(0, 2000),
+  })
+}
 async function blockSender(user: string, b: any) {
   const email = str(b.email, 320).trim().toLowerCase(), name = str(b.name, 200).trim()
   if (!/@/.test(email)) throw new Error('No sender to block.')
@@ -284,6 +301,12 @@ async function blockSender(user: string, b: any) {
       if (!T.block_rules.some((r: any) => r.kind === 'name' && r.value === key)) T.block_rules.push({ kind: 'name', value: key, label: name })
     }
     await sb.from('roarmail_sync').update({ data: row.data, device: 'roarme', updated_at: new Date().toISOString() }).eq('user_id', user)
+  } else {
+    const T = await rmTables(user)
+    if (!T.contacts.some((c: any) => c.email === email)) T.contacts.push({ email, blocked: 1 })
+    const key = foldName(name)
+    if (key.length >= 3 && !/@/.test(key) && !T.block_rules.some((r: any) => r.kind === 'name' && r.value === key)) T.block_rules.push({ kind: 'name', value: key, label: name })
+    await rmSave(user, T)
   }
   const account = str(b.account, 80), path = str(b.path, 500), uid = Number(b.uid), junk = str(b.junk, 500)
   if (account && path && uid && junk && junk !== path) {
@@ -300,7 +323,7 @@ const baseDomain = (host: string) => { const p = host.split('.').filter(Boolean)
 const blockableDomain = (d: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) && !PERSONAL.has(d) && !PERSONAL.has(baseDomain(d))
 async function editRules(user: string, fn: (T: any) => void) {
   const { data: row } = await sb.from('roarmail_sync').select('data').eq('user_id', user).maybeSingle()
-  if (!row?.data?.tables) throw new Error('RoarMail has not synced its settings yet.')
+  if (!row?.data?.tables) { const T = await rmTables(user); fn(T); await rmSave(user, T); return }
   const T = row.data.tables
   T.contacts = Array.isArray(T.contacts) ? T.contacts : []
   T.block_rules = Array.isArray(T.block_rules) ? T.block_rules : []
