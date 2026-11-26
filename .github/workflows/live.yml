@@ -1,6 +1,6 @@
 # RoarMail Live: the always-on mail engine for RoarMe, on Cloudflare (live/). Run by hand.
 # Needs the repository secret CLOUDFLARE_API_TOKEN (Workers + Containers edit). live_key, when given, is set as the
-# Worker's LIVE_KEY secret (the same value as the Edge Function roarmail-creds' LIVE_KEY); leave it empty to keep it.
+# Worker's LIVE_KEY secret (the same value as Vault's roarmail_live_key, read by roarmail-creds); leave it empty to keep it.
 name: RoarMail Live
 on:
   workflow_dispatch:

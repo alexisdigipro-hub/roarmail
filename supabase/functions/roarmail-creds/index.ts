@@ -9,8 +9,15 @@ const MS_CLIENT = '1449effc-2b8b-443b-9523-e2f84dd6b677'
 const MS_SCOPE = 'offline_access openid email profile https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send'
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
+// the shared key lives in Supabase Vault (roarmail_live_key, supabase/roarmail-live.sql), read once per instance
+let liveKey = ''
+async function getKey() {
+  if (!liveKey) { const { data } = await sb.rpc('roarmail_live_key'); liveKey = String(data || '') }
+  return liveKey
+}
+
 Deno.serve(async (req) => {
-  const key = Deno.env.get('LIVE_KEY') || ''
+  const key = await getKey()
   if (!key || req.headers.get('x-live-key') !== key) return reply({ error: 'No' }, 401)
   let b: any = {}
   try { b = await req.json() } catch { return reply({ error: 'Bad request' }, 400) }
