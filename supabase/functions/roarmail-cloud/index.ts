@@ -125,7 +125,7 @@ async function listOne(c: any, account: string, path: string, limit: number, pag
   const what = { uid: true, flags: true, envelope: true, internalDate: true, size: true, bodyStructure: true }
   if (crit) {
     // a search (the unread, one day, one sender): the newest first, a page at a time
-    const uids: number[] = ((await c.search(crit, { uid: true })) || []).sort((a: number, b: number) => b - a)
+    const uids: number[] = ((await c.search({ ...crit, deleted: false }, { uid: true })) || []).sort((a: number, b: number) => b - a)
     total = uids.length
     const part = uids.slice(limit * page, limit * (page + 1))
     if (!part.length) return { total, items: [] }
@@ -135,8 +135,10 @@ async function listOne(c: any, account: string, path: string, limit: number, pag
     if (top < 1) return { total, items: [] }
     for await (const m of c.fetch(`${Math.max(1, top - limit + 1)}:${top}`, what)) rows.push(m)
   }
-  rows.sort((a, b) => b.uid - a.uid)
-  const take = rows.slice(0, limit)
+  // a mail deleted elsewhere (Apple Mail, Outlook) but not yet expunged carries \Deleted: it is gone for the person
+  // (Alex, 26 Nov: "in Apple Mail they are gone, here they are still there"); newest first by when it arrived
+  const arrived = (m: any) => new Date(m.internalDate || m.envelope?.date || 0).getTime()
+  const take = rows.filter((m) => !m.flags?.has('\\Deleted')).sort((a, b) => arrived(b) - arrived(a) || b.uid - a.uid).slice(0, limit)
   // a few lines of each, from the first text part (at most 2 KB of it)
   const want = new Map<number, any>()
   for (const m of take) { const w = walk(m.bodyStructure); const p = w.text || w.html; if (p && (p.size || 0) < 400000) want.set(m.uid, p); m._files = w.files }
@@ -155,7 +157,7 @@ async function listOne(c: any, account: string, path: string, limit: number, pag
   return {
     total,
     items: take.map((m) => ({
-      account, path, uid: m.uid, date: (m.envelope?.date || m.internalDate || new Date()).toISOString?.() || String(m.internalDate),
+      account, path, uid: m.uid, date: new Date(m.internalDate || m.envelope?.date || Date.now()).toISOString(),
       from: who(m.envelope?.from?.[0]), to: (m.envelope?.to || []).slice(0, 4).map(who), subject: m.envelope?.subject || '',
       seen: m.flags?.has('\\Seen') || false, flagged: m.flags?.has('\\Flagged') || false, answered: m.flags?.has('\\Answered') || false,
       size: m.size || 0, files: m._files || 0, snippet: m._sn || '', msgid: m.envelope?.messageId || '',
