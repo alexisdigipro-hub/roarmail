@@ -9,7 +9,7 @@ import PostalMime from 'postal-mime'
 
 const SUPABASE_URL = process.env.SUPABASE_URL
 const LIVE_KEY = process.env.LIVE_KEY
-const IDLE_MS = 15 * 60e3
+const IDLE_MS = 40 * 60e3 // a connection stays open 40 minutes after its last use, kept alive by a NOOP every 9
 
 const str = (v, n = 300) => String(v ?? '').slice(0, n)
 const say = (e) => {
@@ -22,22 +22,32 @@ const say = (e) => {
 
 // ---- credentials, asked from RoarMe's own vault --------------------------------------------------------------------
 const credCache = new Map() // user|account -> { at, v }
+const credAsk = new Map() // user|account -> the ask in flight, shared by every call that needs it at the same moment
 const tokens = new Map() // user -> their newest RoarMe sign-in, which roarmail-creds checks too
 async function creds(user, account) {
   const k = `${user}|${account}`, had = credCache.get(k)
-  if (had && Date.now() - had.at < 20 * 60e3) return had.v
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/roarmail-creds`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-live-key': LIVE_KEY, Authorization: `Bearer ${tokens.get(user) || ''}` }, body: JSON.stringify({ user, account }),
-  })
-  const j = await r.json().catch(() => ({}))
-  if (r.status === 404 || j.error === 'missing') throw Object.assign(new Error('not connected'), { missing: true })
-  if (!r.ok) throw new Error(j.error || `creds ${r.status}`)
-  credCache.set(k, { at: Date.now(), v: j })
-  return j
+  // a password holds until the server refuses it; a Microsoft access token for 45 minutes
+  if (had && Date.now() - had.at < (had.v.access ? 45 * 60e3 : 12 * 3600e3)) return had.v
+  if (credAsk.has(k)) return credAsk.get(k)
+  const ask = (async () => {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/roarmail-creds`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-live-key': LIVE_KEY, Authorization: `Bearer ${tokens.get(user) || ''}` }, body: JSON.stringify({ user, account }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (r.status === 404 || j.error === 'missing') throw Object.assign(new Error('not connected'), { missing: true })
+    if (!r.ok) throw new Error(j.error || `creds ${r.status}`)
+    credCache.set(k, { at: Date.now(), v: j })
+    return j
+  })()
+  credAsk.set(k, ask)
+  try { return await ask } finally { credAsk.delete(k) }
 }
 
-// ---- one open connection per account, used one call at a time ------------------------------------------------------
-const pool = new Map() // user|account -> { c, at, chain }
+// ---- two open connections per account, each used one call at a time ----------------------------------------------
+// 'fg' carries what the person waits for (open a mail, a folder, delete, move); 'bg' the counts and the mail read ahead,
+// so those never stand in front of a tap (26 Nov: "still slow and heavy")
+const pool = new Map() // user|account|lane -> { c, at, chain }
+const opening = new Map() // user|account|lane -> the connection being made, shared
 function client(cfg, cred) {
   const c = new ImapFlow({
     host: cfg.imap_host, port: cfg.imap_port, secure: cfg.imap_tls === 'tls', doSTARTTLS: cfg.imap_tls === 'starttls' ? true : undefined,
@@ -47,29 +57,39 @@ function client(cfg, cred) {
   c.on('error', () => {})
   return c
 }
-async function conn(user, account) {
-  const k = `${user}|${account}`
+async function conn(user, account, lane) {
+  const k = `${user}|${account}|${lane}`
   let p = pool.get(k)
   if (p && p.c.usable) { p.at = Date.now(); return p }
-  if (p) { try { p.c.close() } catch { /* gone */ } }
-  const { cfg, pass, access } = await creds(user, account)
-  const c = client(cfg, { pass, access })
-  await c.connect()
-  p = { c, at: Date.now(), chain: Promise.resolve() }
-  c.on('close', () => { if (pool.get(k) === p) pool.delete(k) })
-  pool.set(k, p)
-  return p
+  if (opening.has(k)) return opening.get(k)
+  if (p) { pool.delete(k); try { p.c.close() } catch { /* gone */ } }
+  const make = (async () => {
+    const { cfg, pass, access } = await creds(user, account)
+    const c = client(cfg, { pass, access })
+    await c.connect()
+    const np = { c, at: Date.now(), chain: Promise.resolve() }
+    c.on('close', () => { if (pool.get(k) === np) pool.delete(k) })
+    pool.set(k, np)
+    return np
+  })()
+  opening.set(k, make)
+  try { return await make } finally { opening.delete(k) }
 }
-// every call on one account waits for the one before it (a call selects its own folder), and a dropped connection is
+// a mailbox already open on this connection is not opened again, except to list it (that is when it must be fresh)
+async function openBox(c, path, fresh) {
+  if (!fresh && c.mailbox && c.mailbox.path === path && !c.mailbox.readOnly) return c.mailbox
+  return c.mailboxOpen(path)
+}
+// every call on one connection waits for the one before it (a call selects its own folder), and a dropped connection is
 // made again once
-async function withConn(user, account, fn) {
+async function withConn(user, account, fn, lane = 'fg') {
   const run = async (again) => {
-    const p = await conn(user, account)
+    const p = await conn(user, account, lane)
     const next = p.chain.then(() => fn(p.c))
     p.chain = next.catch(() => {})
     try { return await next } catch (e) {
       if (!again && (!p.c.usable || /closed|socket|ECONNRESET|EPIPE|Connection not available/i.test(String(e?.message || e)))) {
-        pool.delete(`${user}|${account}`); try { p.c.close() } catch { /* gone */ }
+        pool.delete(`${user}|${account}|${lane}`); try { p.c.close() } catch { /* gone */ }
         return run(true)
       }
       if (e?.authenticationFailed) credCache.delete(`${user}|${account}`)
@@ -78,6 +98,10 @@ async function withConn(user, account, fn) {
   }
   return run(false)
 }
+// mail servers drop a connection that says nothing for about half an hour: a NOOP in its own turn keeps it
+setInterval(() => {
+  for (const p of pool.values()) if (p.c.usable) p.chain = p.chain.then(() => p.c.noop()).catch(() => {})
+}, 9 * 60e3).unref()
 setInterval(() => {
   for (const [k, p] of pool) if (Date.now() - p.at > IDLE_MS) { pool.delete(k); p.c.logout().catch(() => { try { p.c.close() } catch { /* gone */ } }) }
 }, 60e3).unref()
@@ -107,7 +131,7 @@ function walk(node, acc = { text: null, html: null, files: 0 }) {
 const who = (a) => a ? { name: a.name || '', address: a.address || '' } : null
 
 async function listOne(c, account, path, limit, page = 0, crit = null) {
-  const box = await c.mailboxOpen(path, { readOnly: true })
+  const box = await openBox(c, path, true)
   let total = box.exists || 0
   if (!total) return { total: 0, items: [] }
   const rows = []
@@ -150,7 +174,7 @@ async function listOne(c, account, path, limit, page = 0, crit = null) {
 }
 
 async function getOne(c, path, uid, markSeen) {
-  await c.mailboxOpen(path, { readOnly: !markSeen })
+  await openBox(c, path)
   const m = await c.fetchOne(String(uid), { uid: true, source: true, flags: true, size: true }, { uid: true })
   if (!m) throw new Error('This mail is not there any more.')
   if ((m.size || 0) > 25e6) throw new Error('This mail is too big to open here.')
@@ -174,7 +198,7 @@ async function getOne(c, path, uid, markSeen) {
   }
 }
 async function fileOf(c, path, uid, i) {
-  await c.mailboxOpen(path, { readOnly: true })
+  await openBox(c, path)
   const m = await c.fetchOne(String(uid), { uid: true, source: true }, { uid: true })
   if (!m) throw new Error('This mail is not there any more.')
   const a = ((await PostalMime.parse(m.source)).attachments || [])[i]
@@ -185,6 +209,7 @@ async function fileOf(c, path, uid, i) {
 // ---- the actions ----------------------------------------------------------------------------------------------------
 async function handle(user, b) {
   const act = String(b.action || '')
+  const lane = b.bg || act === 'counts' ? 'bg' : 'fg'
   if (act === 'counts' || act === 'list') {
     const items = (Array.isArray(b.items) ? b.items : []).slice(0, 60).map((x) => ({ account: str(x.account, 80), path: str(x.path, 500) })).filter((x) => x.account && x.path)
     const limit = Math.min(60, Math.max(5, Number(b.limit) || 30))
@@ -211,7 +236,7 @@ async function handle(user, b) {
               out.items.push(...r.items)
             }
           }
-        })
+        }, lane)
       } catch (e) { out.errors[account] = e?.missing ? 'missing' : say(e) }
     }))
     out.items.sort((x, y) => String(y.date).localeCompare(String(x.date)))
@@ -219,7 +244,7 @@ async function handle(user, b) {
   }
   const account = str(b.account, 80), path = str(b.path, 500)
   if (!account || !path) return { status: 400, body: { error: 'Missing mail' } }
-  if (act === 'get') return { body: await withConn(user, account, (c) => getOne(c, path, Number(b.uid), b.seen !== false)) }
+  if (act === 'get') return { body: await withConn(user, account, (c) => getOne(c, path, Number(b.uid), b.seen !== false), lane) }
   if (act === 'file') {
     const a = await withConn(user, account, (c) => fileOf(c, path, Number(b.uid), Number(b.i) || 0))
     return { raw: Buffer.from(a.content), type: a.mimeType || 'application/octet-stream', name: a.filename || 'attachment' }
@@ -227,7 +252,7 @@ async function handle(user, b) {
   if (act === 'flag' || act === 'move' || act === 'delete') {
     const uid = String(Number(b.uid))
     await withConn(user, account, async (c) => {
-      await c.mailboxOpen(path)
+      await openBox(c, path)
       if (act === 'flag') {
         const f = b.flag === 'flagged' ? '\\Flagged' : '\\Seen'
         if (b.on) await c.messageFlagsAdd(uid, [f], { uid: true }); else await c.messageFlagsRemove(uid, [f], { uid: true })
@@ -241,7 +266,7 @@ async function handle(user, b) {
     const uids = (Array.isArray(b.uids) ? b.uids : []).map(Number).filter((n) => n > 0).slice(0, 5000)
     if (!uids.length) return { status: 400, body: { error: 'Missing mail' } }
     await withConn(user, account, async (c) => {
-      await c.mailboxOpen(path)
+      await openBox(c, path)
       for (let i = 0; i < uids.length; i += 400) {
         const set = uids.slice(i, i + 400).join(',')
         if (op === 'flag') { const f = b.flag === 'flagged' ? '\\Flagged' : '\\Seen'; if (b.on) await c.messageFlagsAdd(set, [f], { uid: true }); else await c.messageFlagsRemove(set, [f], { uid: true }) }
