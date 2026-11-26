@@ -31,7 +31,7 @@ async function creds(user, account) {
   if (credAsk.has(k)) return credAsk.get(k)
   const ask = (async () => {
     const r = await fetch(`${SUPABASE_URL}/functions/v1/roarmail-creds`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-live-key': LIVE_KEY, Authorization: `Bearer ${tokens.get(user) || ''}` }, body: JSON.stringify({ user, account }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-live-key': LIVE_KEY, Authorization: `Bearer ${tokens.get(user) || ''}` }, body: JSON.stringify({ user, account, watch: true }),
     })
     const j = await r.json().catch(() => ({}))
     if (r.status === 404 || j.error === 'missing') throw Object.assign(new Error('not connected'), { missing: true })
@@ -48,11 +48,11 @@ async function creds(user, account) {
 // so those never stand in front of a tap (26 Nov: "still slow and heavy")
 const pool = new Map() // user|account|lane -> { c, at, chain }
 const opening = new Map() // user|account|lane -> the connection being made, shared
-function client(cfg, cred) {
+function client(cfg, cred, extra = {}) {
   const c = new ImapFlow({
     host: cfg.imap_host, port: cfg.imap_port, secure: cfg.imap_tls === 'tls', doSTARTTLS: cfg.imap_tls === 'starttls' ? true : undefined,
     auth: cred.access ? { user: cfg.username, accessToken: cred.access } : { user: cfg.username, pass: cred.pass || '' },
-    logger: false, emitLogs: false, tls: { servername: cfg.imap_host }, connectionTimeout: 15e3, greetingTimeout: 12e3, socketTimeout: 120e3,
+    logger: false, emitLogs: false, tls: { servername: cfg.imap_host }, connectionTimeout: 15e3, greetingTimeout: 12e3, socketTimeout: 120e3, ...extra,
   })
   c.on('error', () => {})
   return c
@@ -289,9 +289,78 @@ async function handle(user, b) {
   return { status: 400, body: { error: 'Unknown action' } }
 }
 
+// ---- new mail, told at once (Alex, 26 Nov: "notifications as Spark's") ------------------------------------------------
+// The Worker's five-minute round (src/index.js scheduled) hands this container the person's watched accounts; each gets
+// its own connection resting in IDLE on the Inbox, so the mail server says the moment a mail lands. A new mail that is
+// not read already and not from a blocked sender goes to RoarMe's roar-push, which tells the person's devices.
+const watch = new Map() // user|account -> { c, last, validity, block, chain, user, account }
+const blockedBy = (w, from) => {
+  const a = String(from?.address || '').toLowerCase(); const d = a.split('@')[1] || ''
+  return !!a && (w.block.emails.includes(a) || (d && w.block.domains.some((x) => d === x || d.endsWith('.' + x))))
+}
+async function snippetOf(c, m) {
+  try {
+    const w = walk(m.bodyStructure); const p = w.text || w.html
+    if (!p || (p.size || 0) > 400000) return ''
+    const got = await c.fetchOne(String(m.uid), { uid: true, bodyParts: [p.part || '1'] }, { uid: true })
+    const raw = got?.bodyParts?.get(p.part || '1'); if (!raw) return ''
+    let t = decodePart(new Uint8Array(raw).slice(0, 4000), p.encoding, p.parameters?.charset)
+    if (String(p.type).toLowerCase() === 'text/html') t = stripHtml(t)
+    return squash(t).slice(0, 160)
+  } catch { return '' }
+}
+const saveSeen = (w) => fetch(`${SUPABASE_URL}/functions/v1/roarmail-creds`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-live-key': LIVE_KEY }, body: JSON.stringify({ seen: true, user: w.user, account: w.account, validity: w.validity, last: w.last }) }).catch(() => {})
+const tellPush = (mail) => fetch(`${SUPABASE_URL}/functions/v1/roar-push`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-live-key': LIVE_KEY }, body: JSON.stringify({ mail }) }).catch(() => {})
+async function checkNew(w) {
+  const c = w.c
+  if (!c?.usable) return
+  const from = w.last + 1
+  const news = []
+  for await (const m of c.fetch(`${from}:*`, { uid: true, flags: true, envelope: true, bodyStructure: true }, { uid: true })) if (m.uid > w.last) news.push(m)
+  if (!news.length) return
+  news.sort((a, b) => a.uid - b.uid)
+  w.last = news[news.length - 1].uid
+  saveSeen(w)
+  const fresh = news.filter((m) => !m.flags?.has('\\Seen') && !m.flags?.has('\\Deleted') && !blockedBy(w, m.envelope?.from?.[0]))
+  // a big batch (a server catching up) is told as its newest three
+  for (const m of fresh.slice(-3)) {
+    tellPush({ user: w.user, account: w.account, path: 'INBOX', uid: m.uid, from: who(m.envelope?.from?.[0]), subject: str(m.envelope?.subject || '', 200), snippet: await snippetOf(c, m) })
+  }
+}
+async function startWatch(user, a, block) {
+  const k = `${user}|${a.account}`
+  const had = watch.get(k)
+  if (had) { had.block = block; if (had.c?.usable || had.starting) return; watch.delete(k) }
+  const w = { user, account: a.account, last: Number(a.last) || 0, validity: Number(a.validity) || 0, block, chain: Promise.resolve(), starting: true, c: null }
+  watch.set(k, w)
+  try {
+    const { cfg, pass, access } = await creds(user, a.account)
+    // IDLE is restarted every four minutes (servers end it after about thirty), and the socket may stay quiet that long
+    const c = client(cfg, { pass, access }, { socketTimeout: 30 * 60e3, maxIdleTime: 4 * 60e3 })
+    await c.connect()
+    const box = await c.mailboxOpen('INBOX')
+    const v = Number(box.uidValidity || 0)
+    if (v !== w.validity || !w.last) { w.validity = v; w.last = Math.max(0, Number(box.uidNext || 1) - 1); saveSeen(w) }
+    w.c = c; w.starting = false
+    const run = () => { w.chain = w.chain.then(() => checkNew(w)).catch((e) => console.log('watch check', a.account, say(e))) }
+    c.on('exists', () => setTimeout(run, 300))
+    c.on('close', () => { if (watch.get(k) === w) watch.delete(k); setTimeout(() => startWatch(user, { account: w.account, last: w.last, validity: w.validity }, w.block).catch(() => {}), 30e3).unref?.() })
+    run() // mail that came while no one was listening
+  } catch (e) {
+    watch.delete(k)
+    console.log('watch start', a.account, say(e))
+  }
+}
+async function setWatch(user, accounts, block) {
+  const want = new Set(accounts.map((a) => `${user}|${a.account}`))
+  for (const [k, w] of watch) if (w.user === user && !want.has(k)) { watch.delete(k); try { w.c?.logout() } catch { /* gone */ } }
+  await Promise.all(accounts.map((a) => startWatch(user, a, block)))
+  return { watching: [...watch.values()].filter((w) => w.user === user && w.c?.usable).map((w) => w.account) }
+}
+
 http.createServer(async (req, res) => {
   const send = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
-  if (req.url === '/health') { res.writeHead(200); res.end(`ok ${pool.size}`); return }
+  if (req.url === '/health') { res.writeHead(200); res.end(`ok ${pool.size} ${watch.size}`); return }
   const user = String(req.headers['x-user'] || '')
   if (!user || req.headers['x-live-key'] !== LIVE_KEY) return send(401, { error: 'No' })
   if (req.headers['x-user-token']) tokens.set(user, String(req.headers['x-user-token']))
@@ -299,6 +368,11 @@ http.createServer(async (req, res) => {
   for await (const ch of req) { raw += ch; if (raw.length > 2e6) return send(413, { error: 'Too big' }) }
   let b = {}
   try { b = JSON.parse(raw || '{}') } catch { return send(400, { error: 'Bad request' }) }
+  if (req.url === '/watch') {
+    const accounts = (Array.isArray(b.accounts) ? b.accounts : []).slice(0, 20).map((x) => ({ account: str(x.account, 80), last: Number(x.last) || 0, validity: Number(x.validity) || 0 })).filter((x) => x.account)
+    const block = { emails: (b.block?.emails || []).map((x) => String(x).toLowerCase()).slice(0, 5000), domains: (b.block?.domains || []).map((x) => String(x).toLowerCase()).slice(0, 2000) }
+    try { return send(200, await setWatch(user, accounts, block)) } catch (e) { return send(502, { error: say(e) }) }
+  }
   try {
     const r = await handle(user, b)
     if (r.raw) { res.writeHead(200, { 'Content-Type': r.type, 'X-File-Name': encodeURIComponent(r.name) }); res.end(r.raw); return }

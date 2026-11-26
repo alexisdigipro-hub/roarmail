@@ -12,5 +12,6 @@
   ],
   "durable_objects": { "bindings": [{ "class_name": "MailBox", "name": "MAILBOX" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MailBox"] }],
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  "triggers": { "crons": ["*/5 * * * *"] }
 }

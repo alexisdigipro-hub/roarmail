@@ -21,10 +21,24 @@ Deno.serve(async (req) => {
   if (!key || req.headers.get('x-live-key') !== key) return reply({ error: 'No' }, 401)
   let b: any = {}
   try { b = await req.json() } catch { return reply({ error: 'Bad request' }, 400) }
+  // New-mail notifications (26 Nov, supabase/roarmail-watch.sql): the Worker's five-minute round asks who is watched,
+  // with their accounts, the last mail told about and their blocked senders
+  if (b.watchers === true) return reply(await watchers())
   const user = String(b.user || ''), account = String(b.account || '').slice(0, 80)
+  if (b.seen && /^[0-9a-f-]{36}$/i.test(user)) {
+    await sb.from('roarmail_watch_seen').upsert({ user_id: user, account_id: account, validity: Number(b.validity) || 0, last_uid: Number(b.last) || 0, updated_at: new Date().toISOString() })
+    return reply({ ok: true })
+  }
   const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
   const { data: au } = await sb.auth.getUser(token)
-  if (!user || au?.user?.id !== user) return reply({ error: 'Sign in first' }, 401)
+  // the watch reads an Inbox while the person is away, with no sign-in of theirs at hand: allowed only for someone who
+  // turned notifications on, for an account they did not keep quiet
+  let watching = false
+  if (b.watch === true && user && au?.user?.id !== user) {
+    const { data: w } = await sb.from('roarmail_watch').select('enabled, muted').eq('user_id', user).maybeSingle()
+    watching = !!w?.enabled && !(w.muted || []).includes(account)
+  }
+  if (!user || (au?.user?.id !== user && !watching)) return reply({ error: 'Sign in first' }, 401)
   const { data: row } = await sb.from('roarmail_cloud').select('cfg, email').eq('user_id', user).eq('account_id', account).maybeSingle()
   if (!row) return reply({ error: 'missing' }, 404)
   const { data: secret } = await sb.rpc('roarmail_cloud_secret', { p_user: user, p_account: account })
@@ -40,3 +54,34 @@ Deno.serve(async (req) => {
   if (j.refresh_token && j.refresh_token !== secret) await sb.rpc('roarmail_cloud_put', { p_user: user, p_account: account, p_email: row.email, p_cfg: cfg, p_secret: j.refresh_token })
   return reply({ cfg, email: row.email, access: j.access_token })
 })
+
+async function watchers() {
+  const { data: ws } = await sb.from('roarmail_watch').select('user_id, muted').eq('enabled', true)
+  if (!ws?.length) return { users: [] }
+  const ids = ws.map((w) => w.user_id)
+  const [{ data: accs }, { data: seen }, { data: cb }, { data: sy }] = await Promise.all([
+    sb.from('roarmail_cloud').select('user_id, account_id, email').in('user_id', ids),
+    sb.from('roarmail_watch_seen').select('user_id, account_id, validity, last_uid').in('user_id', ids),
+    sb.from('roarmail_cloud_blocks').select('user_id, emails, domains').in('user_id', ids),
+    sb.from('roarmail_sync').select('user_id, data').in('user_id', ids),
+  ])
+  return {
+    users: ws.map((w) => {
+      const emails = new Set<string>(), domains = new Set<string>()
+      for (const x of (cb || []).filter((r) => r.user_id === w.user_id)) { (x.emails || []).forEach((e: string) => emails.add(String(e).toLowerCase())); (x.domains || []).forEach((d: string) => domains.add(String(d).toLowerCase())) }
+      for (const x of (sy || []).filter((r) => r.user_id === w.user_id)) {
+        const t = (x.data as any)?.tables || {}
+        for (const c of t.contacts || []) if (c?.blocked && c.email) emails.add(String(c.email).toLowerCase())
+        for (const r of t.block_rules || []) if (r?.kind === 'domain' && r.value) domains.add(String(r.value).toLowerCase())
+      }
+      return {
+        user: w.user_id,
+        accounts: (accs || []).filter((a) => a.user_id === w.user_id && !(w.muted || []).includes(a.account_id)).map((a) => {
+          const s = (seen || []).find((x) => x.user_id === w.user_id && x.account_id === a.account_id)
+          return { account: a.account_id, validity: s?.validity || 0, last: s?.last_uid || 0 }
+        }),
+        block: { emails: [...emails], domains: [...domains] },
+      }
+    }).filter((u) => u.accounts.length),
+  }
+}
