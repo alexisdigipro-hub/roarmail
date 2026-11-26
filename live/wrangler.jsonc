@@ -1,0 +1,16 @@
+{
+  "name": "roarmail-live",
+  "main": "src/index.js",
+  "compatibility_date": "2025-11-01",
+  "workers_dev": true,
+  "vars": {
+    "SUPABASE_URL": "https://bzmjhbnwhdwmncxkqkdl.supabase.co",
+    "SUPABASE_KEY": "sb_publishable_7mQ3e0NH5lCmdoIKx2-FUA_EgCoXx9X"
+  },
+  "containers": [
+    { "class_name": "MailBox", "image": "./Dockerfile", "max_instances": 50, "instance_type": "basic" }
+  ],
+  "durable_objects": { "bindings": [{ "class_name": "MailBox", "name": "MAILBOX" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MailBox"] }],
+  "observability": { "enabled": true }
+}
