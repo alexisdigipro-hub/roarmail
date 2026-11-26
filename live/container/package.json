@@ -1,0 +1,1 @@
+{ "name": "roarmail-live-container", "private": true, "type": "module", "dependencies": { "imapflow": "2.5.8", "postal-mime": "2.4.4" } }

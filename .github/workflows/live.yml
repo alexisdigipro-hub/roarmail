@@ -1,0 +1,41 @@
+# RoarMail Live: the always-on mail engine for RoarMe, on Cloudflare (live/). Run by hand.
+# Needs the repository secret CLOUDFLARE_API_TOKEN (Workers + Containers edit). live_key, when given, is set as the
+# Worker's LIVE_KEY secret (the same value as Vault's roarmail_live_key, read by roarmail-creds); leave it empty to keep it.
+name: RoarMail Live
+on:
+  workflow_dispatch:
+    inputs:
+      live_key:
+        description: LIVE_KEY to set (empty keeps the one there)
+        required: false
+        default: ''
+concurrency: { group: roarmail-live, cancel-in-progress: false }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: live } }
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Hide the key
+        working-directory: .
+        run: |
+          KEY=$(jq -r '.inputs.live_key // ""' "$GITHUB_EVENT_PATH")
+          [ -n "$KEY" ] && echo "::add-mask::$KEY"
+          echo "LIVE_KEY_IN=$KEY" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+      - name: Deploy
+        run: npx wrangler deploy 2>&1 | tee deploy.log
+      - name: Set LIVE_KEY
+        if: env.LIVE_KEY_IN != ''
+        run: printf '%s' "$LIVE_KEY_IN" | npx wrangler secret put LIVE_KEY
+      - name: Check
+        run: |
+          URL=$(grep -o 'https://roarmail-live[^ ]*workers.dev' deploy.log | head -1)
+          echo "Live at: $URL"
+          sleep 5
+          curl -s -o /dev/null -w "health %{http_code}\n" "$URL/health"
+          curl -s -w " (%{http_code})\n" -X POST "$URL/" -H 'Content-Type: application/json' -d '{}'
