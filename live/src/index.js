@@ -25,6 +25,21 @@ async function who(env, token) {
 }
 
 export default {
+  // every five minutes: who has new-mail notifications on, and each of them gets their container woken and told which
+  // Inboxes to keep listening to (26 Nov); the call itself keeps the container from going to sleep
+  async scheduled(_ev, env, ctx) {
+    ctx.waitUntil((async () => {
+      const r = await fetch(`${env.SUPABASE_URL}/functions/v1/roarmail-creds`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-live-key': env.LIVE_KEY }, body: JSON.stringify({ watchers: true }) })
+      const j = await r.json().catch(() => ({}))
+      await Promise.all((j.users || []).map(async (u) => {
+        try {
+          const box = getContainer(env.MAILBOX, u.user)
+          const got = await box.fetch(new Request('http://mailbox/watch', { method: 'POST', body: JSON.stringify({ accounts: u.accounts, block: u.block }), headers: { 'Content-Type': 'application/json', 'x-user': u.user, 'x-live-key': env.LIVE_KEY } }))
+          console.log('watch', u.user, got.status, await got.text())
+        } catch (e) { console.error('watch', u.user, String(e?.message || e)) }
+      }))
+    })())
+  },
   async fetch(req, env) {
     const origin = req.headers.get('Origin') || ''
     const cors = {
