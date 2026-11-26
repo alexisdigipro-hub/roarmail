@@ -4,7 +4,7 @@ import { Container, getContainer } from '@cloudflare/containers'
 
 export class MailBox extends Container {
   defaultPort = 8080
-  sleepAfter = '20m'
+  sleepAfter = '60m' // an hour after the last call, so opening Mail again later in the day finds it awake
   constructor(ctx, env) {
     super(ctx, env)
     this.envVars = { SUPABASE_URL: env.SUPABASE_URL, LIVE_KEY: env.LIVE_KEY }
