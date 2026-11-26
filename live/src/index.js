@@ -43,10 +43,21 @@ export default {
     const user = token ? await who(env, token) : ''
     if (!user) return json({ error: 'Sign in first' }, 401)
     const box = getContainer(env.MAILBOX, user)
-    const r = await box.fetch(new Request('http://mailbox/do', {
-      method: 'POST', body: await req.text(),
-      headers: { 'Content-Type': 'application/json', 'x-user': user, 'x-live-key': env.LIVE_KEY, 'x-user-token': token },
-    }))
+    const body = await req.text()
+    // a container that is waking (or was just replaced) can refuse the first call: it is asked again, three times in
+    // all, before the app is told to go the slow way (26 Nov)
+    let r = null, last = null
+    for (let i = 0; i < 3 && !r; i++) {
+      try {
+        const got = await box.fetch(new Request('http://mailbox/do', {
+          method: 'POST', body,
+          headers: { 'Content-Type': 'application/json', 'x-user': user, 'x-live-key': env.LIVE_KEY, 'x-user-token': token },
+        }))
+        if (got.status >= 500 && got.status !== 502) { last = `status ${got.status}`; await new Promise((ok) => setTimeout(ok, 600 * (i + 1))); continue }
+        r = got
+      } catch (e) { last = String(e?.message || e); console.error('mailbox', last); await new Promise((ok) => setTimeout(ok, 600 * (i + 1))) }
+    }
+    if (!r) return json({ error: 'waking', detail: last }, 503)
     const h = new Headers(r.headers)
     for (const [k, v] of Object.entries(cors)) h.set(k, v)
     return new Response(r.body, { status: r.status, headers: h })
