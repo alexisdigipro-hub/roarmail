@@ -526,14 +526,45 @@ Deno.serve(async (req) => {
       } finally { await close(c) }
     }
     if (act === 'empty') {
-      // Empty Trash (or Junk): everything in that one folder, for good
+      // Empty Trash (or Junk): everything in that one folder, for good, 400 at a time for at most 35 s a call (a big
+      // folder at once ran into the function's time limit and stopped half way); RoarMe calls again while some are left
       const account = str(b.account, 80), path = str(b.path, 500)
       if (!account || !path) return reply({ error: 'Missing folder' }, 400)
       const c = await open(user, account)
       try {
-        const box = await c.mailboxOpen(path)
-        if (box.exists) await c.messageDelete('1:*')
-        return reply({ ok: true, gone: box.exists || 0 })
+        await c.mailboxOpen(path)
+        const uids: number[] = ((await c.search({ all: true }, { uid: true })) || []).sort((x: number, y: number) => y - x)
+        const t0 = Date.now()
+        let gone = 0
+        for (let i = 0; i < uids.length && Date.now() - t0 < 35e3; i += 400) {
+          const part = uids.slice(i, i + 400)
+          await c.messageDelete(part.join(','), { uid: true })
+          gone += part.length
+        }
+        return reply({ ok: true, gone, left: Math.max(0, uids.length - gone) })
+      } finally { await close(c) }
+    }
+    if (act === 'bulk') {
+      // several mails of one folder at once, on one connection (Select > Delete / Move / Junk / Read / Star; the slide's
+      // and the menu's own actions too): op delete (to trash, or for good in Trash), move (to), flag (flag, on)
+      const account = str(b.account, 80), path = str(b.path, 500), op = str(b.op, 20)
+      const uids = (Array.isArray(b.uids) ? b.uids : []).map(Number).filter((n: number) => n > 0).slice(0, 5000)
+      if (!account || !path || !uids.length) return reply({ error: 'Missing mail' }, 400)
+      const c = await open(user, account)
+      try {
+        await c.mailboxOpen(path)
+        for (let i = 0; i < uids.length; i += 400) {
+          const set = uids.slice(i, i + 400).join(',')
+          if (op === 'flag') {
+            const f = b.flag === 'flagged' ? '\\Flagged' : '\\Seen'
+            if (b.on) await c.messageFlagsAdd(set, [f], { uid: true }); else await c.messageFlagsRemove(set, [f], { uid: true })
+          } else if (op === 'move') await c.messageMove(set, str(b.to, 500), { uid: true })
+          else if (op === 'delete') {
+            const to = str(b.trash, 500)
+            if (to && to !== path) await c.messageMove(set, to, { uid: true }); else await c.messageDelete(set, { uid: true })
+          }
+        }
+        return reply({ ok: true, n: uids.length })
       } finally { await close(c) }
     }
     if (act === 'detect') return reply({ cfg: await detect(str(b.email, 320).trim().toLowerCase()) })
