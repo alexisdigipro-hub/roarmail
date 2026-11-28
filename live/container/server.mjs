@@ -136,16 +136,15 @@ async function listOne(c, account, path, limit, page = 0, crit = null) {
   if (!total) return { total: 0, items: [] }
   const rows = []
   const what = { uid: true, flags: true, envelope: true, internalDate: true, size: true, bodyStructure: true }
-  if (crit) {
-    const uids = ((await c.search({ ...crit, deleted: false }, { uid: true })) || []).sort((a, b) => b - a)
+  // always by a search that leaves out mail flagged \Deleted (28 Nov: Apple Mail and others leave deleted mail in the box
+  // until it is expunged; the newest 30 by number could be mostly those, so the list showed only a few, and the count
+  // of what is there was wrong)
+  {
+    const uids = ((await c.search({ ...(crit || {}), deleted: false }, { uid: true })) || []).sort((a, b) => b - a)
     total = uids.length
     const part = uids.slice(limit * page, limit * (page + 1))
     if (!part.length) return { total, items: [] }
     for await (const m of c.fetch(part.join(','), what, { uid: true })) rows.push(m)
-  } else {
-    const top = total - limit * page
-    if (top < 1) return { total, items: [] }
-    for await (const m of c.fetch(`${Math.max(1, top - limit + 1)}:${top}`, what)) rows.push(m)
   }
   const arrived = (m) => new Date(m.internalDate || m.envelope?.date || 0).getTime()
   const take = rows.filter((m) => !m.flags?.has('\\Deleted')).sort((a, b) => arrived(b) - arrived(a) || b.uid - a.uid).slice(0, limit)
@@ -206,6 +205,9 @@ async function fileOf(c, path, uid, i) {
   return a
 }
 
+const ACC_MS = 20e3
+const timed = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })), ms))])
+
 // ---- the actions ----------------------------------------------------------------------------------------------------
 async function handle(user, b) {
   const act = String(b.action || '')
@@ -223,9 +225,11 @@ async function handle(user, b) {
     if (f.from) crit = { ...(crit || {}), from: str(f.from, 320) }
     if (f.text) crit = { ...(crit || {}), text: str(f.text, 200) }
     if (/^\d{4}-\d{2}-\d{2}$/.test(String(f.on || ''))) crit = { ...(crit || {}), on: new Date(String(f.on) + 'T12:00:00Z') }
+    // one slow or broken account never holds the others back (28 Nov): it answers within ACC_MS or is reported as an
+    // error, and the app keeps what it had of that account
     await Promise.all([...by.entries()].map(async ([account, list]) => {
       try {
-        await withConn(user, account, async (c) => {
+        await timed(withConn(user, account, async (c) => {
           for (const it of list) {
             if (act === 'counts') {
               const s = await c.status(it.path, { unseen: true, messages: true })
@@ -236,7 +240,7 @@ async function handle(user, b) {
               out.items.push(...r.items)
             }
           }
-        }, lane)
+        }, lane), ACC_MS)
       } catch (e) { out.errors[account] = e?.missing ? 'missing' : say(e) }
     }))
     out.items.sort((x, y) => String(y.date).localeCompare(String(x.date)))
